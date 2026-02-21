@@ -12,6 +12,10 @@ pub(crate) fn test_fixtures_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
+pub mod error;
+#[cfg(test)]
+pub mod test_util;
+
 pub mod asset_io; // Phase 00
 pub mod math; // Phase 01
 pub mod pressure; // Phase 01

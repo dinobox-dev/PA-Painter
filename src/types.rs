@@ -35,6 +35,14 @@ impl Color {
     pub fn rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b, a: 1.0 }
     }
+
+    /// Check if two colors are approximately equal within the given tolerance.
+    pub fn approx_eq(&self, other: &Color, tolerance: f32) -> bool {
+        (self.r - other.r).abs() < tolerance
+            && (self.g - other.g).abs() < tolerance
+            && (self.b - other.b).abs() < tolerance
+            && (self.a - other.a).abs() < tolerance
+    }
 }
 
 impl From<[f32; 4]> for Color {
