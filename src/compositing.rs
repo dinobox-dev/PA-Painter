@@ -1,4 +1,5 @@
 use glam::Vec2;
+use rayon::prelude::*;
 
 use crate::brush_profile::generate_brush_profile;
 use crate::local_frame::{build_local_frame, LocalFrameTransform};
@@ -8,7 +9,7 @@ use crate::stroke_color::ColorTextureRef;
 use crate::rng::SeededRng;
 use crate::stroke_color::{compute_stroke_color, sample_bilinear};
 use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
-use crate::types::{Color, OutputSettings, PaintLayer};
+use crate::types::{Color, OutputSettings, PaintLayer, StrokePath};
 
 /// Global compositing buffers in UV space.
 pub struct GlobalMaps {
@@ -111,6 +112,37 @@ pub fn composite_stroke(
     }
 }
 
+/// Generate stroke paths for all layers in compositing order (parallel).
+///
+/// Returns a list of path sets, one per layer in `order`-sorted sequence.
+/// The returned vec can be passed to [`composite_all_with_paths`] for
+/// reuse across multiple renders with the same layout.
+///
+/// Path generation (direction field + streamline tracing) is done in parallel
+/// across layers using rayon.
+pub fn generate_all_paths(
+    layers: &[PaintLayer],
+    resolution: u32,
+    base_color_texture: Option<&[Color]>,
+    tex_width: u32,
+    tex_height: u32,
+) -> Vec<Vec<StrokePath>> {
+    let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
+    sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
+
+    sorted
+        .par_iter()
+        .map(|&(layer_index, layer)| {
+            let tex_ref = base_color_texture.map(|data| ColorTextureRef {
+                data,
+                width: tex_width,
+                height: tex_height,
+            });
+            generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref())
+        })
+        .collect()
+}
+
 /// Composite all strokes from all layers into global maps.
 ///
 /// Layers are composited in `order` (ascending). Within each layer,
@@ -124,16 +156,59 @@ pub fn composite_all(
     solid_color: Color,
     settings: &OutputSettings,
 ) -> GlobalMaps {
+    composite_all_with_paths(
+        layers, resolution, base_color_texture, tex_width, tex_height,
+        solid_color, settings, None,
+    )
+}
+
+/// Composite all layers, optionally reusing pre-generated paths.
+///
+/// If `cached_paths` is `Some`, it must contain one entry per layer in
+/// `order`-sorted sequence (as returned by [`generate_all_paths`]).
+/// When `None`, paths are generated in parallel via rayon before
+/// sequential compositing.
+#[allow(clippy::too_many_arguments)]
+pub fn composite_all_with_paths(
+    layers: &[PaintLayer],
+    resolution: u32,
+    base_color_texture: Option<&[Color]>,
+    tex_width: u32,
+    tex_height: u32,
+    solid_color: Color,
+    settings: &OutputSettings,
+    cached_paths: Option<&[Vec<StrokePath>]>,
+) -> GlobalMaps {
     let mut global = GlobalMaps::new(resolution, base_color_texture, tex_width, tex_height, solid_color);
 
     // Sort layers by order (ascending), preserving original index for stroke ID encoding
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
 
-    for (layer_index, layer) in sorted {
+    // Phase A: Generate paths (parallel across layers when not cached)
+    let generated;
+    let all_paths: &[Vec<StrokePath>] = if let Some(cp) = cached_paths {
+        cp
+    } else {
+        generated = sorted
+            .par_iter()
+            .map(|&(layer_index, layer)| {
+                let tex_ref = base_color_texture.map(|data| ColorTextureRef {
+                    data,
+                    width: tex_width,
+                    height: tex_height,
+                });
+                generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref())
+            })
+            .collect::<Vec<_>>();
+        &generated
+    };
+
+    // Phase B: Composite sequentially (preserves deterministic blending order)
+    for (sorted_idx, &(_, layer)) in sorted.iter().enumerate() {
         composite_layer(
             layer,
-            layer_index as u32,
+            sorted[sorted_idx].0 as u32,
             resolution,
             &mut global,
             settings,
@@ -141,6 +216,7 @@ pub fn composite_all(
             tex_width,
             tex_height,
             solid_color,
+            Some(&all_paths[sorted_idx]),
         );
     }
 
@@ -152,6 +228,9 @@ pub fn composite_all(
 /// This is the inner loop of `composite_all`, extracted for single-layer
 /// preview regeneration. The caller is responsible for clearing/resetting
 /// pixels belonging to this layer before calling (if needed).
+///
+/// When `cached_paths` is `Some`, those paths are used directly instead of
+/// regenerating them.
 pub fn composite_layer(
     layer: &PaintLayer,
     layer_index: u32,
@@ -162,62 +241,76 @@ pub fn composite_layer(
     tex_width: u32,
     tex_height: u32,
     solid_color: Color,
+    cached_paths: Option<&[StrokePath]>,
 ) {
-    let tex_ref = base_color_texture.map(|data| ColorTextureRef {
-        data,
-        width: tex_width,
-        height: tex_height,
-    });
-    let paths = generate_paths(layer, layer_index, resolution, tex_ref.as_ref());
+    let paths_owned;
+    let paths: &[StrokePath] = if let Some(cached) = cached_paths {
+        cached
+    } else {
+        let tex_ref = base_color_texture.map(|data| ColorTextureRef {
+            data,
+            width: tex_width,
+            height: tex_height,
+        });
+        paths_owned = generate_paths(layer, layer_index, resolution, tex_ref.as_ref());
+        &paths_owned
+    };
 
     // Generate brush profile once per layer (same seed for all strokes in layer)
     let brush_profile =
         generate_brush_profile(layer.params.brush_width.round() as usize, layer.params.seed);
 
+    let bw = layer.params.brush_width.round() as usize;
+    let rw = layer.params.ridge_width.round() as usize;
+
+    // Step 1: Pre-compute stroke colors sequentially (preserves RNG determinism)
     let mut rng = SeededRng::new(layer.params.seed);
+    let stroke_colors: Vec<Color> = paths
+        .iter()
+        .map(|path| {
+            compute_stroke_color(
+                path,
+                base_color_texture,
+                tex_width,
+                tex_height,
+                solid_color,
+                layer.params.color_variation,
+                &mut rng,
+            )
+        })
+        .collect();
 
-    for (i, path) in paths.iter().enumerate() {
-        // Build local frame
-        let transform = build_local_frame(
-            path,
-            layer.params.brush_width.round() as usize,
-            layer.params.ridge_width.round() as usize,
-            resolution,
-        );
+    // Step 2: Build local frames and height maps in parallel (CPU-heavy, no shared state)
+    let prepared: Vec<(LocalFrameTransform, StrokeHeightResult)> = paths
+        .par_iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let transform = build_local_frame(path, bw, rw, resolution);
+            let stroke_length_px = (path.arc_length() * resolution as f32).ceil() as usize;
+            let local_height = generate_stroke_height(
+                &brush_profile,
+                bw,
+                stroke_length_px,
+                layer.params.load,
+                layer.params.base_height,
+                layer.params.ridge_height,
+                rw,
+                layer.params.ridge_variation,
+                layer.params.body_wiggle,
+                layer.params.pressure_preset,
+                layer.params.seed + i as u32,
+            );
+            (transform, local_height)
+        })
+        .collect();
 
-        // Generate height
-        let stroke_length_px = (path.arc_length() * resolution as f32).ceil() as usize;
-        let local_height = generate_stroke_height(
-            &brush_profile,
-            layer.params.brush_width.round() as usize,
-            stroke_length_px,
-            layer.params.load,
-            layer.params.base_height,
-            layer.params.ridge_height,
-            layer.params.ridge_width.round() as usize,
-            layer.params.ridge_variation,
-            layer.params.body_wiggle,
-            layer.params.pressure_preset,
-            layer.params.seed + i as u32,
-        );
-
-        // Compute stroke color
-        let stroke_color = compute_stroke_color(
-            path,
-            base_color_texture,
-            tex_width,
-            tex_height,
-            solid_color,
-            layer.params.color_variation,
-            &mut rng,
-        );
-
-        // Composite
+    // Step 3: Composite sequentially (preserves deterministic blending order)
+    for (i, (transform, local_height)) in prepared.iter().enumerate() {
         composite_stroke(
-            &local_height,
-            &transform,
-            stroke_color,
-            path.stroke_id,
+            local_height,
+            transform,
+            stroke_colors[i],
+            paths[i].stroke_id,
             layer.params.base_height,
             global,
         );
@@ -486,11 +579,11 @@ mod tests {
         let mut global = GlobalMaps::new(64, None, 0, 0, Color::WHITE);
         composite_layer(
             &layer_a, 0, 64, &mut global, &settings,
-            None, 0, 0, solid_a,
+            None, 0, 0, solid_a, None,
         );
         composite_layer(
             &layer_b, 1, 64, &mut global, &settings,
-            None, 0, 0, solid_b,
+            None, 0, 0, solid_b, None,
         );
 
         let center = 32 * 64 + 32;
@@ -678,7 +771,7 @@ mod tests {
         let mut global = GlobalMaps::new(256, None, 0, 0, canvas);
         composite_layer(
             &layer, 0, 256, &mut global, &settings,
-            Some(&stroke_tex), 1, 1, canvas,
+            Some(&stroke_tex), 1, 1, canvas, None,
         );
         let maps = global;
 
