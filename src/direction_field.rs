@@ -124,9 +124,9 @@ pub struct DirectionField {
 impl DirectionField {
     /// Build a direction field from guide vertices.
     ///
-    /// Resolution is capped at 512 to limit memory usage.
+    /// Resolution is scaled to 1/4 of output resolution, clamped to [64, 2048].
     pub fn new(guides: &[GuideVertex], resolution: u32) -> Self {
-        let res = resolution.min(512);
+        let res = (resolution / 4).clamp(64, 2048);
         let data = generate_direction_field(guides, res);
         Self {
             data,
