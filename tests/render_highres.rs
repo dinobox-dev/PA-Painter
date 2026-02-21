@@ -35,7 +35,7 @@ fn visual_highres_cpu() {
         eprintln!("Rendering {}px...", res);
 
         let cpu_maps = compositing::composite_all(
-            &[layer.clone()], res, None, 0, 0, solid, &settings,
+            &[layer.clone()], res, None, 0, 0, solid, &settings, None,
         );
         save_maps(&cpu_maps, res, &format!("cpu_{}", res));
 

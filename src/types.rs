@@ -267,6 +267,16 @@ impl StrokePath {
     }
 }
 
+/// Normal map generation mode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NormalMode {
+    /// Height-only Sobel normals (original behavior).
+    SurfacePaint,
+    /// Object-space normals from mesh geometry, perturbed by paint height.
+    #[default]
+    DepictedForm,
+}
+
 /// Output resolution preset with named tiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResolutionPreset {
@@ -293,6 +303,8 @@ pub struct OutputSettings {
     pub resolution_preset: ResolutionPreset,
     pub output_resolution: u32,
     pub normal_strength: f32,
+    #[serde(default)]
+    pub normal_mode: NormalMode,
 }
 
 impl Default for OutputSettings {
@@ -301,6 +313,7 @@ impl Default for OutputSettings {
             resolution_preset: ResolutionPreset::Standard,
             output_resolution: 1024,
             normal_strength: 1.0,
+            normal_mode: NormalMode::default(),
         }
     }
 }

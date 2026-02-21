@@ -421,6 +421,7 @@ mod tests {
                 resolution_preset: ResolutionPreset::High,
                 output_resolution: 2048,
                 normal_strength: 1.5,
+                ..OutputSettings::default()
             },
             cached_height: None,
             cached_color: None,
@@ -607,6 +608,7 @@ mod tests {
             resolution_preset: ResolutionPreset::Ultra,
             output_resolution: 4096,
             normal_strength: 3.0,
+            ..OutputSettings::default()
         };
 
         let path = temp_pap_path("settings_test.pap");

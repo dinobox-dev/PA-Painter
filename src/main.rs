@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::process;
 
-use practical_arcana_painter::asset_io::load_texture;
+use practical_arcana_painter::asset_io::{load_mesh, load_texture};
 use practical_arcana_painter::compositing::{composite_all_with_paths, generate_all_paths};
+use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::output::{export_all, ExportFormat};
 use practical_arcana_painter::project::load_project;
-use practical_arcana_painter::types::{pixels_to_colors, Color};
+use practical_arcana_painter::types::{pixels_to_colors, Color, NormalMode};
 
 fn usage() -> ! {
     eprintln!("Usage: practical-arcana-painter <project.pap> [options]");
@@ -107,6 +108,26 @@ fn main() {
         Color::rgb(c[0], c[1], c[2])
     };
 
+    // Load mesh and compute normal data (DepictedForm mode only)
+    let normal_data: Option<MeshNormalData> =
+        if project.settings.normal_mode == NormalMode::DepictedForm {
+            let mesh_file = resolve_asset_path(&project_path, &project.mesh_ref.path);
+            eprintln!("Loading mesh: {}", mesh_file.display());
+            match load_mesh(&mesh_file) {
+                Ok(mesh) => {
+                    eprintln!("Computing mesh normals...");
+                    Some(compute_mesh_normal_data(&mesh, resolution))
+                }
+                Err(e) => {
+                    eprintln!("Warning: failed to load mesh: {e}");
+                    eprintln!("  Falling back to SurfacePaint normals.");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
     // Generate (with path cache)
     eprintln!("Generating...");
     if project.cached_paths_if_valid(resolution).is_none() {
@@ -129,11 +150,12 @@ fn main() {
         sc,
         &project.settings,
         project.cached_paths.as_deref(),
+        normal_data.as_ref(),
     );
 
     // Export
     eprintln!("Exporting to: {}", output_dir.display());
-    export_all(&global, &project.layers, &project.settings, &output_dir, format)
+    export_all(&global, &project.layers, &project.settings, &output_dir, format, normal_data.as_ref())
         .unwrap_or_else(|e| {
             eprintln!("Error exporting: {e:?}");
             process::exit(1);

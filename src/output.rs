@@ -2,7 +2,8 @@ use std::path::Path;
 
 use crate::asset_io::linear_to_srgb;
 use crate::compositing::GlobalMaps;
-use crate::types::{Color, OutputSettings, PaintLayer};
+use crate::object_normal::MeshNormalData;
+use crate::types::{Color, NormalMode, OutputSettings, PaintLayer};
 
 // ── Error Type ──
 
@@ -125,6 +126,95 @@ pub fn generate_normal_map(
             let nz = nz / len;
 
             normals[idx(x, y)] = [nx * 0.5 + 0.5, ny * 0.5 + 0.5, nz * 0.5 + 0.5];
+        }
+    }
+
+    normals
+}
+
+/// Generate a tangent-space normal map using object-space normals from mesh geometry,
+/// perturbed by the paint height field.
+///
+/// For each pixel:
+/// 1. Compute Sobel gradient from the height map (same as SurfacePaint).
+/// 2. Look up the composited object-space normal N_obj, tangent T, and bitangent B.
+/// 3. Perturb: `perturbed = normalize(N_obj + strength * (dH/dx * T + dH/dy * B))`
+/// 4. Convert to tangent space: `ts = (perturbed·T, perturbed·B, perturbed·N_geom)`
+/// 5. Encode to [0, 1].
+pub fn generate_normal_map_depicted_form(
+    height: &[f32],
+    normal_data: &MeshNormalData,
+    global_object_normals: &[[f32; 3]],
+    resolution: u32,
+    normal_strength: f32,
+) -> Vec<[f32; 3]> {
+    let res = resolution;
+    let nd_res = normal_data.resolution;
+    let mut normals = vec![[0.5f32, 0.5, 1.0]; (res * res) as usize];
+
+    let idx = |x: u32, y: u32| -> usize { (y * res + x) as usize };
+
+    for y in 1..(res - 1) {
+        for x in 1..(res - 1) {
+            // Step 1: Sobel gradient (identical to SurfacePaint)
+            let gx = -height[idx(x - 1, y - 1)]
+                - 2.0 * height[idx(x - 1, y)]
+                - height[idx(x - 1, y + 1)]
+                + height[idx(x + 1, y - 1)]
+                + 2.0 * height[idx(x + 1, y)]
+                + height[idx(x + 1, y + 1)];
+
+            let gy = -height[idx(x - 1, y - 1)]
+                - 2.0 * height[idx(x, y - 1)]
+                - height[idx(x + 1, y - 1)]
+                + height[idx(x - 1, y + 1)]
+                + 2.0 * height[idx(x, y + 1)]
+                + height[idx(x + 1, y + 1)];
+
+            let pixel_idx = idx(x, y);
+
+            // Step 2: Look up mesh TBN at this pixel
+            // Map from output resolution to normal_data resolution
+            let nd_x = ((x as f32 + 0.5) / res as f32 * nd_res as f32).floor() as u32;
+            let nd_y = ((y as f32 + 0.5) / res as f32 * nd_res as f32).floor() as u32;
+            let nd_x = nd_x.min(nd_res - 1);
+            let nd_y = nd_y.min(nd_res - 1);
+            let nd_idx = (nd_y * nd_res + nd_x) as usize;
+
+            let n_geom = normal_data.object_normals[nd_idx];
+            let t = normal_data.tangents[nd_idx];
+            let b = normal_data.bitangents[nd_idx];
+
+            // If no mesh coverage here, fall back to flat tangent-space normal
+            if n_geom.length_squared() < 0.5 {
+                // Use standard SurfacePaint normal for uncovered pixels
+                let nx = -gx * normal_strength;
+                let ny = -gy * normal_strength;
+                let nz = 1.0f32;
+                let len = (nx * nx + ny * ny + nz * nz).sqrt();
+                normals[pixel_idx] = [nx / len * 0.5 + 0.5, ny / len * 0.5 + 0.5, nz / len * 0.5 + 0.5];
+                continue;
+            }
+
+            // Use composited stroke normal if available, else use geometric normal
+            let n_obj = if !global_object_normals.is_empty() {
+                let sn = global_object_normals[pixel_idx];
+                let v = glam::Vec3::new(sn[0], sn[1], sn[2]);
+                if v.length_squared() > 0.5 { v } else { n_geom }
+            } else {
+                n_geom
+            };
+
+            // Step 3: Perturb the object-space normal by height gradient
+            let perturbed = (n_obj + normal_strength * (-gx * t + -gy * b)).normalize();
+
+            // Step 4: Convert to tangent space
+            let ts_x = perturbed.dot(t);
+            let ts_y = perturbed.dot(b);
+            let ts_z = perturbed.dot(n_geom);
+
+            // Step 5: Encode [-1,1] → [0,1]
+            normals[pixel_idx] = [ts_x * 0.5 + 0.5, ts_y * 0.5 + 0.5, ts_z * 0.5 + 0.5];
         }
     }
 
@@ -324,11 +414,21 @@ pub fn export_all(
     settings: &OutputSettings,
     output_dir: &Path,
     format: ExportFormat,
+    normal_data: Option<&MeshNormalData>,
 ) -> Result<(), OutputError> {
     std::fs::create_dir_all(output_dir)?;
 
     let normalized_height = normalize_height_map(&global.height, layers);
-    let normals = generate_normal_map(&normalized_height, global.resolution, settings.normal_strength);
+    let normals = match (settings.normal_mode, normal_data) {
+        (NormalMode::DepictedForm, Some(nd)) => generate_normal_map_depicted_form(
+            &normalized_height,
+            nd,
+            &global.object_normal,
+            global.resolution,
+            settings.normal_strength,
+        ),
+        _ => generate_normal_map(&normalized_height, global.resolution, settings.normal_strength),
+    };
 
     match format {
         ExportFormat::Png => {
@@ -845,10 +945,11 @@ mod tests {
             0,
             Color::rgb(0.5, 0.5, 0.5),
             &settings,
+            None,
         );
 
         let dir = std::env::temp_dir().join("pap_test_output").join("export_all_png");
-        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Png).unwrap();
+        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Png, None).unwrap();
 
         // Verify files exist
         assert!(dir.join("color_map.png").exists(), "color_map.png should exist");
@@ -873,10 +974,11 @@ mod tests {
             0,
             Color::rgb(0.5, 0.5, 0.5),
             &settings,
+            None,
         );
 
         let dir = std::env::temp_dir().join("pap_test_output").join("export_all_exr");
-        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Exr).unwrap();
+        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Exr, None).unwrap();
 
         assert!(dir.join("color_map.exr").exists(), "color_map.exr should exist");
         assert!(dir.join("height_map.exr").exists(), "height_map.exr should exist");
@@ -896,12 +998,12 @@ mod tests {
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.6, 0.4, 0.3);
-        let maps = composite_all(&[layer.clone()], 256, None, 0, 0, solid, &settings);
+        let maps = composite_all(&[layer.clone()], 256, None, 0, 0, solid, &settings, None);
 
         let dir = crate::test_module_output_dir("export");
         let _ = std::fs::create_dir_all(&dir);
 
-        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Png).unwrap();
+        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Png, None).unwrap();
 
         eprintln!("Wrote: {}/color_map.png", dir.display());
         eprintln!("Wrote: {}/height_map.png", dir.display());
