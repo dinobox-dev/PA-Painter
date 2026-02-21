@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use practical_arcana_painter::asset_io::load_texture;
-use practical_arcana_painter::compositing::composite_all;
+use practical_arcana_painter::compositing::{composite_all_with_paths, generate_all_paths};
 use practical_arcana_painter::output::{export_all, ExportFormat};
 use practical_arcana_painter::project::load_project;
 use practical_arcana_painter::types::{pixels_to_colors, Color};
@@ -75,7 +75,7 @@ fn main() {
 
     // Load project
     eprintln!("Loading project: {}", project_path.display());
-    let project = load_project(&project_path).unwrap_or_else(|e| {
+    let mut project = load_project(&project_path).unwrap_or_else(|e| {
         eprintln!("Error loading project: {e:?}");
         process::exit(1);
     });
@@ -107,9 +107,20 @@ fn main() {
         Color::rgb(c[0], c[1], c[2])
     };
 
-    // Generate
+    // Generate (with path cache)
     eprintln!("Generating...");
-    let global = composite_all(
+    if project.cached_paths_if_valid(resolution).is_none() {
+        let paths = generate_all_paths(
+            &project.layers,
+            resolution,
+            base_colors.as_deref(),
+            tw,
+            th,
+        );
+        project.set_cached_paths(paths, resolution);
+    }
+
+    let global = composite_all_with_paths(
         &project.layers,
         resolution,
         base_colors.as_deref(),
@@ -117,6 +128,7 @@ fn main() {
         th,
         sc,
         &project.settings,
+        project.cached_paths.as_deref(),
     );
 
     // Export

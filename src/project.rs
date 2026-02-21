@@ -6,7 +6,7 @@ use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::asset_io::linear_to_srgb;
-use crate::types::{OutputSettings, PaintLayer};
+use crate::types::{OutputSettings, PaintLayer, StrokePath};
 
 // ── Data Structures ──
 
@@ -30,6 +30,15 @@ pub struct ColorRef {
     pub solid_color: [f32; 3],
 }
 
+/// Snapshot of the state that was used to generate the cached paths.
+/// Compared against the current state to detect staleness.
+#[derive(Debug)]
+struct PathCacheKey {
+    layers: Vec<PaintLayer>,
+    resolution: u32,
+    color_ref_path: Option<String>,
+}
+
 /// Full project state (in-memory representation).
 #[derive(Debug)]
 pub struct Project {
@@ -40,6 +49,48 @@ pub struct Project {
     pub settings: OutputSettings,
     pub cached_height: Option<Vec<f32>>,
     pub cached_color: Option<Vec<[f32; 4]>>,
+    /// Runtime path cache — one entry per layer in order-sorted sequence.
+    /// Not serialized to disk.
+    pub cached_paths: Option<Vec<Vec<StrokePath>>>,
+    /// Key used to validate `cached_paths` (private).
+    path_cache_key: Option<PathCacheKey>,
+}
+
+impl Project {
+    /// Return cached paths if they are still valid for the current layers,
+    /// resolution, and color texture path. Returns `None` on cache miss.
+    pub fn cached_paths_if_valid(
+        &self,
+        resolution: u32,
+    ) -> Option<&[Vec<StrokePath>]> {
+        let key = self.path_cache_key.as_ref()?;
+        let paths = self.cached_paths.as_ref()?;
+        if key.resolution == resolution
+            && key.layers == self.layers
+            && key.color_ref_path == self.color_ref.path
+        {
+            Some(paths.as_slice())
+        } else {
+            None
+        }
+    }
+
+    /// Store newly generated paths in the cache, along with a snapshot of the
+    /// current project state that produced them.
+    pub fn set_cached_paths(&mut self, paths: Vec<Vec<StrokePath>>, resolution: u32) {
+        self.path_cache_key = Some(PathCacheKey {
+            layers: self.layers.clone(),
+            resolution,
+            color_ref_path: self.color_ref.path.clone(),
+        });
+        self.cached_paths = Some(paths);
+    }
+
+    /// Explicitly invalidate the path cache.
+    pub fn invalidate_path_cache(&mut self) {
+        self.cached_paths = None;
+        self.path_cache_key = None;
+    }
 }
 
 // ── Error Type ──
@@ -241,6 +292,8 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
         settings,
         cached_height,
         cached_color,
+        cached_paths: None,
+        path_cache_key: None,
     })
 }
 
@@ -349,6 +402,8 @@ mod tests {
             settings: OutputSettings::default(),
             cached_height: None,
             cached_color: None,
+            cached_paths: None,
+            path_cache_key: None,
         }
     }
 
@@ -369,6 +424,8 @@ mod tests {
             },
             cached_height: None,
             cached_color: None,
+            cached_paths: None,
+            path_cache_key: None,
         }
     }
 

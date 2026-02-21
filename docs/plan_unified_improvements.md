@@ -256,11 +256,11 @@ fn channel_max_diff(a: Color, b: Color) -> f32 {
 독립적인 성능 개선들. 순서대로 적용.
 
 > **Progress**
-> - [ ] 3-1. local_frame UV 버퍼 재사용
-> - [ ] 3-2. 경로 캐시 도입
-> - [ ] 3-3. 레이어 병렬 합성 (rayon)
-> - [ ] 기존 테스트 통과
-> - [ ] 비주얼 결과 동일 확인
+> - [x] 3-1. local_frame UV 버퍼 재사용
+> - [x] 3-2. 경로 캐시 도입
+> - [x] 3-3. 레이어 병렬 합성 (rayon)
+> - [x] 기존 테스트 통과 (230 passed)
+> - [x] 비주얼 결과 동일 확인 — `visual_highres_cpu` 정상
 > - [ ] 프로파일링으로 개선 확인
 
 #### 3-1. local_frame UV 버퍼 재사용 (CR#6)

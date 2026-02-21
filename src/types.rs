@@ -101,7 +101,7 @@ pub enum PressurePreset {
 }
 
 /// Per-layer stroke parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StrokeParams {
     pub brush_width: f32,
     pub load: f32,
@@ -146,7 +146,7 @@ impl Default for StrokeParams {
 }
 
 /// Direction guide vertex placed by the user.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GuideVertex {
     pub position: Vec2,
     pub direction: Vec2,
@@ -165,7 +165,7 @@ impl Default for GuideVertex {
 
 /// A paint layer defining stroke parameters and direction guides.
 /// Covers the full UV space [0,1]² — no polygon mask.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PaintLayer {
     pub name: String,
     pub order: i32,
