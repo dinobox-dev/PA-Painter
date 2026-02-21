@@ -34,17 +34,26 @@ impl LocalFrameTransform {
         let y = (uv.y * resolution as f32) as i32;
         (x, y)
     }
+
+    /// Consume the transform and return the backing buffer for reuse.
+    pub fn into_buffer(self) -> Vec<Vec2> {
+        self.uv_map
+    }
 }
 
-/// Build a local frame transform table for a stroke path.
+/// Build a local frame transform table, reusing a caller-provided buffer.
 ///
+/// The buffer is resized as needed and filled with UV data. After use, call
+/// [`LocalFrameTransform::into_buffer`] to reclaim the allocation for the next
+/// stroke.
+///
+/// - `buffer`: reusable `Vec<Vec2>` — capacity is preserved across calls
 /// - `path`: the stroke path (in UV space)
 /// - `brush_width_px`: brush width in pixels
 /// - `ridge_width_px`: ridge width in pixels (used as margin)
 /// - `resolution`: output resolution (for UV <-> pixel conversion)
-///
-/// Returns the transform table that maps local frame pixels to UV coordinates.
-pub fn build_local_frame(
+pub fn build_local_frame_into(
+    buffer: &mut Vec<Vec2>,
     path: &StrokePath,
     brush_width_px: usize,
     ridge_width_px: usize,
@@ -57,11 +66,13 @@ pub fn build_local_frame(
     let local_width = stroke_length_px + margin;
     let local_height = brush_width_px + margin * 2;
 
-    let mut uv_map = vec![Vec2::NAN; local_height * local_width];
+    let required = local_height * local_width;
+    buffer.clear();
+    buffer.resize(required, Vec2::NAN);
 
     if stroke_length_px == 0 || local_width == 0 || local_height == 0 {
         return LocalFrameTransform {
-            uv_map,
+            uv_map: std::mem::take(buffer),
             width: local_width,
             height: local_height,
             margin,
@@ -91,19 +102,33 @@ pub fn build_local_frame(
 
             // Mark out-of-bounds
             if uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 {
-                uv_map[ly * local_width + lx] = Vec2::NAN;
+                buffer[ly * local_width + lx] = Vec2::NAN;
             } else {
-                uv_map[ly * local_width + lx] = uv;
+                buffer[ly * local_width + lx] = uv;
             }
         }
     }
 
     LocalFrameTransform {
-        uv_map,
+        uv_map: std::mem::take(buffer),
         width: local_width,
         height: local_height,
         margin,
     }
+}
+
+/// Build a local frame transform table for a stroke path.
+///
+/// Convenience wrapper around [`build_local_frame_into`] that allocates a fresh
+/// buffer on each call.
+pub fn build_local_frame(
+    path: &StrokePath,
+    brush_width_px: usize,
+    ridge_width_px: usize,
+    resolution: u32,
+) -> LocalFrameTransform {
+    let mut buf = Vec::new();
+    build_local_frame_into(&mut buf, path, brush_width_px, ridge_width_px, resolution)
 }
 
 #[cfg(test)]
