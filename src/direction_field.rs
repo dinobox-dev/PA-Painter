@@ -2,8 +2,6 @@ use glam::Vec2;
 
 use crate::types::GuideVertex;
 
-const EPSILON: f32 = 0.001;
-
 /// Canonicalize a direction vector to the upper half-plane.
 /// For headless (180°-symmetric) directions, d and -d are equivalent.
 /// We pick the representative with y > 0, or positive x when y == 0.
@@ -15,13 +13,20 @@ fn canonicalize(dir: Vec2) -> Vec2 {
     }
 }
 
+/// Smoothstep-based weight: 1.0 at d=0, 0.0 at d=influence, smooth falloff.
+fn guide_weight(d: f32, influence: f32) -> f32 {
+    let t = (d / influence).clamp(0.0, 1.0);
+    let s = 1.0 - t;
+    s * s * (3.0 - 2.0 * s)
+}
+
 /// Compute direction at a UV coordinate given a set of guide vertices.
 ///
 /// Returns a normalized Vec2 representing the stroke direction.
 /// If no guides have influence at this point, returns the nearest guide's direction.
 /// If guides is empty, returns Vec2::X (default horizontal).
 ///
-/// Uses IDW (inverse distance weighting) with reference-based sign alignment
+/// Uses smoothstep-based weighting with reference-based sign alignment
 /// to handle the 180° symmetry of headless direction vectors. All directions
 /// are canonicalized to the upper half-plane before blending.
 pub fn direction_at(uv: Vec2, guides: &[GuideVertex]) -> Vec2 {
@@ -44,7 +49,7 @@ pub fn direction_at(uv: Vec2, guides: &[GuideVertex]) -> Vec2 {
             continue;
         }
 
-        let w = 1.0 / (d + EPSILON).powi(2);
+        let w = guide_weight(d, g.influence);
         let dir = g.direction.normalize_or_zero();
         if dir.length_squared() < 1e-12 {
             continue;
