@@ -2,8 +2,8 @@ use crate::types::Color;
 use glam::Vec2;
 
 /// Hermite smoothstep: 0 at edge0, 1 at edge1, smooth transition.
-/// Note: argument order is (value, edge0, edge1), not GLSL convention.
-pub fn smoothstep(x: f32, edge0: f32, edge1: f32) -> f32 {
+/// Argument order follows GLSL convention: (edge0, edge1, x).
+pub fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -56,19 +56,19 @@ mod tests {
 
     #[test]
     fn smoothstep_midpoint() {
-        assert!((smoothstep(0.5, 0.0, 1.0) - 0.5).abs() < EPS);
+        assert!((smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < EPS);
     }
 
     #[test]
     fn smoothstep_edges() {
-        assert!((smoothstep(0.0, 0.0, 1.0) - 0.0).abs() < EPS);
-        assert!((smoothstep(1.0, 0.0, 1.0) - 1.0).abs() < EPS);
+        assert!((smoothstep(0.0, 1.0, 0.0) - 0.0).abs() < EPS);
+        assert!((smoothstep(0.0, 1.0, 1.0) - 1.0).abs() < EPS);
     }
 
     #[test]
     fn smoothstep_clamped() {
-        assert!((smoothstep(-1.0, 0.0, 1.0) - 0.0).abs() < EPS);
-        assert!((smoothstep(2.0, 0.0, 1.0) - 1.0).abs() < EPS);
+        assert!((smoothstep(0.0, 1.0, -1.0) - 0.0).abs() < EPS);
+        assert!((smoothstep(0.0, 1.0, 2.0) - 1.0).abs() < EPS);
     }
 
     #[test]

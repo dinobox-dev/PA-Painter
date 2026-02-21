@@ -101,7 +101,7 @@ pub fn composite_stroke(
             global.height[idx] = h.max(global.height[idx]);
 
             // Color: height-based blending
-            let opacity = smoothstep(h, 0.0, base_height * 0.7);
+            let opacity = smoothstep(0.0, base_height * 0.7, h);
             global.color[idx] = lerp_color(global.color[idx], stroke_color, opacity);
 
             // Stroke ID: record last stroke
