@@ -4,6 +4,7 @@ use crate::brush_profile::generate_brush_profile;
 use crate::local_frame::{build_local_frame, LocalFrameTransform};
 use crate::math::{lerp_color, smoothstep};
 use crate::path_placement::generate_paths;
+use crate::stroke_color::ColorTextureRef;
 use crate::rng::SeededRng;
 use crate::stroke_color::{compute_stroke_color, sample_bilinear};
 use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
@@ -162,7 +163,12 @@ pub fn composite_layer(
     tex_height: u32,
     solid_color: Color,
 ) {
-    let paths = generate_paths(layer, layer_index, resolution);
+    let tex_ref = base_color_texture.map(|data| ColorTextureRef {
+        data,
+        width: tex_width,
+        height: tex_height,
+    });
+    let paths = generate_paths(layer, layer_index, resolution, tex_ref.as_ref());
 
     // Generate brush profile once per layer (same seed for all strokes in layer)
     let brush_profile =

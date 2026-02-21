@@ -199,12 +199,13 @@ pub fn trace_streamline(
 R 완료 후의 코드 상태를 기반으로 C를 적용.
 
 > **Progress**
-> - [ ] 2-1. StrokeParams 확장 (`color_break_threshold`)
-> - [ ] 2-2. trace_streamline에 color boundary 조건 추가
-> - [ ] 2-3. channel_max_diff 유틸 구현
-> - [ ] 2-4. generate_paths 호출 체인 수정
-> - [ ] threshold=None 시 기존 동작 보존 확인
-> - [ ] 경계 테스트 통과
+> - [x] 2-1. StrokeParams 확장 (`color_break_threshold`)
+> - [x] 2-2. trace_streamline에 color boundary 조건 추가
+> - [x] 2-3. channel_max_diff 유틸 구현 + ColorTextureRef 도입
+> - [x] 2-4. generate_paths 호출 체인 수정
+> - [x] threshold=None 시 기존 동작 보존 확인
+> - [x] 경계 테스트 통과 (229 passed)
+> - [x] `cargo clippy` 신규 경고 없음
 
 #### 2-1. StrokeParams 확장
 

@@ -3,6 +3,25 @@ use crate::rng::SeededRng;
 use crate::types::{Color, HsvColor, StrokePath};
 use glam::Vec2;
 
+// ── Color Texture Reference ──
+
+/// Lightweight reference to a color texture with its dimensions.
+pub struct ColorTextureRef<'a> {
+    pub data: &'a [Color],
+    pub width: u32,
+    pub height: u32,
+}
+
+// ── Color Difference ──
+
+/// Maximum per-channel absolute difference between two colors (RGB only, ignores alpha).
+pub fn channel_max_diff(a: Color, b: Color) -> f32 {
+    (a.r - b.r)
+        .abs()
+        .max((a.g - b.g).abs())
+        .max((a.b - b.b).abs())
+}
+
 // ── RGB ↔ HSV Conversion ──
 
 /// Convert an RGB color to HSV. All channels in [0, 1].
@@ -629,6 +648,38 @@ mod tests {
         let right = sample_bilinear(&tex, 2, 2, Vec2::new(0.75, 0.5));
         assert!(approx_eq(left.r, right.r), "Symmetric texture not symmetric");
         assert!(approx_eq(left.b, right.b), "Symmetric texture not symmetric");
+    }
+
+    // ── Float Comparison in HSV ──
+
+    // ── channel_max_diff Tests ──
+
+    #[test]
+    fn channel_max_diff_identical() {
+        let c = Color::rgb(0.5, 0.3, 0.8);
+        assert!(approx_eq(channel_max_diff(c, c), 0.0));
+    }
+
+    #[test]
+    fn channel_max_diff_single_channel() {
+        let a = Color::rgb(1.0, 0.0, 0.0);
+        let b = Color::rgb(0.0, 0.0, 0.0);
+        assert!(approx_eq(channel_max_diff(a, b), 1.0));
+    }
+
+    #[test]
+    fn channel_max_diff_picks_max() {
+        let a = Color::rgb(0.5, 0.2, 0.9);
+        let b = Color::rgb(0.4, 0.8, 0.7);
+        // diffs: 0.1, 0.6, 0.2 → max = 0.6
+        assert!(approx_eq(channel_max_diff(a, b), 0.6));
+    }
+
+    #[test]
+    fn channel_max_diff_ignores_alpha() {
+        let a = Color::new(0.5, 0.5, 0.5, 0.0);
+        let b = Color::new(0.5, 0.5, 0.5, 1.0);
+        assert!(approx_eq(channel_max_diff(a, b), 0.0));
     }
 
     // ── Float Comparison in HSV ──

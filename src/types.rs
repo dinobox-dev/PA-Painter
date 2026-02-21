@@ -116,6 +116,10 @@ pub struct StrokeParams {
     pub max_stroke_length: f32,
     pub angle_variation: f32,
     pub max_turn_angle: f32,
+    /// If set, strokes terminate when the per-step color difference (max channel)
+    /// exceeds this threshold.  `None` = disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_break_threshold: Option<f32>,
     pub seed: u32,
 }
 
@@ -135,6 +139,7 @@ impl Default for StrokeParams {
             max_stroke_length: 240.0,
             angle_variation: 5.0,
             max_turn_angle: 15.0,
+            color_break_threshold: None,
             seed: 42,
         }
     }

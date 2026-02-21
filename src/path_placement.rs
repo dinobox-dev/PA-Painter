@@ -5,6 +5,7 @@ use glam::Vec2;
 use crate::direction_field::DirectionField;
 use crate::math::rotate_vec2;
 use crate::rng::SeededRng;
+use crate::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
 use crate::types::{PaintLayer, StrokePath, StrokeParams};
 
 /// Generate seed points across the full UV space [0,1]².
@@ -48,6 +49,7 @@ pub fn trace_streamline(
     params: &StrokeParams,
     resolution: u32,
     rng: &mut SeededRng,
+    color_tex: Option<&ColorTextureRef<'_>>,
 ) -> Option<Vec<Vec2>> {
     let step_size_uv = 1.0 / resolution as f32;
 
@@ -97,6 +99,15 @@ pub fn trace_streamline(
         // UV boundary check
         if next_pos.x < 0.0 || next_pos.x > 1.0 || next_pos.y < 0.0 || next_pos.y > 1.0 {
             break;
+        }
+
+        // Color boundary check
+        if let (Some(threshold), Some(tex)) = (params.color_break_threshold, color_tex) {
+            let cur_color = sample_bilinear(tex.data, tex.width, tex.height, pos);
+            let next_color = sample_bilinear(tex.data, tex.width, tex.height, next_pos);
+            if channel_max_diff(cur_color, next_color) > threshold {
+                break;
+            }
         }
 
         path.push(next_pos);
@@ -171,16 +182,26 @@ pub fn filter_overlapping_paths(paths: &mut Vec<Vec<Vec2>>, brush_width_uv: f32)
 ///
 /// Returns paths in paint order (sorted by seed y-coordinate, top to bottom).
 /// Each path is assigned a globally unique stroke ID: `(layer_index << 16) | index`.
-pub fn generate_paths(layer: &PaintLayer, layer_index: u32, resolution: u32) -> Vec<StrokePath> {
+pub fn generate_paths(
+    layer: &PaintLayer,
+    layer_index: u32,
+    resolution: u32,
+    color_tex: Option<&ColorTextureRef<'_>>,
+) -> Vec<StrokePath> {
     let seeds = generate_seeds(&layer.params, resolution);
     let field = DirectionField::new(&layer.guides, resolution);
 
     let mut rng = SeededRng::new(layer.params.seed);
     let mut raw_paths: Vec<Vec<Vec2>> = Vec::new();
     for seed_point in &seeds {
-        if let Some(path) =
-            trace_streamline(*seed_point, &field, &layer.params, resolution, &mut rng)
-        {
+        if let Some(path) = trace_streamline(
+            *seed_point,
+            &field,
+            &layer.params,
+            resolution,
+            &mut rng,
+            color_tex,
+        ) {
             raw_paths.push(path);
         }
     }
@@ -300,7 +321,7 @@ mod tests {
 
         let field = DirectionField::new(&layer.guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng);
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None);
 
         let path = path.expect("path should exist");
         for p in &path {
@@ -325,7 +346,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng);
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None);
 
         let path = path.expect("path should exist");
         for p in &path {
@@ -353,7 +374,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.9, 0.5), &field, &params, 512, &mut rng);
+        let path = trace_streamline(Vec2::new(0.9, 0.5), &field, &params, 512, &mut rng, None);
 
         if let Some(path) = path {
             let last = path.last().unwrap();
@@ -382,7 +403,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng);
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None);
 
         // min_length = 100/512*2 ≈ 0.39 UV, but max target ≈ 0.002 UV
         assert!(path.is_none(), "short path should be filtered out");
@@ -406,6 +427,7 @@ mod tests {
                 &params,
                 512,
                 &mut rng,
+                None,
             ) {
                 let len: f32 = path
                     .windows(2)
@@ -474,8 +496,8 @@ mod tests {
     #[test]
     fn generate_paths_determinism() {
         let layer = make_layer();
-        let paths1 = generate_paths(&layer, 0, 256);
-        let paths2 = generate_paths(&layer, 0, 256);
+        let paths1 = generate_paths(&layer, 0, 256, None);
+        let paths2 = generate_paths(&layer, 0, 256, None);
 
         assert_eq!(paths1.len(), paths2.len());
         for (a, b) in paths1.iter().zip(paths2.iter()) {
@@ -492,7 +514,7 @@ mod tests {
     #[test]
     fn generate_paths_sorted_by_y() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 256);
+        let paths = generate_paths(&layer, 0, 256, None);
 
         assert!(!paths.is_empty(), "should generate some paths");
         for i in 1..paths.len() {
@@ -510,7 +532,7 @@ mod tests {
     #[test]
     fn generate_paths_unique_stroke_ids() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 256);
+        let paths = generate_paths(&layer, 0, 256, None);
 
         let mut ids: Vec<u32> = paths.iter().map(|p| p.stroke_id).collect();
         ids.sort();
@@ -521,7 +543,7 @@ mod tests {
     #[test]
     fn generate_paths_stroke_id_encoding() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 3, 256);
+        let paths = generate_paths(&layer, 3, 256, None);
 
         for (i, path) in paths.iter().enumerate() {
             assert_eq!(path.layer_index, 3);
@@ -537,7 +559,7 @@ mod tests {
     fn area_coverage_90_percent() {
         let layer = make_layer();
         let resolution = 512u32;
-        let paths = generate_paths(&layer, 0, resolution);
+        let paths = generate_paths(&layer, 0, resolution, None);
 
         let mut covered = vec![false; (resolution * resolution) as usize];
         let brush_radius_uv = layer.params.brush_width / resolution as f32 / 2.0;
@@ -590,7 +612,7 @@ mod tests {
     #[test]
     fn paths_stay_within_uv() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 512);
+        let paths = generate_paths(&layer, 0, 512, None);
 
         for path in &paths {
             for point in &path.points {
@@ -625,7 +647,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng);
+        let path = trace_streamline(Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng, None);
 
         let path = path.expect("curved path should exist");
         assert!(path.len() > 10, "path should have enough points");
@@ -662,7 +684,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.3, 0.5), &field, &params, 512, &mut rng);
+        let path = trace_streamline(Vec2::new(0.3, 0.5), &field, &params, 512, &mut rng, None);
 
         if let Some(path) = path {
             for w in path.windows(3) {
@@ -745,7 +767,7 @@ mod tests {
     fn visual_horizontal_strokes() {
         let layer = make_layer();
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, resolution);
+        let paths = generate_paths(&layer, 0, resolution, None);
 
         eprintln!("visual_horizontal_strokes: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "horizontal_strokes.png");
@@ -788,11 +810,127 @@ mod tests {
             ],
         };
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, resolution);
+        let paths = generate_paths(&layer, 0, resolution, None);
 
         eprintln!("visual_spiral_guides: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "spiral_guides.png");
         assert!(!paths.is_empty());
+    }
+
+    /// Draw paths on top of a color texture background.
+    fn draw_paths_on_texture(
+        paths: &[StrokePath],
+        tex: &[crate::types::Color],
+        tex_w: u32,
+        tex_h: u32,
+        resolution: u32,
+        filename: &str,
+    ) {
+        use crate::stroke_color::sample_bilinear;
+        let res = resolution as usize;
+        let mut img = vec![0u8; res * res * 3];
+
+        // Draw texture background
+        for py in 0..resolution {
+            for px in 0..resolution {
+                let uv = Vec2::new(
+                    (px as f32 + 0.5) / resolution as f32,
+                    (py as f32 + 0.5) / resolution as f32,
+                );
+                let c = sample_bilinear(tex, tex_w, tex_h, uv);
+                let i = (py as usize * res + px as usize) * 3;
+                img[i] = (c.r.clamp(0.0, 1.0) * 255.0) as u8;
+                img[i + 1] = (c.g.clamp(0.0, 1.0) * 255.0) as u8;
+                img[i + 2] = (c.b.clamp(0.0, 1.0) * 255.0) as u8;
+            }
+        }
+
+        // Draw paths
+        for (idx, path) in paths.iter().enumerate() {
+            let hue = (idx as f32 * 0.618034) % 1.0;
+            let (r, g, b) = hue_to_rgb(hue);
+            for point in &path.points {
+                let px = (point.x * resolution as f32) as i32;
+                let py = (point.y * resolution as f32) as i32;
+                if px >= 0 && px < resolution as i32 && py >= 0 && py < resolution as i32 {
+                    let i = (py as usize * res + px as usize) * 3;
+                    img[i] = r;
+                    img[i + 1] = g;
+                    img[i + 2] = b;
+                }
+            }
+        }
+
+        let path = crate::test_module_output_dir("path_placement").join(filename);
+        image::save_buffer(&path, &img, resolution, resolution, image::ColorType::Rgb8)
+            .unwrap();
+        eprintln!("Wrote visual test: {}", path.display());
+    }
+
+    #[test]
+    fn visual_color_boundary_comparison() {
+        // INSPECT: Two images on a 4-stripe color texture (red/green/blue/yellow).
+        // "color_break_off.png" — strokes cross color boundaries freely.
+        // "color_break_on.png"  — strokes stop at sharp color boundaries.
+        // Expected: ON image shows shorter strokes that respect color regions.
+
+        let resolution = 512u32;
+
+        // 128×1 texture: 4 vertical color stripes
+        let mut tex_data = Vec::with_capacity(128);
+        for i in 0..128 {
+            tex_data.push(match i / 32 {
+                0 => crate::types::Color::rgb(0.85, 0.2, 0.15),  // red
+                1 => crate::types::Color::rgb(0.15, 0.7, 0.2),   // green
+                2 => crate::types::Color::rgb(0.15, 0.25, 0.85), // blue
+                _ => crate::types::Color::rgb(0.9, 0.8, 0.15),   // yellow
+            });
+        }
+        let tex_ref = ColorTextureRef {
+            data: &tex_data,
+            width: 128,
+            height: 1,
+        };
+
+        let layer_off = PaintLayer {
+            name: String::from("off"),
+            order: 0,
+            params: StrokeParams {
+                brush_width: 15.0,
+                angle_variation: 3.0,
+                max_turn_angle: 20.0,
+                color_break_threshold: None,
+                ..StrokeParams::default()
+            },
+            guides: vec![
+                GuideVertex {
+                    position: Vec2::new(0.5, 0.5),
+                    direction: Vec2::X,
+                    influence: 1.0,
+                },
+            ],
+        };
+        let mut layer_on = layer_off.clone();
+        layer_on.params.color_break_threshold = Some(0.08);
+
+        let paths_off = generate_paths(&layer_off, 0, resolution, Some(&tex_ref));
+        let paths_on = generate_paths(&layer_on, 0, resolution, Some(&tex_ref));
+
+        eprintln!(
+            "color_break OFF: {} paths, ON: {} paths",
+            paths_off.len(),
+            paths_on.len()
+        );
+
+        draw_paths_on_texture(
+            &paths_off, &tex_data, 128, 1, resolution, "color_break_off.png",
+        );
+        draw_paths_on_texture(
+            &paths_on, &tex_data, 128, 1, resolution, "color_break_on.png",
+        );
+
+        assert!(!paths_off.is_empty());
+        assert!(!paths_on.is_empty());
     }
 
     // ── Stroke Length Distribution Tests ──
@@ -815,6 +953,7 @@ mod tests {
                 &params,
                 512,
                 &mut rng,
+                None,
             ) {
                 let len: f32 = path
                     .windows(2)
@@ -853,6 +992,7 @@ mod tests {
                 &params,
                 512,
                 &mut rng,
+                None,
             ) {
                 let len: f32 = path
                     .windows(2)
@@ -878,8 +1018,8 @@ mod tests {
 
         let mut rng1 = SeededRng::new(99);
         let mut rng2 = SeededRng::new(99);
-        let path1 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng1);
-        let path2 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng2);
+        let path1 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng1, None);
+        let path2 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng2, None);
 
         match (path1, path2) {
             (Some(p1), Some(p2)) => {
@@ -915,6 +1055,7 @@ mod tests {
                     &params,
                     512,
                     &mut rng,
+                    None,
                 ) {
                     let len: f32 = path
                         .windows(2)
@@ -934,5 +1075,243 @@ mod tests {
             medians[0],
             medians[1]
         );
+    }
+
+    // ── Color Boundary Break Tests ──
+
+    #[test]
+    fn threshold_none_same_as_no_texture() {
+        // With threshold=None, providing a color texture should not change paths.
+        let guides = vec![GuideVertex {
+            position: Vec2::new(0.5, 0.5),
+            direction: Vec2::X,
+            influence: 1.5,
+        }];
+        let params = StrokeParams {
+            angle_variation: 0.0,
+            color_break_threshold: None,
+            ..StrokeParams::default()
+        };
+        let field = DirectionField::new(&guides, 512);
+
+        // 2×2 split texture: left=red, right=blue
+        let tex_data = vec![
+            crate::types::Color::rgb(1.0, 0.0, 0.0),
+            crate::types::Color::rgb(0.0, 0.0, 1.0),
+            crate::types::Color::rgb(1.0, 0.0, 0.0),
+            crate::types::Color::rgb(0.0, 0.0, 1.0),
+        ];
+        let tex_ref = ColorTextureRef {
+            data: &tex_data,
+            width: 2,
+            height: 2,
+        };
+
+        let mut rng1 = SeededRng::new(42);
+        let mut rng2 = SeededRng::new(42);
+        let path_no_tex =
+            trace_streamline(Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None);
+        let path_with_tex = trace_streamline(
+            Vec2::new(0.1, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng2,
+            Some(&tex_ref),
+        );
+
+        match (path_no_tex, path_with_tex) {
+            (Some(a), Some(b)) => {
+                assert_eq!(a.len(), b.len(), "threshold=None should not affect path length");
+            }
+            (None, None) => {}
+            _ => panic!("threshold=None should not affect path existence"),
+        }
+    }
+
+    #[test]
+    fn color_boundary_breaks_path() {
+        // Horizontal stroke crossing a sharp red/blue boundary at u=0.5.
+        // Use a 64-pixel-wide texture so the bilinear transition zone is narrow
+        // enough (~1/64 UV) that per-step color diff exceeds the threshold.
+        let guides = vec![GuideVertex {
+            position: Vec2::new(0.5, 0.5),
+            direction: Vec2::X,
+            influence: 1.5,
+        }];
+        let params = StrokeParams {
+            angle_variation: 0.0,
+            max_stroke_length: 500.0,
+            color_break_threshold: Some(0.1),
+            ..StrokeParams::default()
+        };
+        let field = DirectionField::new(&guides, 512);
+
+        // 64×1 texture: left half red, right half blue
+        let mut tex_data = Vec::with_capacity(64);
+        for i in 0..64 {
+            if i < 32 {
+                tex_data.push(crate::types::Color::rgb(1.0, 0.0, 0.0));
+            } else {
+                tex_data.push(crate::types::Color::rgb(0.0, 0.0, 1.0));
+            }
+        }
+        let tex_ref = ColorTextureRef {
+            data: &tex_data,
+            width: 64,
+            height: 1,
+        };
+
+        let mut rng = SeededRng::new(42);
+        let path = trace_streamline(
+            Vec2::new(0.1, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng,
+            Some(&tex_ref),
+        );
+
+        // Path should exist but be shorter than without boundary
+        let mut rng2 = SeededRng::new(42);
+        let path_no_break = trace_streamline(
+            Vec2::new(0.1, 0.5),
+            &field,
+            &StrokeParams {
+                color_break_threshold: None,
+                ..params.clone()
+            },
+            512,
+            &mut rng2,
+            Some(&tex_ref),
+        );
+
+        if let (Some(p), Some(p_nb)) = (path, path_no_break) {
+            assert!(
+                p.len() < p_nb.len(),
+                "color boundary should shorten path: {} vs {} points",
+                p.len(),
+                p_nb.len()
+            );
+            // Path should stop before or near the boundary (u ≈ 0.5)
+            let last_x = p.last().unwrap().x;
+            assert!(
+                last_x < 0.65,
+                "path should stop near color boundary, got last x={last_x:.3}"
+            );
+        }
+    }
+
+    #[test]
+    fn uniform_texture_no_break() {
+        // Uniform texture: color boundary should never trigger.
+        let guides = vec![GuideVertex {
+            position: Vec2::new(0.5, 0.5),
+            direction: Vec2::X,
+            influence: 1.5,
+        }];
+        let params_break = StrokeParams {
+            angle_variation: 0.0,
+            color_break_threshold: Some(0.05),
+            ..StrokeParams::default()
+        };
+        let params_no_break = StrokeParams {
+            color_break_threshold: None,
+            ..params_break.clone()
+        };
+        let field = DirectionField::new(&guides, 512);
+
+        let tex_data = vec![crate::types::Color::rgb(0.5, 0.3, 0.7); 4];
+        let tex_ref = ColorTextureRef {
+            data: &tex_data,
+            width: 2,
+            height: 2,
+        };
+
+        let mut rng1 = SeededRng::new(42);
+        let mut rng2 = SeededRng::new(42);
+        let path_break = trace_streamline(
+            Vec2::new(0.1, 0.5),
+            &field,
+            &params_break,
+            512,
+            &mut rng1,
+            Some(&tex_ref),
+        );
+        let path_no_break = trace_streamline(
+            Vec2::new(0.1, 0.5),
+            &field,
+            &params_no_break,
+            512,
+            &mut rng2,
+            Some(&tex_ref),
+        );
+
+        match (path_break, path_no_break) {
+            (Some(a), Some(b)) => {
+                assert_eq!(
+                    a.len(),
+                    b.len(),
+                    "uniform texture should not cause any breaks"
+                );
+            }
+            (None, None) => {}
+            _ => panic!("uniform texture should not affect path existence"),
+        }
+    }
+
+    #[test]
+    fn color_boundary_deterministic() {
+        let guides = vec![GuideVertex {
+            position: Vec2::new(0.5, 0.5),
+            direction: Vec2::X,
+            influence: 1.5,
+        }];
+        let params = StrokeParams {
+            angle_variation: 0.0,
+            color_break_threshold: Some(0.15),
+            ..StrokeParams::default()
+        };
+        let field = DirectionField::new(&guides, 512);
+        let tex_data = vec![
+            crate::types::Color::rgb(1.0, 0.0, 0.0),
+            crate::types::Color::rgb(0.0, 0.0, 1.0),
+        ];
+        let tex_ref = ColorTextureRef {
+            data: &tex_data,
+            width: 2,
+            height: 1,
+        };
+
+        let mut rng1 = SeededRng::new(42);
+        let mut rng2 = SeededRng::new(42);
+        let p1 = trace_streamline(
+            Vec2::new(0.2, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng1,
+            Some(&tex_ref),
+        );
+        let p2 = trace_streamline(
+            Vec2::new(0.2, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng2,
+            Some(&tex_ref),
+        );
+
+        match (p1, p2) {
+            (Some(a), Some(b)) => {
+                assert_eq!(a.len(), b.len());
+                for (pa, pb) in a.iter().zip(b.iter()) {
+                    assert_eq!(pa.x, pb.x);
+                    assert_eq!(pa.y, pb.y);
+                }
+            }
+            (None, None) => {}
+            _ => panic!("determinism broken with color boundary"),
+        }
     }
 }
