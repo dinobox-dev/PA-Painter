@@ -82,7 +82,7 @@ fn main() {
 
     let resolution = resolution_override.unwrap_or(project.settings.output_resolution);
     eprintln!("Resolution: {resolution}px");
-    eprintln!("Regions: {}", project.regions.len());
+    eprintln!("Layers: {}", project.layers.len());
 
     // Load base color texture if referenced
     let (base_colors, tw, th) = if let Some(ref tex_path) = project.color_ref.path {
@@ -110,7 +110,7 @@ fn main() {
     // Generate
     eprintln!("Generating...");
     let global = composite_all(
-        &project.regions,
+        &project.layers,
         resolution,
         base_colors.as_deref(),
         tw,
@@ -121,7 +121,7 @@ fn main() {
 
     // Export
     eprintln!("Exporting to: {}", output_dir.display());
-    export_all(&global, &project.regions, &project.settings, &output_dir, format)
+    export_all(&global, &project.layers, &project.settings, &output_dir, format)
         .unwrap_or_else(|e| {
             eprintln!("Error exporting: {e:?}");
             process::exit(1);

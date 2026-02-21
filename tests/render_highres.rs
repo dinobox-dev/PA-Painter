@@ -1,24 +1,14 @@
 use practical_arcana_painter::compositing;
 use practical_arcana_painter::types::*;
-use glam::Vec2;
 
-fn make_square_region(min: f32, max: f32) -> Region {
-    Region {
-        id: 0,
-        name: "region_0".to_string(),
-        mask: vec![Polygon {
-            vertices: vec![
-                Vec2::new(min, min),
-                Vec2::new(max, min),
-                Vec2::new(max, max),
-                Vec2::new(min, max),
-            ],
-        }],
+fn make_layer() -> PaintLayer {
+    PaintLayer {
+        name: "layer_0".to_string(),
         order: 0,
         params: StrokeParams::default(),
         guides: vec![GuideVertex {
-            position: Vec2::new(0.5, 0.5),
-            direction: Vec2::X,
+            position: glam::Vec2::new(0.5, 0.5),
+            direction: glam::Vec2::X,
             influence: 1.5,
         }],
     }
@@ -29,10 +19,10 @@ fn make_square_region(min: f32, max: f32) -> Region {
 #[test]
 #[ignore]
 fn visual_highres_cpu() {
-    let mut region = make_square_region(0.1, 0.9);
-    region.params.brush_width = 25.0;
-    region.params.ridge_height = 0.3;
-    region.params.color_variation = 0.15;
+    let mut layer = make_layer();
+    layer.params.brush_width = 25.0;
+    layer.params.ridge_height = 0.3;
+    layer.params.color_variation = 0.15;
 
     let settings = OutputSettings::default();
 
@@ -45,7 +35,7 @@ fn visual_highres_cpu() {
         eprintln!("Rendering {}px...", res);
 
         let cpu_maps = compositing::composite_all(
-            &[region.clone()], res, None, 0, 0, solid, &settings,
+            &[layer.clone()], res, None, 0, 0, solid, &settings,
         );
         save_maps(&cpu_maps, res, &format!("cpu_{}", res));
 

@@ -24,7 +24,6 @@ pub mod types; // Phase 01
 pub mod brush_profile; // Phase 02
 pub mod stroke_height; // Phase 02
 pub mod direction_field; // Phase 03
-pub mod region; // Phase 04
 pub mod path_placement; // Phase 05
 pub mod local_frame; // Phase 06
 pub mod stroke_color; // Phase 07

@@ -100,7 +100,7 @@ pub enum PressurePreset {
     Taper,
 }
 
-/// Per-region stroke parameters.
+/// Per-layer stroke parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrokeParams {
     pub brush_width: f32,
@@ -158,18 +158,11 @@ impl Default for GuideVertex {
     }
 }
 
-/// A polygon defined as a list of vertices in UV space.
+/// A paint layer defining stroke parameters and direction guides.
+/// Covers the full UV space [0,1]² — no polygon mask.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Polygon {
-    pub vertices: Vec<Vec2>,
-}
-
-/// A region defining a UV-space area with uniform stroke style.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Region {
-    pub id: u32,
+pub struct PaintLayer {
     pub name: String,
-    pub mask: Vec<Polygon>,
     pub order: i32,
     pub params: StrokeParams,
     pub guides: Vec<GuideVertex>,
@@ -179,14 +172,14 @@ pub struct Region {
 #[derive(Debug, Clone)]
 pub struct StrokePath {
     pub points: Vec<Vec2>,
-    pub region_id: u32,
+    pub layer_index: u32,
     pub stroke_id: u32,
     cumulative_lengths: Vec<f32>,
     total_length: f32,
 }
 
 impl StrokePath {
-    pub fn new(points: Vec<Vec2>, region_id: u32, stroke_id: u32) -> Self {
+    pub fn new(points: Vec<Vec2>, layer_index: u32, stroke_id: u32) -> Self {
         let mut cumulative_lengths = Vec::with_capacity(points.len());
         let mut accum = 0.0f32;
         cumulative_lengths.push(0.0);
@@ -196,7 +189,7 @@ impl StrokePath {
         }
         Self {
             points,
-            region_id,
+            layer_index,
             stroke_id,
             cumulative_lengths,
             total_length: accum,

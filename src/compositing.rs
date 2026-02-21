@@ -7,7 +7,7 @@ use crate::path_placement::generate_paths;
 use crate::rng::SeededRng;
 use crate::stroke_color::{compute_stroke_color, sample_bilinear};
 use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
-use crate::types::{Color, OutputSettings, Region};
+use crate::types::{Color, OutputSettings, PaintLayer};
 
 /// Global compositing buffers in UV space.
 pub struct GlobalMaps {
@@ -66,7 +66,7 @@ impl GlobalMaps {
 /// - `transform`: local frame → UV transform from Phase 06
 /// - `stroke_color`: uniform color for this stroke
 /// - `stroke_id`: unique ID for this stroke
-/// - `base_height`: the region's base_height param (used for opacity calc)
+/// - `base_height`: the layer's base_height param (used for opacity calc)
 /// - `global`: mutable reference to global maps
 pub fn composite_stroke(
     local_height: &StrokeHeightResult,
@@ -110,12 +110,12 @@ pub fn composite_stroke(
     }
 }
 
-/// Composite all strokes from all regions into global maps.
+/// Composite all strokes from all layers into global maps.
 ///
-/// Regions are composited in `order` (ascending). Within each region,
+/// Layers are composited in `order` (ascending). Within each layer,
 /// strokes are composited in their path order (top-to-bottom).
 pub fn composite_all(
-    regions: &[Region],
+    layers: &[PaintLayer],
     resolution: u32,
     base_color_texture: Option<&[Color]>,
     tex_width: u32,
@@ -125,13 +125,14 @@ pub fn composite_all(
 ) -> GlobalMaps {
     let mut global = GlobalMaps::new(resolution, base_color_texture, tex_width, tex_height, solid_color);
 
-    // Sort regions by order (ascending)
-    let mut sorted_regions: Vec<&Region> = regions.iter().collect();
-    sorted_regions.sort_by(|a, b| a.order.cmp(&b.order));
+    // Sort layers by order (ascending), preserving original index for stroke ID encoding
+    let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
+    sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
 
-    for region in sorted_regions {
-        composite_region(
-            region,
+    for (layer_index, layer) in sorted {
+        composite_layer(
+            layer,
+            layer_index as u32,
             resolution,
             &mut global,
             settings,
@@ -145,13 +146,14 @@ pub fn composite_all(
     global
 }
 
-/// Composite a single region's strokes into the global maps.
+/// Composite a single layer's strokes into the global maps.
 ///
-/// This is the inner loop of `composite_all`, extracted for single-region
+/// This is the inner loop of `composite_all`, extracted for single-layer
 /// preview regeneration. The caller is responsible for clearing/resetting
-/// pixels belonging to this region before calling (if needed).
-pub fn composite_region(
-    region: &Region,
+/// pixels belonging to this layer before calling (if needed).
+pub fn composite_layer(
+    layer: &PaintLayer,
+    layer_index: u32,
     resolution: u32,
     global: &mut GlobalMaps,
     _settings: &OutputSettings,
@@ -160,20 +162,20 @@ pub fn composite_region(
     tex_height: u32,
     solid_color: Color,
 ) {
-    let paths = generate_paths(region, resolution);
+    let paths = generate_paths(layer, layer_index, resolution);
 
-    // Generate brush profile once per region (same seed for all strokes in region)
+    // Generate brush profile once per layer (same seed for all strokes in layer)
     let brush_profile =
-        generate_brush_profile(region.params.brush_width.round() as usize, region.params.seed);
+        generate_brush_profile(layer.params.brush_width.round() as usize, layer.params.seed);
 
-    let mut rng = SeededRng::new(region.params.seed);
+    let mut rng = SeededRng::new(layer.params.seed);
 
     for (i, path) in paths.iter().enumerate() {
         // Build local frame
         let transform = build_local_frame(
             path,
-            region.params.brush_width.round() as usize,
-            region.params.ridge_width.round() as usize,
+            layer.params.brush_width.round() as usize,
+            layer.params.ridge_width.round() as usize,
             resolution,
         );
 
@@ -181,16 +183,16 @@ pub fn composite_region(
         let stroke_length_px = (path.arc_length() * resolution as f32).ceil() as usize;
         let local_height = generate_stroke_height(
             &brush_profile,
-            region.params.brush_width.round() as usize,
+            layer.params.brush_width.round() as usize,
             stroke_length_px,
-            region.params.load,
-            region.params.base_height,
-            region.params.ridge_height,
-            region.params.ridge_width.round() as usize,
-            region.params.ridge_variation,
-            region.params.body_wiggle,
-            region.params.pressure_preset,
-            region.params.seed + i as u32,
+            layer.params.load,
+            layer.params.base_height,
+            layer.params.ridge_height,
+            layer.params.ridge_width.round() as usize,
+            layer.params.ridge_variation,
+            layer.params.body_wiggle,
+            layer.params.pressure_preset,
+            layer.params.seed + i as u32,
         );
 
         // Compute stroke color
@@ -200,7 +202,7 @@ pub fn composite_region(
             tex_width,
             tex_height,
             solid_color,
-            region.params.color_variation,
+            layer.params.color_variation,
             &mut rng,
         );
 
@@ -210,7 +212,7 @@ pub fn composite_region(
             &transform,
             stroke_color,
             path.stroke_id,
-            region.params.base_height,
+            layer.params.base_height,
             global,
         );
     }
@@ -219,7 +221,7 @@ pub fn composite_region(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{GuideVertex, Polygon, StrokeParams};
+    use crate::types::{GuideVertex, PaintLayer, StrokeParams};
 
     const EPS: f32 = 1e-4;
 
@@ -244,20 +246,9 @@ mod tests {
         }
     }
 
-    fn make_polygon(verts: Vec<Vec2>) -> Polygon {
-        Polygon { vertices: verts }
-    }
-
-    fn make_square_region(min: f32, max: f32, order: i32, id: u32) -> Region {
-        Region {
-            id,
-            name: format!("region_{}", id),
-            mask: vec![make_polygon(vec![
-                Vec2::new(min, min),
-                Vec2::new(max, min),
-                Vec2::new(max, max),
-                Vec2::new(min, max),
-            ])],
+    fn make_layer_with_order(order: i32) -> PaintLayer {
+        PaintLayer {
+            name: format!("layer_{}", order),
             order,
             params: StrokeParams::default(),
             guides: vec![GuideVertex {
@@ -294,7 +285,6 @@ mod tests {
 
     #[test]
     fn global_maps_texture_resample() {
-        // 2x2 texture: corners are red, green, blue, yellow
         let tex = vec![
             Color::rgb(1.0, 0.0, 0.0),
             Color::rgb(0.0, 1.0, 0.0),
@@ -304,9 +294,7 @@ mod tests {
         let maps = GlobalMaps::new(4, Some(&tex), 2, 2, Color::WHITE);
         assert_eq!(maps.color.len(), 16);
 
-        // Center pixel should be a blend of all four
-        let center = maps.color[1 * 4 + 1]; // pixel (1,1) in a 4x4 map
-        // Should have non-trivial values in r, g channels
+        let center = maps.color[1 * 4 + 1];
         assert!(center.r > 0.0 && center.g > 0.0);
     }
 
@@ -314,8 +302,6 @@ mod tests {
 
     #[test]
     fn no_height_stacking() {
-        // 3 strokes at the same UV position with heights [0.7, 0.3, 0.5]
-        // Expected: Final height = 0.7 (max wins), NOT 0.5 (overwrite) or 1.5 (sum)
         let mut global = GlobalMaps::new(16, None, 0, 0, Color::WHITE);
         let uv = Vec2::new(0.5, 0.5);
 
@@ -345,8 +331,7 @@ mod tests {
 
     #[test]
     fn color_full_cover() {
-        // h = base_height → opacity ≈ 1.0, should be fully covered
-        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0)); // red base
+        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0));
         let uv = Vec2::new(0.5, 0.5);
         let base_height = 0.5;
 
@@ -355,7 +340,7 @@ mod tests {
         composite_stroke(
             &height_map,
             &transform,
-            Color::rgb(0.0, 0.0, 1.0), // blue stroke
+            Color::rgb(0.0, 0.0, 1.0),
             1,
             base_height,
             &mut global,
@@ -364,7 +349,6 @@ mod tests {
         let (px, py) = LocalFrameTransform::uv_to_pixel(uv, 16);
         let idx = (py as u32 * 16 + px as u32) as usize;
         let c = global.color[idx];
-        // smoothstep(0.5, 0.0, 0.5*0.7=0.35) → 0.5 > 0.35 → saturated to 1.0
         assert!(
             c.b > 0.9,
             "full cover: blue should dominate, got ({:.3}, {:.3}, {:.3})",
@@ -374,12 +358,11 @@ mod tests {
 
     #[test]
     fn color_transparent_bristle_gap() {
-        // h ≈ 0 (bristle gap) → opacity ≈ 0, should preserve base color
         let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0));
         let uv = Vec2::new(0.5, 0.5);
         let base_height = 0.5;
 
-        let height_map = make_simple_height(1, 1, 0.001); // near-zero
+        let height_map = make_simple_height(1, 1, 0.001);
         let transform = make_simple_transform(1, 1, uv);
         composite_stroke(
             &height_map,
@@ -393,7 +376,6 @@ mod tests {
         let (px, py) = LocalFrameTransform::uv_to_pixel(uv, 16);
         let idx = (py as u32 * 16 + px as u32) as usize;
         let c = global.color[idx];
-        // smoothstep(0.001, 0.0, 0.35) ≈ very small
         assert!(
             c.r > 0.9,
             "bristle gap: base red should show through, got ({:.3}, {:.3}, {:.3})",
@@ -403,11 +385,10 @@ mod tests {
 
     #[test]
     fn color_partial_blend() {
-        // h = base_height * 0.3 → partial opacity
         let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0));
         let uv = Vec2::new(0.5, 0.5);
         let base_height = 0.5;
-        let h = base_height * 0.3; // 0.15
+        let h = base_height * 0.3;
 
         let height_map = make_simple_height(1, 1, h);
         let transform = make_simple_transform(1, 1, uv);
@@ -423,17 +404,15 @@ mod tests {
         let (px, py) = LocalFrameTransform::uv_to_pixel(uv, 16);
         let idx = (py as u32 * 16 + px as u32) as usize;
         let c = global.color[idx];
-        // Should be a blend — neither fully red nor fully blue
         assert!(c.r > 0.1 && c.b > 0.1, "partial: should be a blend");
     }
 
     #[test]
     fn color_ridge_full_opacity() {
-        // h = base_height + ridge_height (> base) → opacity = 1.0
         let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0));
         let uv = Vec2::new(0.5, 0.5);
         let base_height = 0.5;
-        let h = base_height + 0.3; // ridge: 0.8
+        let h = base_height + 0.3;
 
         let height_map = make_simple_height(1, 1, h);
         let transform = make_simple_transform(1, 1, uv);
@@ -449,7 +428,6 @@ mod tests {
         let (px, py) = LocalFrameTransform::uv_to_pixel(uv, 16);
         let idx = (py as u32 * 16 + px as u32) as usize;
         let c = global.color[idx];
-        // Ridge height well above threshold → opacity saturated to 1.0
         assert!(
             c.b > 0.95,
             "ridge: should be fully covered, got ({:.3}, {:.3}, {:.3})",
@@ -482,47 +460,39 @@ mod tests {
         assert_eq!(global.stroke_id[idx], 30, "stroke_id should be last stroke");
     }
 
-    // ── Region Order Test ──
+    // ── Layer Order Test ──
 
     #[test]
-    fn region_order_respected() {
-        // Region A (order=0, red), Region B (order=1, blue) — overlapping
-        // In overlap area, blue should be on top
-        let mut region_a = make_square_region(0.2, 0.8, 0, 0);
-        region_a.params.color_variation = 0.0;
-        region_a.params.brush_width = 40.0;
+    fn layer_order_respected() {
+        let mut layer_a = make_layer_with_order(0);
+        layer_a.params.color_variation = 0.0;
+        layer_a.params.brush_width = 40.0;
 
-        let mut region_b = make_square_region(0.2, 0.8, 1, 1);
-        region_b.params.color_variation = 0.0;
-        region_b.params.brush_width = 40.0;
+        let mut layer_b = make_layer_with_order(1);
+        layer_b.params.color_variation = 0.0;
+        layer_b.params.brush_width = 40.0;
 
         let settings = OutputSettings::default();
 
         let solid_a = Color::rgb(1.0, 0.0, 0.0);
         let solid_b = Color::rgb(0.0, 0.0, 1.0);
 
-        // Composite region A (order 0) first
         let mut global = GlobalMaps::new(64, None, 0, 0, Color::WHITE);
-        composite_region(
-            &region_a, 64, &mut global, &settings,
+        composite_layer(
+            &layer_a, 0, 64, &mut global, &settings,
             None, 0, 0, solid_a,
         );
-
-        // Composite region B (order 1) second
-        composite_region(
-            &region_b, 64, &mut global, &settings,
+        composite_layer(
+            &layer_b, 1, 64, &mut global, &settings,
             None, 0, 0, solid_b,
         );
 
-        // Check center pixel — region B should have painted last
         let center = 32 * 64 + 32;
         if global.stroke_id[center] > 0 {
-            // If both regions painted here, the stroke_id should be from region B
-            // Region B IDs are (1 << 16) | index
-            let region_from_id = global.stroke_id[center] >> 16;
+            let layer_from_id = global.stroke_id[center] >> 16;
             assert_eq!(
-                region_from_id, 1,
-                "center should be painted by region B (order=1)"
+                layer_from_id, 1,
+                "center should be painted by layer B (order=1)"
             );
         }
     }
@@ -531,13 +501,13 @@ mod tests {
 
     #[test]
     fn composite_all_produces_output() {
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.brush_width = 10.0; // smaller brush for low-res test
+        let mut layer = make_layer_with_order(0);
+        layer.params.brush_width = 10.0;
 
         let settings = OutputSettings::default();
 
         let maps = composite_all(
-            &[region],
+            &[layer],
             128,
             None, 0, 0,
             Color::rgb(0.8, 0.6, 0.4),
@@ -547,19 +517,18 @@ mod tests {
         assert_eq!(maps.height.len(), 128 * 128);
         assert_eq!(maps.color.len(), 128 * 128);
 
-        // Should have some painted pixels
         let painted = maps.height.iter().filter(|&&h| h > 0.0).count();
         assert!(painted > 0, "should have painted some pixels");
     }
 
     #[test]
     fn composite_all_deterministic() {
-        let region = make_square_region(0.15, 0.85, 0, 0);
+        let layer = make_layer_with_order(0);
         let settings = OutputSettings::default();
         let solid = Color::rgb(0.5, 0.5, 0.5);
 
-        let maps1 = composite_all(&[region.clone()], 64, None, 0, 0, solid, &settings);
-        let maps2 = composite_all(&[region], 64, None, 0, 0, solid, &settings);
+        let maps1 = composite_all(&[layer.clone()], 64, None, 0, 0, solid, &settings);
+        let maps2 = composite_all(&[layer], 64, None, 0, 0, solid, &settings);
 
         assert_eq!(maps1.height, maps2.height);
         assert_eq!(maps1.stroke_id, maps2.stroke_id);
@@ -569,19 +538,18 @@ mod tests {
 
     #[test]
     fn visual_compositing() {
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.brush_width = 25.0;
-        region.params.ridge_height = 0.3;
-        region.params.color_variation = 0.1;
+        let mut layer = make_layer_with_order(0);
+        layer.params.brush_width = 25.0;
+        layer.params.ridge_height = 0.3;
+        layer.params.color_variation = 0.1;
 
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.6, 0.4, 0.3);
-        let maps = composite_all(&[region], 256, None, 0, 0, solid, &settings);
+        let maps = composite_all(&[layer], 256, None, 0, 0, solid, &settings);
 
         let out_dir = crate::test_module_output_dir("compositing");
 
-        // Save height map as grayscale PNG
         let max_h = maps.height.iter().cloned().fold(0.0f32, f32::max).max(1e-10);
         let height_pixels: Vec<u8> = maps
             .height
@@ -598,7 +566,6 @@ mod tests {
         )
         .expect("Failed to save compositing_height.png");
 
-        // Save color map as RGB PNG
         let color_pixels: Vec<u8> = maps
             .color
             .iter()
@@ -626,17 +593,16 @@ mod tests {
 
     #[test]
     fn visual_flat_stroke_no_impasto() {
-        // base_height=0.5, ridge_height=0 → bristle pattern only, no edge ridges
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.base_height = 0.5;
-        region.params.ridge_height = 0.0;
-        region.params.brush_width = 25.0;
-        region.params.color_variation = 0.0;
+        let mut layer = make_layer_with_order(0);
+        layer.params.base_height = 0.5;
+        layer.params.ridge_height = 0.0;
+        layer.params.brush_width = 25.0;
+        layer.params.color_variation = 0.0;
 
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.5, 0.7, 0.3);
-        let maps = composite_all(&[region], 256, None, 0, 0, solid, &settings);
+        let maps = composite_all(&[layer], 256, None, 0, 0, solid, &settings);
 
         let max_h = maps.height.iter().cloned().fold(0.0f32, f32::max).max(1e-10);
         let pixels: Vec<u8> = maps
@@ -659,17 +625,16 @@ mod tests {
 
     #[test]
     fn visual_prominent_impasto() {
-        // base_height=0.3, ridge_height=0.5 → pronounced ridges
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.base_height = 0.3;
-        region.params.ridge_height = 0.5;
-        region.params.brush_width = 25.0;
-        region.params.color_variation = 0.0;
+        let mut layer = make_layer_with_order(0);
+        layer.params.base_height = 0.3;
+        layer.params.ridge_height = 0.5;
+        layer.params.brush_width = 25.0;
+        layer.params.color_variation = 0.0;
 
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.5, 0.3, 0.6);
-        let maps = composite_all(&[region], 256, None, 0, 0, solid, &settings);
+        let maps = composite_all(&[layer], 256, None, 0, 0, solid, &settings);
 
         let max_h = maps.height.iter().cloned().fold(0.0f32, f32::max).max(1e-10);
         let pixels: Vec<u8> = maps
@@ -692,27 +657,21 @@ mod tests {
 
     #[test]
     fn visual_dry_brush() {
-        // load=0.3 → underlying color visible through bristle gaps
-        // Use a bright canvas with a contrasting dark stroke color (via texture)
-        // so the dry brush transparency effect is clearly visible.
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.load = 0.3;
-        region.params.base_height = 0.5;
-        region.params.ridge_height = 0.0;
-        region.params.brush_width = 25.0;
-        region.params.color_variation = 0.0;
+        let mut layer = make_layer_with_order(0);
+        layer.params.load = 0.3;
+        layer.params.base_height = 0.5;
+        layer.params.ridge_height = 0.0;
+        layer.params.brush_width = 25.0;
+        layer.params.color_variation = 0.0;
 
         let settings = OutputSettings::default();
 
-        // Dark brown 1x1 texture for stroke color sampling,
-        // bright canvas as base so gaps show through
         let stroke_tex = vec![Color::rgb(0.25, 0.12, 0.05)];
         let canvas = Color::rgb(0.95, 0.92, 0.85);
 
-        // Initialize global maps with bright canvas, then composite with dark texture
         let mut global = GlobalMaps::new(256, None, 0, 0, canvas);
-        composite_region(
-            &region, 256, &mut global, &settings,
+        composite_layer(
+            &layer, 0, 256, &mut global, &settings,
             Some(&stroke_tex), 1, 1, canvas,
         );
         let maps = global;
@@ -743,14 +702,12 @@ mod tests {
 
     #[test]
     fn visual_color_variation() {
-        // High color_variation → impressionist-style per-stroke shifts
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.color_variation = 0.25;
-        region.params.brush_width = 20.0;
+        let mut layer = make_layer_with_order(0);
+        layer.params.color_variation = 0.25;
+        layer.params.brush_width = 20.0;
 
         let settings = OutputSettings::default();
 
-        // Create a gradient texture (4x4)
         let mut tex = Vec::new();
         for y in 0..4 {
             for x in 0..4 {
@@ -763,7 +720,7 @@ mod tests {
         }
 
         let maps = composite_all(
-            &[region],
+            &[layer],
             256,
             Some(&tex),
             4,
@@ -798,11 +755,9 @@ mod tests {
 
     #[test]
     fn zero_height_preserves_base() {
-        // Pixels where no stroke paints should retain base color
         let solid = Color::rgb(0.3, 0.7, 0.1);
         let maps = GlobalMaps::new(16, None, 0, 0, solid);
 
-        // Without any compositing, all colors should be the base
         for c in &maps.color {
             assert!((c.r - 0.3).abs() < EPS);
             assert!((c.g - 0.7).abs() < EPS);
@@ -812,11 +767,10 @@ mod tests {
 
     #[test]
     fn skip_unpainted_pixels() {
-        // Height = 0 pixels should not affect global maps
         let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0));
         let uv = Vec2::new(0.5, 0.5);
 
-        let height_map = make_simple_height(1, 1, 0.0); // zero height
+        let height_map = make_simple_height(1, 1, 0.0);
         let transform = make_simple_transform(1, 1, uv);
         composite_stroke(
             &height_map,

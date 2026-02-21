@@ -6,7 +6,7 @@ use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::asset_io::linear_to_srgb;
-use crate::types::{OutputSettings, Region};
+use crate::types::{OutputSettings, PaintLayer};
 
 // ── Data Structures ──
 
@@ -36,7 +36,7 @@ pub struct Project {
     pub manifest: Manifest,
     pub mesh_ref: MeshRef,
     pub color_ref: ColorRef,
-    pub regions: Vec<Region>,
+    pub layers: Vec<PaintLayer>,
     pub settings: OutputSettings,
     pub cached_height: Option<Vec<f32>>,
     pub cached_color: Option<Vec<[f32; 4]>>,
@@ -158,10 +158,10 @@ pub fn save_project(project: &Project, path: &Path) -> Result<(), ProjectError> 
     zip.start_file("color_ref.json", options)?;
     zip.write_all(color_json.as_bytes())?;
 
-    // regions.json
-    let regions_json = serde_json::to_string_pretty(&project.regions)?;
-    zip.start_file("regions.json", options)?;
-    zip.write_all(regions_json.as_bytes())?;
+    // layers.json
+    let layers_json = serde_json::to_string_pretty(&project.layers)?;
+    zip.start_file("layers.json", options)?;
+    zip.write_all(layers_json.as_bytes())?;
 
     // settings.json
     let settings_json = serde_json::to_string_pretty(&project.settings)?;
@@ -214,8 +214,15 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     // color_ref.json (required)
     let color_ref: ColorRef = read_json_entry(&mut archive, "color_ref.json")?;
 
-    // regions.json (required)
-    let regions: Vec<Region> = read_json_entry(&mut archive, "regions.json")?;
+    // layers.json (v2) with fallback to regions.json (v1)
+    // serde ignores unknown fields (id, mask) when deserializing v1 regions as PaintLayer
+    let layers: Vec<PaintLayer> = match read_json_entry(&mut archive, "layers.json") {
+        Ok(layers) => layers,
+        Err(ProjectError::Zip(zip::result::ZipError::FileNotFound)) => {
+            read_json_entry(&mut archive, "regions.json")?
+        }
+        Err(e) => return Err(e),
+    };
 
     // settings.json (required)
     let settings: OutputSettings = read_json_entry(&mut archive, "settings.json")?;
@@ -230,7 +237,7 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
         manifest,
         mesh_ref,
         color_ref,
-        regions,
+        layers,
         settings,
         cached_height,
         cached_color,
@@ -272,7 +279,7 @@ fn read_bincode_entry_optional<T: serde::de::DeserializeOwned>(
 mod tests {
     use super::*;
     use crate::types::{
-        GuideVertex, OutputSettings, Polygon, PressurePreset, Region, ResolutionPreset,
+        GuideVertex, OutputSettings, PaintLayer, PressurePreset, ResolutionPreset,
         StrokeParams,
     };
     use glam::Vec2;
@@ -300,7 +307,7 @@ mod tests {
         }
     }
 
-    fn make_test_region(id: u32, name: &str, guide_count: usize) -> Region {
+    fn make_test_layer(name: &str, order: i32, guide_count: usize) -> PaintLayer {
         let guides: Vec<GuideVertex> = (0..guide_count)
             .map(|i| GuideVertex {
                 position: Vec2::new(0.1 * i as f32, 0.2 * i as f32),
@@ -309,20 +316,11 @@ mod tests {
             })
             .collect();
 
-        Region {
-            id,
+        PaintLayer {
             name: name.to_string(),
-            mask: vec![Polygon {
-                vertices: vec![
-                    Vec2::new(0.1, 0.1),
-                    Vec2::new(0.9, 0.1),
-                    Vec2::new(0.9, 0.9),
-                    Vec2::new(0.1, 0.9),
-                ],
-            }],
-            order: id as i32,
+            order,
             params: StrokeParams {
-                brush_width: 20.0 + id as f32,
+                brush_width: 20.0 + order as f32,
                 load: 0.7,
                 base_height: 0.4,
                 ridge_height: 0.2,
@@ -335,7 +333,7 @@ mod tests {
                 max_stroke_length: 200.0,
                 angle_variation: 5.0,
                 max_turn_angle: 15.0,
-                seed: 100 + id,
+                seed: 100 + order as u32,
             },
             guides,
         }
@@ -346,22 +344,22 @@ mod tests {
             manifest: make_manifest(),
             mesh_ref: make_mesh_ref(),
             color_ref: make_color_ref(),
-            regions: vec![],
+            layers: vec![],
             settings: OutputSettings::default(),
             cached_height: None,
             cached_color: None,
         }
     }
 
-    fn make_project_with_regions() -> Project {
+    fn make_project_with_layers() -> Project {
         Project {
             manifest: make_manifest(),
             mesh_ref: make_mesh_ref(),
             color_ref: make_color_ref(),
-            regions: vec![
-                make_test_region(0, "skin", 3),
-                make_test_region(1, "armor", 5),
-                make_test_region(2, "cloth", 2),
+            layers: vec![
+                make_test_layer("skin", 0, 3),
+                make_test_layer("armor", 1, 5),
+                make_test_layer("cloth", 2, 2),
             ],
             settings: OutputSettings {
                 resolution_preset: ResolutionPreset::High,
@@ -391,28 +389,24 @@ mod tests {
 
         assert_eq!(loaded.manifest.version, "1.0.0");
         assert_eq!(loaded.manifest.app_name, "Practical Arcana Painter");
-        assert_eq!(loaded.regions.len(), 0);
+        assert_eq!(loaded.layers.len(), 0);
         assert!(loaded.cached_height.is_none());
         assert!(loaded.cached_color.is_none());
     }
 
     #[test]
-    fn round_trip_with_regions() {
-        let project = make_project_with_regions();
-        let path = temp_pap_path("with_regions.pap");
+    fn round_trip_with_layers() {
+        let project = make_project_with_layers();
+        let path = temp_pap_path("with_layers.pap");
 
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
-        assert_eq!(loaded.regions.len(), 3);
+        assert_eq!(loaded.layers.len(), 3);
 
-        // Check each region
-        for (a, b) in project.regions.iter().zip(loaded.regions.iter()) {
-            assert_eq!(a.id, b.id);
+        for (a, b) in project.layers.iter().zip(loaded.layers.iter()) {
             assert_eq!(a.name, b.name);
             assert_eq!(a.order, b.order);
-            assert_eq!(a.mask.len(), b.mask.len());
-            assert_eq!(a.mask[0].vertices.len(), b.mask[0].vertices.len());
             assert_eq!(a.params.brush_width, b.params.brush_width);
             assert_eq!(a.params.load, b.params.load);
             assert_eq!(a.params.base_height, b.params.base_height);
@@ -444,7 +438,7 @@ mod tests {
             })
             .collect();
 
-        let mut project = make_project_with_regions();
+        let mut project = make_project_with_layers();
         project.cached_height = Some(height.clone());
         project.cached_color = Some(color.clone());
 
@@ -452,14 +446,12 @@ mod tests {
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
-        // Height cache preserved exactly
         let lh = loaded.cached_height.unwrap();
         assert_eq!(lh.len(), pixel_count);
         for (a, b) in height.iter().zip(lh.iter()) {
             assert_eq!(a, b, "height mismatch");
         }
 
-        // Color cache preserved exactly
         let lc = loaded.cached_color.unwrap();
         assert_eq!(lc.len(), pixel_count);
         for (a, b) in color.iter().zip(lc.iter()) {
@@ -469,7 +461,7 @@ mod tests {
 
     #[test]
     fn round_trip_without_cache() {
-        let project = make_project_with_regions();
+        let project = make_project_with_layers();
         let path = temp_pap_path("no_cache.pap");
 
         save_project(&project, &path).unwrap();
@@ -482,17 +474,17 @@ mod tests {
     #[test]
     fn round_trip_complex_guides() {
         let mut project = make_empty_project();
-        project.regions = vec![make_test_region(0, "detailed", 10)];
+        project.layers = vec![make_test_layer("detailed", 0, 10)];
 
         let path = temp_pap_path("complex_guides.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
-        assert_eq!(loaded.regions[0].guides.len(), 10);
-        for (a, b) in project.regions[0]
+        assert_eq!(loaded.layers[0].guides.len(), 10);
+        for (a, b) in project.layers[0]
             .guides
             .iter()
-            .zip(loaded.regions[0].guides.iter())
+            .zip(loaded.layers[0].guides.iter())
         {
             assert_eq!(a.position, b.position);
             assert_eq!(a.direction, b.direction);
@@ -504,7 +496,7 @@ mod tests {
 
     #[test]
     fn valid_zip_structure() {
-        let project = make_project_with_regions();
+        let project = make_project_with_layers();
         let path = temp_pap_path("zip_structure.pap");
         save_project(&project, &path).unwrap();
 
@@ -515,20 +507,19 @@ mod tests {
         assert!(names.contains(&"manifest.json"), "missing manifest.json");
         assert!(names.contains(&"mesh_ref.json"), "missing mesh_ref.json");
         assert!(names.contains(&"color_ref.json"), "missing color_ref.json");
-        assert!(names.contains(&"regions.json"), "missing regions.json");
+        assert!(names.contains(&"layers.json"), "missing layers.json");
         assert!(names.contains(&"settings.json"), "missing settings.json");
     }
 
     #[test]
     fn json_readable() {
-        let project = make_project_with_regions();
+        let project = make_project_with_layers();
         let path = temp_pap_path("json_readable.pap");
         save_project(&project, &path).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
         let mut archive = ZipArchive::new(file).unwrap();
 
-        // Verify manifest.json is valid, pretty-printed JSON
         let mut entry = archive.by_name("manifest.json").unwrap();
         let mut buf = String::new();
         entry.read_to_string(&mut buf).unwrap();
@@ -602,7 +593,6 @@ mod tests {
         let path = temp_pap_path("with_thumbnail.pap");
         save_project(&project, &path).unwrap();
 
-        // Verify thumbnail exists in the zip
         let file = std::fs::File::open(&path).unwrap();
         let archive = ZipArchive::new(file).unwrap();
         let names: Vec<&str> = archive.file_names().collect();
@@ -634,7 +624,7 @@ mod tests {
         let result = load_project(Path::new("/tmp/definitely_missing_file.pap"));
         assert!(result.is_err());
         match result.unwrap_err() {
-            ProjectError::Io(_) => {} // expected
+            ProjectError::Io(_) => {}
             e => panic!("expected Io error, got: {e:?}"),
         }
     }
@@ -647,14 +637,13 @@ mod tests {
         let result = load_project(&path);
         assert!(result.is_err());
         match result.unwrap_err() {
-            ProjectError::Zip(_) => {} // expected
+            ProjectError::Zip(_) => {}
             e => panic!("expected Zip error, got: {e:?}"),
         }
     }
 
     #[test]
     fn load_missing_manifest() {
-        // Create a valid zip without manifest.json
         let path = temp_pap_path("no_manifest.pap");
         {
             let file = std::fs::File::create(&path).unwrap();
@@ -677,33 +666,28 @@ mod tests {
 
     #[test]
     fn load_corrupt_json() {
-        // Create a zip with invalid JSON in regions.json
         let path = temp_pap_path("corrupt_json.pap");
         {
             let file = std::fs::File::create(&path).unwrap();
             let mut zip = ZipWriter::new(file);
             let options = SimpleFileOptions::default();
 
-            // Valid manifest
             let manifest = serde_json::to_string_pretty(&make_manifest()).unwrap();
             zip.start_file("manifest.json", options).unwrap();
             zip.write_all(manifest.as_bytes()).unwrap();
 
-            // Valid mesh_ref
             let mesh = serde_json::to_string_pretty(&make_mesh_ref()).unwrap();
             zip.start_file("mesh_ref.json", options).unwrap();
             zip.write_all(mesh.as_bytes()).unwrap();
 
-            // Valid color_ref
             let color = serde_json::to_string_pretty(&make_color_ref()).unwrap();
             zip.start_file("color_ref.json", options).unwrap();
             zip.write_all(color.as_bytes()).unwrap();
 
-            // Invalid JSON in regions.json
-            zip.start_file("regions.json", options).unwrap();
+            // Invalid JSON in layers.json
+            zip.start_file("layers.json", options).unwrap();
             zip.write_all(b"{ this is not valid json !!!").unwrap();
 
-            // Valid settings
             let settings = serde_json::to_string_pretty(&OutputSettings::default()).unwrap();
             zip.start_file("settings.json", options).unwrap();
             zip.write_all(settings.as_bytes()).unwrap();
@@ -714,7 +698,7 @@ mod tests {
         let result = load_project(&path);
         assert!(result.is_err());
         match result.unwrap_err() {
-            ProjectError::Json(_) => {} // expected
+            ProjectError::Json(_) => {}
             e => panic!("expected Json error, got: {e:?}"),
         }
     }
@@ -723,7 +707,7 @@ mod tests {
 
     #[test]
     fn round_trip_integrity() {
-        let project = make_project_with_regions();
+        let project = make_project_with_layers();
         let path = temp_pap_path("integrity.pap");
 
         save_project(&project, &path).unwrap();
@@ -740,9 +724,8 @@ mod tests {
         assert_eq!(project.color_ref.path, loaded.color_ref.path);
         assert_eq!(project.color_ref.solid_color, loaded.color_ref.solid_color);
 
-        assert_eq!(project.regions.len(), loaded.regions.len());
-        for (a, b) in project.regions.iter().zip(loaded.regions.iter()) {
-            assert_eq!(a.id, b.id);
+        assert_eq!(project.layers.len(), loaded.layers.len());
+        for (a, b) in project.layers.iter().zip(loaded.layers.iter()) {
             assert_eq!(a.name, b.name);
             assert_eq!(a.order, b.order);
             assert_eq!(a.params.brush_width, b.params.brush_width);
@@ -771,7 +754,6 @@ mod tests {
 
     #[test]
     fn missing_cache_in_saved_zip_loads_as_none() {
-        // Save a project WITH cache, then manually remove cache entries
         let res = 4u32;
         let mut project = make_empty_project();
         project.cached_height = Some(vec![0.5; (res * res) as usize]);
@@ -780,7 +762,6 @@ mod tests {
         let path_with_cache = temp_pap_path("has_cache.pap");
         save_project(&project, &path_with_cache).unwrap();
 
-        // Create a new zip without cache entries (copy only metadata)
         let path_no_cache = temp_pap_path("stripped_cache.pap");
         {
             let src_file = std::fs::File::open(&path_with_cache).unwrap();
@@ -794,7 +775,7 @@ mod tests {
                 "manifest.json",
                 "mesh_ref.json",
                 "color_ref.json",
-                "regions.json",
+                "layers.json",
                 "settings.json",
             ] {
                 let mut entry = src_archive.by_name(name).unwrap();
@@ -809,5 +790,64 @@ mod tests {
         let loaded = load_project(&path_no_cache).unwrap();
         assert!(loaded.cached_height.is_none());
         assert!(loaded.cached_color.is_none());
+    }
+
+    // ── v1 Compatibility Test ──
+
+    #[test]
+    fn load_v1_regions_json() {
+        // Create a .pap with regions.json (v1 format) instead of layers.json
+        let path = temp_pap_path("v1_compat.pap");
+        {
+            let file = std::fs::File::create(&path).unwrap();
+            let mut zip = ZipWriter::new(file);
+            let options = SimpleFileOptions::default();
+
+            let manifest = serde_json::to_string_pretty(&make_manifest()).unwrap();
+            zip.start_file("manifest.json", options).unwrap();
+            zip.write_all(manifest.as_bytes()).unwrap();
+
+            let mesh = serde_json::to_string_pretty(&make_mesh_ref()).unwrap();
+            zip.start_file("mesh_ref.json", options).unwrap();
+            zip.write_all(mesh.as_bytes()).unwrap();
+
+            let color = serde_json::to_string_pretty(&make_color_ref()).unwrap();
+            zip.start_file("color_ref.json", options).unwrap();
+            zip.write_all(color.as_bytes()).unwrap();
+
+            // v1 format: regions.json with id and mask fields
+            let regions_json = r#"[
+                {
+                    "id": 0,
+                    "name": "skin",
+                    "mask": [{"vertices": [[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]]}],
+                    "order": 0,
+                    "params": {
+                        "brush_width": 30.0, "load": 0.8, "base_height": 0.5,
+                        "ridge_height": 0.3, "ridge_width": 5.0, "ridge_variation": 0.1,
+                        "body_wiggle": 0.15, "stroke_spacing": 1.0,
+                        "pressure_preset": "FadeOut", "color_variation": 0.1,
+                        "max_stroke_length": 240.0, "angle_variation": 5.0,
+                        "max_turn_angle": 15.0, "seed": 42
+                    },
+                    "guides": [{"position": [0.5, 0.5], "direction": [1.0, 0.0], "influence": 1.5}]
+                }
+            ]"#;
+            zip.start_file("regions.json", options).unwrap();
+            zip.write_all(regions_json.as_bytes()).unwrap();
+
+            let settings = serde_json::to_string_pretty(&OutputSettings::default()).unwrap();
+            zip.start_file("settings.json", options).unwrap();
+            zip.write_all(settings.as_bytes()).unwrap();
+
+            zip.finish().unwrap();
+        }
+
+        let loaded = load_project(&path).unwrap();
+        assert_eq!(loaded.layers.len(), 1);
+        assert_eq!(loaded.layers[0].name, "skin");
+        assert_eq!(loaded.layers[0].order, 0);
+        assert_eq!(loaded.layers[0].params.brush_width, 30.0);
+        assert_eq!(loaded.layers[0].guides.len(), 1);
     }
 }

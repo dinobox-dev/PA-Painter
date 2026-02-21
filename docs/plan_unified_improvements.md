@@ -59,6 +59,14 @@
 
 R과 무관한 소규모 개선. 이후 작업의 기반이 된다.
 
+> **Progress**
+> - [x] 0-1. smoothstep 인자 순서 GLSL 관례 준수 — `dce600b`
+> - [x] 0-2. 공용 함수 분리 — `ec3837d`
+> - [x] 0-3. Direction Field IDW → smoothstep 가중치 — `411b59d`
+> - [x] 0-4. Direction Field 해상도 캡 완화 — `28a0add`
+> - [x] `cargo test` 전체 통과
+> - [ ] `cargo clippy` 경고 없음
+
 #### 0-1. smoothstep 인자 순서 GLSL 관례 준수 (CR#4)
 
 - `smoothstep(x, edge0, edge1)` → `smoothstep(edge0, edge1, x)`
@@ -95,6 +103,17 @@ R과 무관한 소규모 개선. 이후 작업의 기반이 된다.
 ### Phase 1: Region 제거 및 PaintLayer 전환 (R + S 흡수)
 
 구조적 대전환. S의 stroke_id 개선을 포함.
+
+> **Progress**
+> - [x] 1-1. 데이터 모델 전환 (Region → PaintLayer)
+> - [x] 1-2. Region 관련 코드 제거
+> - [x] 1-3. trace_streamline 단순화
+> - [x] 1-4. Stroke ID 단순화 (S 흡수)
+> - [x] 1-5. 합성 파이프라인 전환
+> - [x] 1-6. 직렬화 마이그레이션
+> - [x] `cargo test` 전체 통과 (221 passed)
+> - [x] `region.rs` 삭제 확인
+> - [x] 비주얼 출력 정상 확인 — `visual_highres_cpu` 1024/2048px 정상
 
 #### 1-1. 데이터 모델 전환
 
@@ -179,6 +198,14 @@ pub fn trace_streamline(
 
 R 완료 후의 코드 상태를 기반으로 C를 적용.
 
+> **Progress**
+> - [ ] 2-1. StrokeParams 확장 (`color_break_threshold`)
+> - [ ] 2-2. trace_streamline에 color boundary 조건 추가
+> - [ ] 2-3. channel_max_diff 유틸 구현
+> - [ ] 2-4. generate_paths 호출 체인 수정
+> - [ ] threshold=None 시 기존 동작 보존 확인
+> - [ ] 경계 테스트 통과
+
 #### 2-1. StrokeParams 확장
 
 ```rust
@@ -227,6 +254,14 @@ fn channel_max_diff(a: Color, b: Color) -> f32 {
 
 독립적인 성능 개선들. 순서대로 적용.
 
+> **Progress**
+> - [ ] 3-1. local_frame UV 버퍼 재사용
+> - [ ] 3-2. 경로 캐시 도입
+> - [ ] 3-3. 레이어 병렬 합성 (rayon)
+> - [ ] 기존 테스트 통과
+> - [ ] 비주얼 결과 동일 확인
+> - [ ] 프로파일링으로 개선 확인
+
 #### 3-1. local_frame UV 버퍼 재사용 (CR#6)
 
 - `composite_layer()` 레벨에서 1회 할당 후 스트로크 간 재사용
@@ -274,6 +309,15 @@ for layer_map in &layer_maps {
 ### Phase 4: Object-Oriented Normal (N)
 
 다른 모든 변경과 독립. Phase 1 이후라면 Region 대신 PaintLayer 기준.
+
+> **Progress**
+> - [ ] 4-1. Object Normal Map 생성
+> - [ ] 4-2. Per-Stroke Normal 샘플링
+> - [ ] 4-3. Compositing 확장 (GlobalMaps에 object_normal 추가)
+> - [ ] 4-4. Tangent-Space 변환 및 출력
+> - [ ] 4-5. 모드 선택 (NormalMode enum)
+> - [ ] SurfacePaint 모드 기존 결과 동일 확인
+> - [ ] DepictedForm 모드 비주얼 검증
 
 #### 4-1. Object Normal Map 생성
 

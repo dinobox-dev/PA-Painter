@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::asset_io::linear_to_srgb;
 use crate::compositing::GlobalMaps;
-use crate::types::{Color, OutputSettings, Region};
+use crate::types::{Color, OutputSettings, PaintLayer};
 
 // ── Error Type ──
 
@@ -51,15 +51,15 @@ pub enum ExportFormat {
 
 /// Normalize a height map for export.
 ///
-/// Uses the maximum possible height (base_height + ridge_height across all regions)
+/// Uses the maximum possible height (base_height + ridge_height across all layers)
 /// as a reference, with display_cap = 2x that value.
 ///
 /// Returns a new Vec<f32> with values in [0, 1].
-pub fn normalize_height_map(height: &[f32], regions: &[Region]) -> Vec<f32> {
+pub fn normalize_height_map(height: &[f32], layers: &[PaintLayer]) -> Vec<f32> {
     let mut max_possible: f32 = 0.0;
-    for region in regions {
-        let regional_max = region.params.base_height + region.params.ridge_height;
-        max_possible = max_possible.max(regional_max);
+    for layer in layers {
+        let layer_max = layer.params.base_height + layer.params.ridge_height;
+        max_possible = max_possible.max(layer_max);
     }
 
     let mut display_cap = 2.0 * max_possible;
@@ -320,14 +320,14 @@ pub fn export_color_exr(
 /// Export all textures at once.
 pub fn export_all(
     global: &GlobalMaps,
-    regions: &[Region],
+    layers: &[PaintLayer],
     settings: &OutputSettings,
     output_dir: &Path,
     format: ExportFormat,
 ) -> Result<(), OutputError> {
     std::fs::create_dir_all(output_dir)?;
 
-    let normalized_height = normalize_height_map(&global.height, regions);
+    let normalized_height = normalize_height_map(&global.height, layers);
     let normals = generate_normal_map(&normalized_height, global.resolution, settings.normal_strength);
 
     match format {
@@ -380,26 +380,15 @@ mod tests {
     use crate::asset_io::{linear_to_srgb, load_texture};
     use crate::compositing::composite_all;
     use crate::types::{
-        Color, GuideVertex, OutputSettings, Polygon, Region, StrokeParams,
+        Color, GuideVertex, OutputSettings, PaintLayer, StrokeParams,
     };
     use glam::Vec2;
 
     const EPS: f32 = 1e-4;
 
-    fn make_polygon(verts: Vec<Vec2>) -> Polygon {
-        Polygon { vertices: verts }
-    }
-
-    fn make_square_region(min: f32, max: f32, order: i32, id: u32) -> Region {
-        Region {
-            id,
-            name: format!("region_{}", id),
-            mask: vec![make_polygon(vec![
-                Vec2::new(min, min),
-                Vec2::new(max, min),
-                Vec2::new(max, max),
-                Vec2::new(min, max),
-            ])],
+    fn make_layer_with_order(order: i32) -> PaintLayer {
+        PaintLayer {
+            name: format!("layer_{}", order),
             order,
             params: StrokeParams::default(),
             guides: vec![GuideVertex {
@@ -415,20 +404,20 @@ mod tests {
     #[test]
     fn normalize_all_zeros() {
         let height = vec![0.0f32; 64];
-        let region = make_square_region(0.1, 0.9, 0, 0);
-        let normalized = normalize_height_map(&height, &[region]);
+        let layer = make_layer_with_order(0);
+        let normalized = normalize_height_map(&height, &[layer]);
         assert!(normalized.iter().all(|&v| v == 0.0));
     }
 
     #[test]
     fn normalize_at_display_cap() {
         // max_possible = 0.5 + 0.3 = 0.8, display_cap = 1.6
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.base_height = 0.5;
-        region.params.ridge_height = 0.3;
+        let mut layer = make_layer_with_order(0);
+        layer.params.base_height = 0.5;
+        layer.params.ridge_height = 0.3;
 
         let height = vec![1.6f32; 1]; // exactly at display_cap
-        let normalized = normalize_height_map(&height, &[region]);
+        let normalized = normalize_height_map(&height, &[layer]);
         assert!(
             (normalized[0] - 1.0).abs() < EPS,
             "at display_cap: expected 1.0, got {}",
@@ -438,13 +427,13 @@ mod tests {
 
     #[test]
     fn normalize_half_of_cap() {
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.base_height = 0.5;
-        region.params.ridge_height = 0.3;
+        let mut layer = make_layer_with_order(0);
+        layer.params.base_height = 0.5;
+        layer.params.ridge_height = 0.3;
         // display_cap = 1.6
 
         let height = vec![0.8f32; 1]; // half of 1.6
-        let normalized = normalize_height_map(&height, &[region]);
+        let normalized = normalize_height_map(&height, &[layer]);
         assert!(
             (normalized[0] - 0.5).abs() < EPS,
             "half of cap: expected 0.5, got {}",
@@ -453,26 +442,26 @@ mod tests {
     }
 
     #[test]
-    fn normalize_no_regions() {
+    fn normalize_no_layers() {
         let height = vec![0.5f32; 4];
         let normalized = normalize_height_map(&height, &[]);
         // display_cap = 1.0 (fallback)
         assert!(
             (normalized[0] - 0.5).abs() < EPS,
-            "no regions: expected 0.5, got {}",
+            "no layers: expected 0.5, got {}",
             normalized[0]
         );
     }
 
     #[test]
     fn normalize_clamps_above_cap() {
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.base_height = 0.5;
-        region.params.ridge_height = 0.3;
+        let mut layer = make_layer_with_order(0);
+        layer.params.base_height = 0.5;
+        layer.params.ridge_height = 0.3;
         // display_cap = 1.6
 
         let height = vec![3.0f32; 1]; // above display_cap
-        let normalized = normalize_height_map(&height, &[region]);
+        let normalized = normalize_height_map(&height, &[layer]);
         assert!(
             (normalized[0] - 1.0).abs() < EPS,
             "above cap: expected 1.0, got {}",
@@ -843,13 +832,13 @@ mod tests {
     #[test]
     fn export_all_png() {
         let res = 32u32;
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.brush_width = 10.0;
+        let mut layer = make_layer_with_order(0);
+        layer.params.brush_width = 10.0;
 
         let settings = OutputSettings::default();
 
         let maps = composite_all(
-            &[region.clone()],
+            &[layer.clone()],
             res,
             None,
             0,
@@ -859,7 +848,7 @@ mod tests {
         );
 
         let dir = std::env::temp_dir().join("pap_test_output").join("export_all_png");
-        export_all(&maps, &[region], &settings, &dir, ExportFormat::Png).unwrap();
+        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Png).unwrap();
 
         // Verify files exist
         assert!(dir.join("color_map.png").exists(), "color_map.png should exist");
@@ -871,13 +860,13 @@ mod tests {
     #[test]
     fn export_all_exr() {
         let res = 32u32;
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.brush_width = 10.0;
+        let mut layer = make_layer_with_order(0);
+        layer.params.brush_width = 10.0;
 
         let settings = OutputSettings::default();
 
         let maps = composite_all(
-            &[region.clone()],
+            &[layer.clone()],
             res,
             None,
             0,
@@ -887,7 +876,7 @@ mod tests {
         );
 
         let dir = std::env::temp_dir().join("pap_test_output").join("export_all_exr");
-        export_all(&maps, &[region], &settings, &dir, ExportFormat::Exr).unwrap();
+        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Exr).unwrap();
 
         assert!(dir.join("color_map.exr").exists(), "color_map.exr should exist");
         assert!(dir.join("height_map.exr").exists(), "height_map.exr should exist");
@@ -899,20 +888,20 @@ mod tests {
 
     #[test]
     fn visual_full_output() {
-        let mut region = make_square_region(0.1, 0.9, 0, 0);
-        region.params.brush_width = 25.0;
-        region.params.ridge_height = 0.3;
-        region.params.color_variation = 0.1;
+        let mut layer = make_layer_with_order(0);
+        layer.params.brush_width = 25.0;
+        layer.params.ridge_height = 0.3;
+        layer.params.color_variation = 0.1;
 
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.6, 0.4, 0.3);
-        let maps = composite_all(&[region.clone()], 256, None, 0, 0, solid, &settings);
+        let maps = composite_all(&[layer.clone()], 256, None, 0, 0, solid, &settings);
 
         let dir = crate::test_module_output_dir("export");
         let _ = std::fs::create_dir_all(&dir);
 
-        export_all(&maps, &[region], &settings, &dir, ExportFormat::Png).unwrap();
+        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Png).unwrap();
 
         eprintln!("Wrote: {}/color_map.png", dir.display());
         eprintln!("Wrote: {}/height_map.png", dir.display());
