@@ -11,6 +11,7 @@ use std::path::Path;
 use glam::{Vec2, Vec3};
 
 use crate::asset_io::{linear_to_srgb, LoadedMesh};
+use crate::object_normal::compute_vertex_normals;
 use crate::types::Color;
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -184,23 +185,6 @@ fn subdivide_and_displace(
         texcoords,
         indices,
     }
-}
-
-fn compute_vertex_normals(mesh: &LoadedMesh) -> Vec<Vec3> {
-    let mut normals = vec![Vec3::ZERO; mesh.positions.len()];
-    for tri in mesh.indices.chunks_exact(3) {
-        let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
-        let e1 = mesh.positions[i1] - mesh.positions[i0];
-        let e2 = mesh.positions[i2] - mesh.positions[i0];
-        let face_normal = e1.cross(e2); // area-weighted (not normalized)
-        normals[i0] += face_normal;
-        normals[i1] += face_normal;
-        normals[i2] += face_normal;
-    }
-    for n in &mut normals {
-        *n = n.normalize_or_zero();
-    }
-    normals
 }
 
 fn sample_map_bilinear(map: &[f32], resolution: u32, uv: Vec2) -> f32 {

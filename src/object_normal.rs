@@ -154,7 +154,7 @@ fn compute_vertex_tangents(mesh: &LoadedMesh) -> (Vec<Vec3>, Vec<Vec3>) {
 }
 
 /// Compute area-weighted vertex normals from face normals.
-fn compute_vertex_normals(mesh: &LoadedMesh) -> Vec<Vec3> {
+pub fn compute_vertex_normals(mesh: &LoadedMesh) -> Vec<Vec3> {
     let mut normals = vec![Vec3::ZERO; mesh.positions.len()];
 
     for tri in mesh.indices.chunks_exact(3) {
