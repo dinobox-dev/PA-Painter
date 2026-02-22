@@ -331,11 +331,7 @@ pub fn generate_paths(
 
     // Sort paths by seed point y-coordinate (top-to-bottom row order).
     // Critical for correct wet-on-wet compositing order in Phase 08.
-    raw_paths.sort_by(|a, b| {
-        let ya = a[0].y;
-        let yb = b[0].y;
-        ya.partial_cmp(&yb).unwrap()
-    });
+    raw_paths.sort_by(|a, b| a[0].y.total_cmp(&b[0].y));
 
     // Convert to StrokePath with globally unique IDs
     raw_paths
@@ -381,11 +377,7 @@ pub fn generate_paths_poisson(
     let overlap_dist_factor = layer.params.overlap_dist_factor.unwrap_or(0.3);
     filter_overlapping_paths(&mut raw_paths, brush_width_uv, overlap_ratio, overlap_dist_factor);
 
-    raw_paths.sort_by(|a, b| {
-        let ya = a[0].y;
-        let yb = b[0].y;
-        ya.partial_cmp(&yb).unwrap()
-    });
+    raw_paths.sort_by(|a, b| a[0].y.total_cmp(&b[0].y));
 
     raw_paths
         .into_iter()
@@ -461,11 +453,7 @@ pub fn generate_paths_overscan(
 
     filter_overlapping_paths(&mut raw_paths, brush_width_uv, overlap_ratio, overlap_dist_factor);
 
-    raw_paths.sort_by(|a, b| {
-        let ya = a[0].y;
-        let yb = b[0].y;
-        ya.partial_cmp(&yb).unwrap()
-    });
+    raw_paths.sort_by(|a, b| a[0].y.total_cmp(&b[0].y));
 
     raw_paths
         .into_iter()
