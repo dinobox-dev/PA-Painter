@@ -422,7 +422,6 @@ mod tests {
             ],
             settings: OutputSettings {
                 resolution_preset: ResolutionPreset::High,
-                output_resolution: 2048,
                 normal_strength: 1.5,
                 ..OutputSettings::default()
             },
@@ -609,7 +608,6 @@ mod tests {
         let mut project = make_empty_project();
         project.settings = OutputSettings {
             resolution_preset: ResolutionPreset::Ultra,
-            output_resolution: 4096,
             normal_strength: 3.0,
             ..OutputSettings::default()
         };
@@ -622,7 +620,7 @@ mod tests {
             loaded.settings.resolution_preset,
             ResolutionPreset::Ultra
         );
-        assert_eq!(loaded.settings.output_resolution, 4096);
+        assert_eq!(loaded.settings.resolution_preset.resolution(), 4096);
         assert_eq!(loaded.settings.normal_strength, 3.0);
     }
 
@@ -806,8 +804,8 @@ mod tests {
             loaded.settings.resolution_preset
         );
         assert_eq!(
-            project.settings.output_resolution,
-            loaded.settings.output_resolution
+            project.settings.resolution_preset,
+            loaded.settings.resolution_preset
         );
         assert_eq!(
             project.settings.normal_strength,

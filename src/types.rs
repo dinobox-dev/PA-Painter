@@ -336,7 +336,6 @@ impl ResolutionPreset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputSettings {
     pub resolution_preset: ResolutionPreset,
-    pub output_resolution: u32,
     pub normal_strength: f32,
     #[serde(default)]
     pub normal_mode: NormalMode,
@@ -348,7 +347,6 @@ impl Default for OutputSettings {
     fn default() -> Self {
         Self {
             resolution_preset: ResolutionPreset::Standard,
-            output_resolution: 1024,
             normal_strength: 1.0,
             normal_mode: NormalMode::default(),
             background_mode: BackgroundMode::default(),

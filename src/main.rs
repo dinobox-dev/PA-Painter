@@ -86,7 +86,7 @@ fn main() {
         process::exit(1);
     });
 
-    let resolution = resolution_override.unwrap_or(project.settings.output_resolution);
+    let resolution = resolution_override.unwrap_or(project.settings.resolution_preset.resolution());
     eprintln!("Resolution: {resolution}px");
     eprintln!("Layers: {}", project.layers.len());
 
