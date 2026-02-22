@@ -509,25 +509,12 @@ mod tests {
     use super::*;
     use crate::asset_io::{linear_to_srgb, load_texture};
     use crate::compositing::composite_all;
+    use crate::test_util::make_layer_with_order;
     use crate::types::{
-        Color, GuideVertex, OutputSettings, PaintLayer, StrokeParams,
+        Color, OutputSettings, PaintLayer,
     };
-    use glam::Vec2;
 
     const EPS: f32 = 1e-4;
-
-    fn make_layer_with_order(order: i32) -> PaintLayer {
-        PaintLayer {
-            name: format!("layer_{}", order),
-            order,
-            params: StrokeParams::default(),
-            guides: vec![GuideVertex {
-                position: Vec2::new(0.5, 0.5),
-                direction: Vec2::X,
-                influence: 1.5,
-            }],
-        }
-    }
 
     // ── Height Normalization Tests ──
 
