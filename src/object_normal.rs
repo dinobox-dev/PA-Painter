@@ -30,35 +30,24 @@ pub fn compute_mesh_normal_data(mesh: &LoadedMesh, resolution: u32) -> MeshNorma
     // Step 1: Compute area-weighted vertex normals
     let vertex_normals = compute_vertex_normals(mesh);
 
-    // Step 2+3: Rasterize each triangle in UV space
+    // Step 2: Compute area-weighted vertex tangents/bitangents
+    let (vertex_tangents, vertex_bitangents) = compute_vertex_tangents(mesh);
+
+    // Step 3: Rasterize each triangle in UV space with per-vertex interpolation
     for tri in mesh.indices.chunks_exact(3) {
         let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
-
-        let p0 = mesh.positions[i0];
-        let p1 = mesh.positions[i1];
-        let p2 = mesh.positions[i2];
 
         let uv0 = mesh.uvs[i0];
         let uv1 = mesh.uvs[i1];
         let uv2 = mesh.uvs[i2];
 
-        let n0 = vertex_normals[i0];
-        let n1 = vertex_normals[i1];
-        let n2 = vertex_normals[i2];
-
-        // Per-triangle TBN from UV gradients
-        let (tri_t, tri_b) = compute_triangle_tbn(p0, p1, p2, uv0, uv1, uv2);
-
-        // Rasterize triangle in UV space
         rasterize_triangle_uv(
             uv0,
             uv1,
             uv2,
-            n0,
-            n1,
-            n2,
-            tri_t,
-            tri_b,
+            [vertex_normals[i0], vertex_normals[i1], vertex_normals[i2]],
+            [vertex_tangents[i0], vertex_tangents[i1], vertex_tangents[i2]],
+            [vertex_bitangents[i0], vertex_bitangents[i1], vertex_bitangents[i2]],
             resolution,
             &mut object_normals,
             &mut tangents,
@@ -127,6 +116,43 @@ pub fn sample_tbn(data: &MeshNormalData, uv: Vec2) -> (Vec3, Vec3, Vec3) {
 
 // ── Internal helpers ──
 
+/// Compute area-weighted vertex tangents and bitangents from UV gradients.
+///
+/// Each triangle contributes its (un-normalized) T/B to its three vertices.
+/// Edge magnitudes provide implicit area weighting, analogous to `compute_vertex_normals`.
+fn compute_vertex_tangents(mesh: &LoadedMesh) -> (Vec<Vec3>, Vec<Vec3>) {
+    let n = mesh.positions.len();
+    let mut tangents = vec![Vec3::ZERO; n];
+    let mut bitangents = vec![Vec3::ZERO; n];
+
+    for tri in mesh.indices.chunks_exact(3) {
+        let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
+
+        let e1 = mesh.positions[i1] - mesh.positions[i0];
+        let e2 = mesh.positions[i2] - mesh.positions[i0];
+        let duv1 = mesh.uvs[i1] - mesh.uvs[i0];
+        let duv2 = mesh.uvs[i2] - mesh.uvs[i0];
+
+        let det = duv1.x * duv2.y - duv1.y * duv2.x;
+        if det.abs() < 1e-10 {
+            continue; // degenerate UV — no contribution
+        }
+
+        let inv_det = 1.0 / det;
+        let t = (e1 * duv2.y - e2 * duv1.y) * inv_det;
+        let b = (e2 * duv1.x - e1 * duv2.x) * inv_det;
+
+        tangents[i0] += t;
+        tangents[i1] += t;
+        tangents[i2] += t;
+        bitangents[i0] += b;
+        bitangents[i1] += b;
+        bitangents[i2] += b;
+    }
+
+    (tangents, bitangents)
+}
+
 /// Compute area-weighted vertex normals from face normals.
 fn compute_vertex_normals(mesh: &LoadedMesh) -> Vec<Vec3> {
     let mut normals = vec![Vec3::ZERO; mesh.positions.len()];
@@ -156,6 +182,7 @@ fn compute_vertex_normals(mesh: &LoadedMesh) -> Vec<Vec3> {
 /// Compute tangent and bitangent for a triangle from UV gradients.
 ///
 /// Standard formula: T = (E1*dV2 - E2*dV1) / det, B = (E2*dU1 - E1*dU2) / det
+#[cfg(test)]
 fn compute_triangle_tbn(
     p0: Vec3,
     p1: Vec3,
@@ -213,16 +240,17 @@ fn barycentric(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> (f32, f32, f32) {
 }
 
 /// Rasterize a single UV-space triangle, writing interpolated normals/tangents/bitangents.
+///
+/// All three attributes (N, T, B) are interpolated per-vertex using barycentric
+/// coordinates, ensuring smooth transitions across triangle boundaries.
 #[allow(clippy::too_many_arguments)]
 fn rasterize_triangle_uv(
     uv0: Vec2,
     uv1: Vec2,
     uv2: Vec2,
-    n0: Vec3,
-    n1: Vec3,
-    n2: Vec3,
-    tri_t: Vec3,
-    tri_b: Vec3,
+    normals_vtx: [Vec3; 3],
+    tangents_vtx: [Vec3; 3],
+    bitangents_vtx: [Vec3; 3],
     resolution: u32,
     object_normals: &mut [Vec3],
     tangents: &mut [Vec3],
@@ -258,11 +286,10 @@ fn rasterize_triangle_uv(
 
             let idx = (py * resolution + px) as usize;
 
-            // Interpolate vertex normal using barycentric coords
-            let interp_normal = n0 * u + n1 * v + n2 * w;
-            object_normals[idx] = interp_normal; // last-writer-wins for overlapping triangles
-            tangents[idx] = tri_t;
-            bitangents[idx] = tri_b;
+            // Interpolate all attributes using barycentric coords
+            object_normals[idx] = normals_vtx[0] * u + normals_vtx[1] * v + normals_vtx[2] * w;
+            tangents[idx] = tangents_vtx[0] * u + tangents_vtx[1] * v + tangents_vtx[2] * w;
+            bitangents[idx] = bitangents_vtx[0] * u + bitangents_vtx[1] * v + bitangents_vtx[2] * w;
         }
     }
 }

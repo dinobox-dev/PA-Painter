@@ -2,8 +2,9 @@ use glam::Vec2;
 use rayon::prelude::*;
 
 use crate::brush_profile::generate_brush_profile;
-use crate::local_frame::{build_local_frame, LocalFrameTransform};
-use crate::math::{lerp_color, smoothstep};
+#[cfg(test)]
+use crate::local_frame::LocalFrameTransform;
+use crate::math::{lerp_color, perpendicular, smoothstep};
 use crate::object_normal::{sample_object_normal, MeshNormalData};
 use crate::path_placement::generate_paths;
 use crate::stroke_color::ColorTextureRef;
@@ -74,59 +75,162 @@ impl GlobalMaps {
     }
 }
 
-/// Composite a single stroke into the global maps.
+/// Bilinear sample from a row-major 2D float array.
+fn bilinear_sample(data: &[f32], width: usize, height: usize, x: f32, y: f32) -> f32 {
+    let x0 = (x.floor() as usize).min(width - 1);
+    let y0 = (y.floor() as usize).min(height - 1);
+    let x1 = (x0 + 1).min(width - 1);
+    let y1 = (y0 + 1).min(height - 1);
+    let sx = x - x0 as f32;
+    let sy = y - y0 as f32;
+
+    let h00 = data[y0 * width + x0];
+    let h10 = data[y0 * width + x1];
+    let h01 = data[y1 * width + x0];
+    let h11 = data[y1 * width + x1];
+
+    h00 * (1.0 - sx) * (1.0 - sy)
+        + h10 * sx * (1.0 - sy)
+        + h01 * (1.0 - sx) * sy
+        + h11 * sx * sy
+}
+
+/// Composite a single stroke into the global maps using **per-segment gather**.
 ///
-/// - `local_height`: stroke height map from Phase 02
-/// - `transform`: local frame → UV transform from Phase 06
-/// - `stroke_color`: uniform color for this stroke
-/// - `stroke_id`: unique ID for this stroke
-/// - `base_height`: the layer's base_height param (used for opacity calc)
-/// - `stroke_normal`: optional object-space normal for this stroke (DepictedForm mode)
-/// - `global`: mutable reference to global maps
+/// For each path segment, compute a tight bounding box and evaluate every
+/// global pixel inside it. Each pixel is projected onto the segment in O(1)
+/// (dot products), converted to local-frame coordinates, and bilinearly
+/// sampled from the local height map. This guarantees every destination
+/// pixel is explicitly evaluated with no scatter-write gaps, while keeping
+/// the per-pixel cost constant (no full-path scan).
+#[allow(clippy::too_many_arguments)]
 pub fn composite_stroke(
     local_height: &StrokeHeightResult,
-    transform: &LocalFrameTransform,
+    path: &StrokePath,
+    brush_width_px: usize,
+    resolution: u32,
     stroke_color: Color,
     stroke_id: u32,
     base_height: f32,
     stroke_normal: Option<[f32; 3]>,
     global: &mut GlobalMaps,
 ) {
-    let res = global.resolution;
+    let res = resolution;
+    let margin = local_height.margin;
+    let local_w = local_height.width;
+    let local_h = local_height.height;
+    let res_f = res as f32;
+    let _ = brush_width_px;
 
-    for ly in 0..local_height.height {
-        for lx in 0..local_height.width {
-            let h = local_height.data[ly * local_height.width + lx];
-            if h <= 0.0 {
-                continue;
-            }
+    let points = &path.points;
+    if points.len() < 2 || local_w < 2 || local_h < 2 {
+        return;
+    }
 
-            let uv = match transform.local_to_uv(lx, ly) {
-                Some(uv) => uv,
-                None => continue,
-            };
+    // Precompute cumulative arc lengths
+    let mut accum_lens = Vec::with_capacity(points.len());
+    accum_lens.push(0.0f32);
+    for w in points.windows(2) {
+        accum_lens.push(accum_lens.last().unwrap() + (w[1] - w[0]).length());
+    }
+    let total_len = *accum_lens.last().unwrap();
+    if total_len < 1e-8 {
+        return;
+    }
 
-            let (px, py) = LocalFrameTransform::uv_to_pixel(uv, res);
-            if px < 0 || py < 0 || px >= res as i32 || py >= res as i32 {
-                continue;
-            }
+    let stroke_length_px = (total_len * res_f).ceil() as usize;
+    let margin_uv = margin as f32 / res_f;
+    let half_lateral_uv = local_h as f32 / 2.0 / res_f;
+    // Half-pixel overlap at segment junctions to avoid gaps
+    let junction_pad = 0.5 / res_f;
 
-            let idx = (py as u32 * res + px as u32) as usize;
+    for seg_idx in 0..points.len() - 1 {
+        let a = points[seg_idx];
+        let b = points[seg_idx + 1];
+        let seg = b - a;
+        let seg_len = seg.length();
+        if seg_len < 1e-8 {
+            continue;
+        }
+        let seg_dir = seg / seg_len;
+        let normal = perpendicular(seg_dir);
 
-            // Height: MAX (tallest paint wins, no accumulation)
-            global.height[idx] = h.max(global.height[idx]);
+        // Projection bounds along this segment
+        let proj_lo = if seg_idx == 0 { -margin_uv } else { -junction_pad };
+        let proj_hi = seg_len + junction_pad;
 
-            // Color: height-based blending
-            let opacity = smoothstep(0.0, base_height * 0.7, h);
-            global.color[idx] = lerp_color(global.color[idx], stroke_color, opacity);
+        // Tight bounding box for this segment
+        let ext = Vec2::splat(half_lateral_uv + 1.0 / res_f);
+        let mut seg_min = a.min(b) - ext;
+        let mut seg_max = a.max(b) + ext;
+        if seg_idx == 0 {
+            let front = a - seg_dir * margin_uv;
+            seg_min = seg_min.min(front - ext);
+            seg_max = seg_max.max(front + ext);
+        }
 
-            // Stroke ID: record last stroke
-            global.stroke_id[idx] = stroke_id;
+        let gx_min = ((seg_min.x * res_f).floor() as i32).max(0) as u32;
+        let gy_min = ((seg_min.y * res_f).floor() as i32).max(0) as u32;
+        let gx_max = ((seg_max.x * res_f).ceil() as i32).min(res as i32 - 1) as u32;
+        let gy_max = ((seg_max.y * res_f).ceil() as i32).min(res as i32 - 1) as u32;
 
-            // Object normal: record per-stroke normal (last-writer-wins)
-            if let Some(sn) = stroke_normal {
-                if !global.object_normal.is_empty() {
-                    global.object_normal[idx] = sn;
+        let accum = accum_lens[seg_idx];
+
+        for gy in gy_min..=gy_max {
+            for gx in gx_min..=gx_max {
+                let uv = Vec2::new(
+                    (gx as f32 + 0.5) / res_f,
+                    (gy as f32 + 0.5) / res_f,
+                );
+
+                let to_uv = uv - a;
+                let proj = to_uv.dot(seg_dir);
+                if proj < proj_lo || proj > proj_hi {
+                    continue;
+                }
+
+                let lateral = to_uv.dot(normal);
+                if lateral.abs() > half_lateral_uv {
+                    continue;
+                }
+
+                // Local frame coordinates
+                let t = (accum + proj) / total_len;
+                let lx_f = t * stroke_length_px as f32 + margin as f32;
+                let ly_f = lateral * res_f + local_h as f32 / 2.0;
+
+                if lx_f < 0.0
+                    || lx_f >= (local_w - 1) as f32
+                    || ly_f < 0.0
+                    || ly_f >= (local_h - 1) as f32
+                {
+                    continue;
+                }
+
+                let h = bilinear_sample(
+                    &local_height.data,
+                    local_w,
+                    local_h,
+                    lx_f,
+                    ly_f,
+                );
+                if h <= 0.0 {
+                    continue;
+                }
+
+                let idx = (gy * res + gx) as usize;
+
+                global.height[idx] = h.max(global.height[idx]);
+
+                let opacity = smoothstep(0.0, base_height * 0.7, h);
+                global.color[idx] = lerp_color(global.color[idx], stroke_color, opacity);
+
+                global.stroke_id[idx] = stroke_id;
+
+                if let Some(sn) = stroke_normal {
+                    if !global.object_normal.is_empty() {
+                        global.object_normal[idx] = sn;
+                    }
                 }
             }
         }
@@ -322,14 +426,13 @@ pub fn composite_layer(
         vec![None; paths.len()]
     };
 
-    // Step 2: Build local frames and height maps in parallel (CPU-heavy, no shared state)
-    let prepared: Vec<(LocalFrameTransform, StrokeHeightResult)> = paths
+    // Step 2: Build height maps in parallel (no local frame transform needed)
+    let heights: Vec<StrokeHeightResult> = paths
         .par_iter()
         .enumerate()
         .map(|(i, path)| {
-            let transform = build_local_frame(path, bw, rw, resolution);
             let stroke_length_px = (path.arc_length() * resolution as f32).ceil() as usize;
-            let local_height = generate_stroke_height(
+            generate_stroke_height(
                 &brush_profile,
                 bw,
                 stroke_length_px,
@@ -341,16 +444,17 @@ pub fn composite_layer(
                 layer.params.body_wiggle,
                 layer.params.pressure_preset,
                 layer.params.seed + i as u32,
-            );
-            (transform, local_height)
+            )
         })
         .collect();
 
-    // Step 3: Composite sequentially (preserves deterministic blending order)
-    for (i, (transform, local_height)) in prepared.iter().enumerate() {
+    // Step 3: Composite sequentially using gather (no scatter-write gaps)
+    for (i, local_height) in heights.iter().enumerate() {
         composite_stroke(
             local_height,
-            transform,
+            &paths[i],
+            bw,
+            resolution,
             stroke_colors[i],
             paths[i].stroke_id,
             layer.params.base_height,
@@ -368,6 +472,42 @@ mod tests {
     const EPS: f32 = 1e-4;
 
     // ── Helpers ──
+
+    /// Scatter-write composite for unit tests that test blending math.
+    /// Production code uses the gather-based `composite_stroke` above.
+    fn composite_stroke_scatter(
+        local_height: &StrokeHeightResult,
+        transform: &LocalFrameTransform,
+        stroke_color: Color,
+        stroke_id: u32,
+        base_height: f32,
+        stroke_normal: Option<[f32; 3]>,
+        global: &mut GlobalMaps,
+    ) {
+        let res = global.resolution;
+        for ly in 0..local_height.height {
+            for lx in 0..local_height.width {
+                let h = local_height.data[ly * local_height.width + lx];
+                if h <= 0.0 { continue; }
+                let uv = match transform.local_to_uv(lx, ly) {
+                    Some(uv) => uv,
+                    None => continue,
+                };
+                let (px, py) = LocalFrameTransform::uv_to_pixel(uv, res);
+                if px < 0 || py < 0 || px >= res as i32 || py >= res as i32 { continue; }
+                let idx = (py as u32 * res + px as u32) as usize;
+                global.height[idx] = h.max(global.height[idx]);
+                let opacity = smoothstep(0.0, base_height * 0.7, h);
+                global.color[idx] = lerp_color(global.color[idx], stroke_color, opacity);
+                global.stroke_id[idx] = stroke_id;
+                if let Some(sn) = stroke_normal {
+                    if !global.object_normal.is_empty() {
+                        global.object_normal[idx] = sn;
+                    }
+                }
+            }
+        }
+    }
 
     fn make_simple_height(width: usize, height: usize, value: f32) -> StrokeHeightResult {
         StrokeHeightResult {
@@ -450,7 +590,7 @@ mod tests {
         for (i, &h) in [0.7f32, 0.3, 0.5].iter().enumerate() {
             let height_map = make_simple_height(1, 1, h);
             let transform = make_simple_transform(1, 1, uv);
-            composite_stroke(
+            composite_stroke_scatter(
                 &height_map,
                 &transform,
                 Color::rgb(0.5, 0.5, 0.5),
@@ -480,7 +620,7 @@ mod tests {
 
         let height_map = make_simple_height(1, 1, base_height);
         let transform = make_simple_transform(1, 1, uv);
-        composite_stroke(
+        composite_stroke_scatter(
             &height_map,
             &transform,
             Color::rgb(0.0, 0.0, 1.0),
@@ -508,7 +648,7 @@ mod tests {
 
         let height_map = make_simple_height(1, 1, 0.001);
         let transform = make_simple_transform(1, 1, uv);
-        composite_stroke(
+        composite_stroke_scatter(
             &height_map,
             &transform,
             Color::rgb(0.0, 0.0, 1.0),
@@ -537,7 +677,7 @@ mod tests {
 
         let height_map = make_simple_height(1, 1, h);
         let transform = make_simple_transform(1, 1, uv);
-        composite_stroke(
+        composite_stroke_scatter(
             &height_map,
             &transform,
             Color::rgb(0.0, 0.0, 1.0),
@@ -562,7 +702,7 @@ mod tests {
 
         let height_map = make_simple_height(1, 1, h);
         let transform = make_simple_transform(1, 1, uv);
-        composite_stroke(
+        composite_stroke_scatter(
             &height_map,
             &transform,
             Color::rgb(0.0, 0.0, 1.0),
@@ -592,7 +732,7 @@ mod tests {
         for sid in [10u32, 20, 30] {
             let height_map = make_simple_height(1, 1, 0.5);
             let transform = make_simple_transform(1, 1, uv);
-            composite_stroke(
+            composite_stroke_scatter(
                 &height_map,
                 &transform,
                 Color::WHITE,
@@ -922,7 +1062,7 @@ mod tests {
 
         let height_map = make_simple_height(1, 1, 0.0);
         let transform = make_simple_transform(1, 1, uv);
-        composite_stroke(
+        composite_stroke_scatter(
             &height_map,
             &transform,
             Color::rgb(0.0, 0.0, 1.0),
