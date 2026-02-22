@@ -14,6 +14,9 @@ use crate::types::{PaintLayer, StrokePath, StrokeParams};
 /// Returns UV-space seed points distributed on a uniform grid with 20% jitter.
 pub fn generate_seeds(params: &StrokeParams, resolution: u32) -> Vec<Vec2> {
     let spacing = params.brush_width / resolution as f32 * params.stroke_spacing;
+    if spacing <= 0.0 || !spacing.is_finite() {
+        return Vec::new();
+    }
     let jitter_amount = spacing * 0.2;
     let mut rng = SeededRng::new(params.seed);
 
@@ -54,6 +57,9 @@ pub fn generate_seeds_poisson_in(
     hi: Vec2,
 ) -> Vec<Vec2> {
     let min_dist = params.brush_width / resolution as f32 * params.stroke_spacing;
+    if min_dist <= 0.0 || !min_dist.is_finite() {
+        return Vec::new();
+    }
     let cell_size = min_dist / std::f32::consts::SQRT_2;
     let extent = hi - lo;
     let grid_w = (extent.x / cell_size).ceil() as usize + 1;
