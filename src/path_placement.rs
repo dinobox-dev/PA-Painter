@@ -36,10 +36,105 @@ pub fn generate_seeds(params: &StrokeParams, resolution: u32) -> Vec<Vec2> {
     seeds
 }
 
+/// Generate seed points using Poisson disk sampling (Bridson's algorithm).
+///
+/// Produces a blue-noise distribution with minimum spacing guarantee,
+/// filling the UV space more naturally than a jittered grid.
+pub fn generate_seeds_poisson(params: &StrokeParams, resolution: u32) -> Vec<Vec2> {
+    generate_seeds_poisson_in(params, resolution, Vec2::ZERO, Vec2::ONE)
+}
+
+/// Generate Poisson disk seeds within an arbitrary UV rectangle `[lo, hi]`.
+///
+/// Used by overscan variants to generate seeds outside the standard [0,1]² region.
+pub fn generate_seeds_poisson_in(
+    params: &StrokeParams,
+    resolution: u32,
+    lo: Vec2,
+    hi: Vec2,
+) -> Vec<Vec2> {
+    let min_dist = params.brush_width / resolution as f32 * params.stroke_spacing;
+    let cell_size = min_dist / std::f32::consts::SQRT_2;
+    let extent = hi - lo;
+    let grid_w = (extent.x / cell_size).ceil() as usize + 1;
+    let grid_h = (extent.y / cell_size).ceil() as usize + 1;
+    let mut grid: Vec<Option<usize>> = vec![None; grid_w * grid_h];
+    let mut rng = SeededRng::new(params.seed);
+    let mut points: Vec<Vec2> = Vec::new();
+    let mut active: Vec<usize> = Vec::new();
+
+    let min_dist_sq = min_dist * min_dist;
+    let k = 30; // candidates per active point
+
+    // Start with a random initial point within [lo, hi]
+    let initial = Vec2::new(
+        lo.x + rng.next_f32() * extent.x,
+        lo.y + rng.next_f32() * extent.y,
+    );
+    points.push(initial);
+    active.push(0);
+    let gi = (((initial.x - lo.x) / cell_size) as usize).min(grid_w - 1);
+    let gj = (((initial.y - lo.y) / cell_size) as usize).min(grid_h - 1);
+    grid[gj * grid_w + gi] = Some(0);
+
+    while !active.is_empty() {
+        let active_idx = (rng.next_f32() * active.len() as f32) as usize % active.len();
+        let center = points[active[active_idx]];
+
+        let mut found = false;
+        for _ in 0..k {
+            let angle = rng.next_f32() * std::f32::consts::TAU;
+            let dist = min_dist + rng.next_f32() * min_dist;
+            let candidate = center + Vec2::new(angle.cos(), angle.sin()) * dist;
+
+            if candidate.x < lo.x || candidate.x > hi.x
+                || candidate.y < lo.y || candidate.y > hi.y
+            {
+                continue;
+            }
+
+            let ci = (((candidate.x - lo.x) / cell_size) as usize).min(grid_w - 1);
+            let cj = (((candidate.y - lo.y) / cell_size) as usize).min(grid_h - 1);
+
+            // Check neighbors in 5×5 grid
+            let mut too_close = false;
+            'outer: for dy in -2i32..=2 {
+                for dx in -2i32..=2 {
+                    let ni = ci as i32 + dx;
+                    let nj = cj as i32 + dy;
+                    if ni >= 0 && ni < grid_w as i32 && nj >= 0 && nj < grid_h as i32 {
+                        if let Some(idx) = grid[nj as usize * grid_w + ni as usize] {
+                            if (candidate - points[idx]).length_squared() < min_dist_sq {
+                                too_close = true;
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !too_close {
+                let new_idx = points.len();
+                points.push(candidate);
+                active.push(new_idx);
+                grid[cj * grid_w + ci] = Some(new_idx);
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            active.swap_remove(active_idx);
+        }
+    }
+
+    points
+}
+
 /// Trace a single streamline from a seed point.
 ///
-/// The seed must be within UV [0,1]² bounds. The stroke traces along the
-/// direction field until it hits a UV boundary, exceeds curvature limits,
+/// The seed must be within `uv_bounds` (lo..hi). The stroke traces along the
+/// direction field until it hits the UV boundary, exceeds curvature limits,
 /// or reaches the target length.
 ///
 /// Returns `None` if the resulting path is shorter than `brush_width * 2` (in UV
@@ -52,6 +147,7 @@ pub fn trace_streamline(
     rng: &mut SeededRng,
     color_tex: Option<&ColorTextureRef<'_>>,
     normal_data: Option<&MeshNormalData>,
+    uv_bounds: (Vec2, Vec2),
 ) -> Option<Vec<Vec2>> {
     let step_size_uv = 1.0 / resolution as f32;
 
@@ -101,7 +197,8 @@ pub fn trace_streamline(
         let next_pos = pos + dir * step_size_uv;
 
         // UV boundary check
-        if next_pos.x < 0.0 || next_pos.x > 1.0 || next_pos.y < 0.0 || next_pos.y > 1.0 {
+        let (uv_lo, uv_hi) = uv_bounds;
+        if next_pos.x < uv_lo.x || next_pos.x > uv_hi.x || next_pos.y < uv_lo.y || next_pos.y > uv_hi.y {
             break;
         }
 
@@ -131,7 +228,7 @@ pub fn trace_streamline(
     }
 
     // Minimum length filter
-    let min_length = params.brush_width / resolution as f32 * 2.0;
+    let min_length = params.brush_width / resolution as f32;
     if length < min_length {
         return None;
     }
@@ -141,15 +238,19 @@ pub fn trace_streamline(
 
 /// Filter paths by removing those that overlap excessively with existing paths.
 ///
-/// A path is removed if >= 70% of its points are within `brush_width_uv * 0.3`
-/// of any accepted path's centerline points.
+/// A path is removed if >= `overlap_ratio` of its points are within
+/// `brush_width_uv * overlap_dist_factor` of any accepted path's centerline points.
 ///
 /// Uses a spatial grid index for O(n × m × k) performance instead of brute-force
 /// O(n² × m²), where k is the average number of points per grid cell.
-pub fn filter_overlapping_paths(paths: &mut Vec<Vec<Vec2>>, brush_width_uv: f32) {
-    let threshold_dist = brush_width_uv * 0.3;
+pub fn filter_overlapping_paths(
+    paths: &mut Vec<Vec<Vec2>>,
+    brush_width_uv: f32,
+    overlap_ratio: f32,
+    overlap_dist_factor: f32,
+) {
+    let threshold_dist = brush_width_uv * overlap_dist_factor;
     let threshold_sq = threshold_dist * threshold_dist;
-    let overlap_ratio = 0.7;
     let cell_size = threshold_dist;
     let inv_cell = 1.0 / cell_size;
 
@@ -217,13 +318,16 @@ pub fn generate_paths(
             &mut rng,
             color_tex,
             normal_data,
+            (Vec2::ZERO, Vec2::ONE),
         ) {
             raw_paths.push(path);
         }
     }
 
     let brush_width_uv = layer.params.brush_width / resolution as f32;
-    filter_overlapping_paths(&mut raw_paths, brush_width_uv);
+    let overlap_ratio = layer.params.overlap_ratio.unwrap_or(0.7);
+    let overlap_dist_factor = layer.params.overlap_dist_factor.unwrap_or(0.3);
+    filter_overlapping_paths(&mut raw_paths, brush_width_uv, overlap_ratio, overlap_dist_factor);
 
     // Sort paths by seed point y-coordinate (top-to-bottom row order).
     // Critical for correct wet-on-wet compositing order in Phase 08.
@@ -234,6 +338,135 @@ pub fn generate_paths(
     });
 
     // Convert to StrokePath with globally unique IDs
+    raw_paths
+        .into_iter()
+        .enumerate()
+        .map(|(i, path)| StrokePath::new(path, layer_index, (layer_index << 16) | (i as u32)))
+        .collect()
+}
+
+/// Generate paths using Poisson disk seed distribution.
+///
+/// Same pipeline as `generate_paths` but uses blue-noise seed placement
+/// instead of a jittered grid.
+pub fn generate_paths_poisson(
+    layer: &PaintLayer,
+    layer_index: u32,
+    resolution: u32,
+    color_tex: Option<&ColorTextureRef<'_>>,
+    normal_data: Option<&MeshNormalData>,
+) -> Vec<StrokePath> {
+    let seeds = generate_seeds_poisson(&layer.params, resolution);
+    let field = DirectionField::new(&layer.guides, resolution);
+
+    let mut rng = SeededRng::new(layer.params.seed);
+    let mut raw_paths: Vec<Vec<Vec2>> = Vec::new();
+    for seed_point in &seeds {
+        if let Some(path) = trace_streamline(
+            *seed_point,
+            &field,
+            &layer.params,
+            resolution,
+            &mut rng,
+            color_tex,
+            normal_data,
+            (Vec2::ZERO, Vec2::ONE),
+        ) {
+            raw_paths.push(path);
+        }
+    }
+
+    let brush_width_uv = layer.params.brush_width / resolution as f32;
+    let overlap_ratio = layer.params.overlap_ratio.unwrap_or(0.7);
+    let overlap_dist_factor = layer.params.overlap_dist_factor.unwrap_or(0.3);
+    filter_overlapping_paths(&mut raw_paths, brush_width_uv, overlap_ratio, overlap_dist_factor);
+
+    raw_paths.sort_by(|a, b| {
+        let ya = a[0].y;
+        let yb = b[0].y;
+        ya.partial_cmp(&yb).unwrap()
+    });
+
+    raw_paths
+        .into_iter()
+        .enumerate()
+        .map(|(i, path)| StrokePath::new(path, layer_index, (layer_index << 16) | (i as u32)))
+        .collect()
+}
+
+/// Clip a path to the [0,1]² UV region by trimming points outside the bounds.
+///
+/// Since streamlines trace monotonically from boundary to boundary, out-of-bounds
+/// points only appear at the start or end.  Returns `None` if fewer than 2 points
+/// remain after clipping.
+fn clip_path_to_uv(path: Vec<Vec2>) -> Option<Vec<Vec2>> {
+    let clipped: Vec<Vec2> = path
+        .into_iter()
+        .filter(|p| p.x >= 0.0 && p.x <= 1.0 && p.y >= 0.0 && p.y <= 1.0)
+        .collect();
+    if clipped.len() >= 2 {
+        Some(clipped)
+    } else {
+        None
+    }
+}
+
+/// Generate paths using Poisson disk seeds in an overscan region.
+///
+/// Combines two techniques:
+/// - **Overscan**: seeds are generated and traced in `[-margin, 1+margin]²`,
+///   then clipped to `[0,1]²`.  This eliminates the density drop at UV boundaries.
+/// - **Poisson disk**: blue-noise seed distribution avoids grid artifacts.
+pub fn generate_paths_overscan(
+    layer: &PaintLayer,
+    layer_index: u32,
+    resolution: u32,
+    color_tex: Option<&ColorTextureRef<'_>>,
+    normal_data: Option<&MeshNormalData>,
+) -> Vec<StrokePath> {
+    let field = DirectionField::new(&layer.guides, resolution);
+    let brush_width_uv = layer.params.brush_width / resolution as f32;
+    let overlap_ratio = layer.params.overlap_ratio.unwrap_or(0.7);
+    let overlap_dist_factor = layer.params.overlap_dist_factor.unwrap_or(0.3);
+    let margin = brush_width_uv * 3.0;
+    let uv_lo = Vec2::splat(-margin);
+    let uv_hi = Vec2::splat(1.0 + margin);
+    let min_length = brush_width_uv;
+
+    let seeds = generate_seeds_poisson_in(&layer.params, resolution, uv_lo, uv_hi);
+    let mut rng = SeededRng::new(layer.params.seed);
+    let mut raw_paths: Vec<Vec<Vec2>> = Vec::new();
+    for seed_point in &seeds {
+        if let Some(path) = trace_streamline(
+            *seed_point,
+            &field,
+            &layer.params,
+            resolution,
+            &mut rng,
+            color_tex,
+            normal_data,
+            (uv_lo, uv_hi),
+        ) {
+            if let Some(clipped) = clip_path_to_uv(path) {
+                let length: f32 = clipped
+                    .windows(2)
+                    .map(|w| (w[1] - w[0]).length())
+                    .sum();
+                if length >= min_length {
+                    raw_paths.push(clipped);
+                }
+            }
+        }
+    }
+
+    filter_overlapping_paths(&mut raw_paths, brush_width_uv, overlap_ratio, overlap_dist_factor);
+
+    raw_paths.sort_by(|a, b| {
+        let ya = a[0].y;
+        let yb = b[0].y;
+        ya.partial_cmp(&yb).unwrap()
+    });
+
     raw_paths
         .into_iter()
         .enumerate()
@@ -338,7 +571,7 @@ mod tests {
 
         let field = DirectionField::new(&layer.guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None);
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
 
         let path = path.expect("path should exist");
         for p in &path {
@@ -363,7 +596,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None);
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
 
         let path = path.expect("path should exist");
         for p in &path {
@@ -391,7 +624,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.9, 0.5), &field, &params, 512, &mut rng, None, None);
+        let path = trace_streamline(Vec2::new(0.9, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
 
         if let Some(path) = path {
             let last = path.last().unwrap();
@@ -420,9 +653,9 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None);
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
 
-        // min_length = 100/512*2 ≈ 0.39 UV, but max target ≈ 0.002 UV
+        // min_length = 100/512 ≈ 0.195 UV, but max target ≈ 0.002 UV
         assert!(path.is_none(), "short path should be filtered out");
     }
 
@@ -446,6 +679,7 @@ mod tests {
                 &mut rng,
                 None,
                 None,
+                (Vec2::ZERO, Vec2::ONE),
             ) {
                 let len: f32 = path
                     .windows(2)
@@ -479,7 +713,7 @@ mod tests {
             vec![Vec2::new(0.1, 0.1), Vec2::new(0.2, 0.1)],
             vec![Vec2::new(0.1, 0.9), Vec2::new(0.2, 0.9)],
         ];
-        filter_overlapping_paths(&mut paths, brush_width_uv);
+        filter_overlapping_paths(&mut paths, brush_width_uv, 0.7, 0.3);
         assert_eq!(paths.len(), 2);
     }
 
@@ -490,7 +724,7 @@ mod tests {
             .map(|i| Vec2::new(0.1 + i as f32 * 0.01, 0.5))
             .collect();
         let mut paths = vec![p.clone(), p];
-        filter_overlapping_paths(&mut paths, brush_width_uv);
+        filter_overlapping_paths(&mut paths, brush_width_uv, 0.7, 0.3);
         assert_eq!(paths.len(), 1, "duplicate path should be removed");
     }
 
@@ -505,7 +739,7 @@ mod tests {
             .map(|i| Vec2::new(0.1 + i as f32 * 0.01, 0.5 + offset))
             .collect();
         let mut paths = vec![p1, p2];
-        filter_overlapping_paths(&mut paths, brush_width_uv);
+        filter_overlapping_paths(&mut paths, brush_width_uv, 0.7, 0.3);
         assert_eq!(paths.len(), 2, "partially overlapping paths should both be kept");
     }
 
@@ -665,7 +899,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng, None, None);
+        let path = trace_streamline(Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
 
         let path = path.expect("curved path should exist");
         assert!(path.len() > 10, "path should have enough points");
@@ -702,7 +936,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.3, 0.5), &field, &params, 512, &mut rng, None, None);
+        let path = trace_streamline(Vec2::new(0.3, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
 
         if let Some(path) = path {
             for w in path.windows(3) {
@@ -973,6 +1207,7 @@ mod tests {
                 &mut rng,
                 None,
                 None,
+                (Vec2::ZERO, Vec2::ONE),
             ) {
                 let len: f32 = path
                     .windows(2)
@@ -1013,6 +1248,7 @@ mod tests {
                 &mut rng,
                 None,
                 None,
+                (Vec2::ZERO, Vec2::ONE),
             ) {
                 let len: f32 = path
                     .windows(2)
@@ -1038,8 +1274,8 @@ mod tests {
 
         let mut rng1 = SeededRng::new(99);
         let mut rng2 = SeededRng::new(99);
-        let path1 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng1, None, None);
-        let path2 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng2, None, None);
+        let path1 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE));
+        let path2 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng2, None, None, (Vec2::ZERO, Vec2::ONE));
 
         match (path1, path2) {
             (Some(p1), Some(p2)) => {
@@ -1077,6 +1313,7 @@ mod tests {
                     &mut rng,
                     None,
                     None,
+                    (Vec2::ZERO, Vec2::ONE),
                 ) {
                     let len: f32 = path
                         .windows(2)
@@ -1131,7 +1368,7 @@ mod tests {
         let mut rng1 = SeededRng::new(42);
         let mut rng2 = SeededRng::new(42);
         let path_no_tex =
-            trace_streamline(Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None);
+            trace_streamline(Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE));
         let path_with_tex = trace_streamline(
             Vec2::new(0.1, 0.5),
             &field,
@@ -1140,6 +1377,7 @@ mod tests {
             &mut rng2,
             Some(&tex_ref),
             None,
+            (Vec2::ZERO, Vec2::ONE),
         );
 
         match (path_no_tex, path_with_tex) {
@@ -1193,6 +1431,7 @@ mod tests {
             &mut rng,
             Some(&tex_ref),
             None,
+            (Vec2::ZERO, Vec2::ONE),
         );
 
         // Path should exist but be shorter than without boundary
@@ -1208,6 +1447,7 @@ mod tests {
             &mut rng2,
             Some(&tex_ref),
             None,
+            (Vec2::ZERO, Vec2::ONE),
         );
 
         if let (Some(p), Some(p_nb)) = (path, path_no_break) {
@@ -1262,6 +1502,7 @@ mod tests {
             &mut rng1,
             Some(&tex_ref),
             None,
+            (Vec2::ZERO, Vec2::ONE),
         );
         let path_no_break = trace_streamline(
             Vec2::new(0.1, 0.5),
@@ -1271,6 +1512,7 @@ mod tests {
             &mut rng2,
             Some(&tex_ref),
             None,
+            (Vec2::ZERO, Vec2::ONE),
         );
 
         match (path_break, path_no_break) {
@@ -1319,6 +1561,7 @@ mod tests {
             &mut rng1,
             Some(&tex_ref),
             None,
+            (Vec2::ZERO, Vec2::ONE),
         );
         let p2 = trace_streamline(
             Vec2::new(0.2, 0.5),
@@ -1328,6 +1571,7 @@ mod tests {
             &mut rng2,
             Some(&tex_ref),
             None,
+            (Vec2::ZERO, Vec2::ONE),
         );
 
         match (p1, p2) {
@@ -1398,6 +1642,7 @@ mod tests {
             &mut rng,
             None,
             Some(&nd),
+            (Vec2::ZERO, Vec2::ONE),
         );
 
         // Path without normal break for comparison
@@ -1413,6 +1658,7 @@ mod tests {
             &mut rng2,
             None,
             Some(&nd),
+            (Vec2::ZERO, Vec2::ONE),
         );
 
         if let (Some(p), Some(p_nb)) = (path, path_no_break) {
@@ -1448,10 +1694,10 @@ mod tests {
         let mut rng1 = SeededRng::new(42);
         let mut rng2 = SeededRng::new(42);
         let p1 = trace_streamline(
-            Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng1, None, Some(&nd),
+            Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng1, None, Some(&nd), (Vec2::ZERO, Vec2::ONE),
         );
         let p2 = trace_streamline(
-            Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng2, None, Some(&nd),
+            Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng2, None, Some(&nd), (Vec2::ZERO, Vec2::ONE),
         );
 
         match (p1, p2) {
@@ -1486,10 +1732,10 @@ mod tests {
         let mut rng1 = SeededRng::new(42);
         let mut rng2 = SeededRng::new(42);
         let path_no_nd = trace_streamline(
-            Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None,
+            Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE),
         );
         let path_with_nd = trace_streamline(
-            Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng2, None, Some(&nd),
+            Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng2, None, Some(&nd), (Vec2::ZERO, Vec2::ONE),
         );
 
         match (path_no_nd, path_with_nd) {
@@ -1639,5 +1885,185 @@ mod tests {
 
         assert!(!paths_off.is_empty());
         assert!(!paths_on.is_empty());
+    }
+
+    // ── Density Comparison Visual Tests ──
+
+    /// Draw a labelled header onto the top of an image buffer.
+    fn draw_label(img: &mut [u8], res: usize, label: &str) {
+        // Simple 3×5 digit/letter font — just draw a colored bar with contrasting text area
+        let bar_h = 18;
+        for y in 0..bar_h.min(res) {
+            for x in 0..res {
+                let i = (y * res + x) * 3;
+                img[i] = 20;
+                img[i + 1] = 20;
+                img[i + 2] = 20;
+            }
+        }
+        // Encode label as simple pixel blocks (4px per char)
+        let char_w = 6;
+        let char_h = 10;
+        let start_x = 4;
+        let start_y = 4;
+        for (ci, ch) in label.chars().enumerate() {
+            if ch == ' ' {
+                continue;
+            }
+            let x0 = start_x + ci * char_w;
+            for dy in 0..char_h.min(bar_h - start_y) {
+                for dx in 0..(char_w - 1) {
+                    let x = x0 + dx;
+                    let y = start_y + dy;
+                    if x < res && y < res {
+                        let i = (y * res + x) * 3;
+                        img[i] = 200;
+                        img[i + 1] = 200;
+                        img[i + 2] = 200;
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn visual_density_comparison() {
+        // INSPECT: Five images comparing density improvement methods.
+        // All use the same guide setup (horizontal + slight diagonal).
+        //
+        // 1. density_baseline.png        — default params
+        // 2. density_A_tight_spacing.png  — stroke_spacing=0.5
+        // 3. density_AB_relaxed.png       — spacing=0.5 + overlap_ratio=0.85, dist_factor=0.15
+        // 4. density_C_poisson.png        — Poisson disk seeds
+        // 5. density_D_multipass.png      — 3-pass layering
+
+        let resolution = 512u32;
+        let guides = vec![
+            GuideVertex {
+                position: Vec2::new(0.3, 0.4),
+                direction: Vec2::new(1.0, 0.15).normalize(),
+                influence: 0.8,
+            },
+            GuideVertex {
+                position: Vec2::new(0.7, 0.6),
+                direction: Vec2::new(1.0, -0.1).normalize(),
+                influence: 0.8,
+            },
+        ];
+
+        // ── 1. Baseline ──
+        let layer_base = PaintLayer {
+            name: String::from("baseline"),
+            order: 0,
+            params: StrokeParams {
+                brush_width: 20.0,
+                angle_variation: 3.0,
+                max_turn_angle: 20.0,
+                ..StrokeParams::default()
+            },
+            guides: guides.clone(),
+        };
+        let paths_base = generate_paths(&layer_base, 0, resolution, None, None);
+
+        // ── 2. Method A: tight spacing ──
+        let layer_a = PaintLayer {
+            name: String::from("tight_spacing"),
+            order: 0,
+            params: StrokeParams {
+                stroke_spacing: 0.5,
+                ..layer_base.params.clone()
+            },
+            guides: guides.clone(),
+        };
+        let paths_a = generate_paths(&layer_a, 0, resolution, None, None);
+
+        // ── 3. Method A+B: tight spacing + relaxed overlap filter ──
+        let layer_ab = PaintLayer {
+            name: String::from("relaxed_filter"),
+            order: 0,
+            params: StrokeParams {
+                stroke_spacing: 0.5,
+                overlap_ratio: Some(0.85),
+                overlap_dist_factor: Some(0.15),
+                ..layer_base.params.clone()
+            },
+            guides: guides.clone(),
+        };
+        let paths_ab = generate_paths(&layer_ab, 0, resolution, None, None);
+
+        // ── 4. Method C: Poisson disk seeds ──
+        let paths_c = generate_paths_poisson(&layer_base, 0, resolution, None, None);
+
+        // ── 5. Overscan + Poisson ──
+        let paths_overscan = generate_paths_overscan(&layer_base, 0, resolution, None, None);
+
+        eprintln!("=== Density Comparison ===");
+        eprintln!("  Baseline:      {} paths", paths_base.len());
+        eprintln!("  A (spacing):   {} paths", paths_a.len());
+        eprintln!("  A+B (relaxed): {} paths", paths_ab.len());
+        eprintln!("  C (Poisson):   {} paths", paths_c.len());
+        eprintln!("  Overscan+C:    {} paths", paths_overscan.len());
+
+        let cases: &[(&[StrokePath], &str, &str)] = &[
+            (&paths_base, "density_1_baseline.png", "BASELINE"),
+            (&paths_a, "density_2_A_tight_spacing.png", "A: spacing=0.5"),
+            (&paths_ab, "density_3_AB_relaxed.png", "A+B: spacing+filter"),
+            (&paths_c, "density_4_C_poisson.png", "C: Poisson disk"),
+            (&paths_overscan, "density_5_overscan_poisson.png", "Overscan+Poisson"),
+        ];
+
+        for &(paths, filename, label) in cases {
+            let res = resolution as usize;
+            let mut img = vec![40u8; res * res * 3];
+
+            for (idx, path) in paths.iter().enumerate() {
+                let hue = (idx as f32 * 0.618034) % 1.0;
+                let (r, g, b) = hue_to_rgb(hue);
+                for point in &path.points {
+                    let px = (point.x * resolution as f32) as i32;
+                    let py = (point.y * resolution as f32) as i32;
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            let x = px + dx;
+                            let y = py + dy;
+                            if x >= 0 && x < resolution as i32 && y >= 0 && y < resolution as i32 {
+                                let i = (y as usize * res + x as usize) * 3;
+                                img[i] = r;
+                                img[i + 1] = g;
+                                img[i + 2] = b;
+                            }
+                        }
+                    }
+                }
+            }
+
+            draw_label(&mut img, res, &format!("{} ({} paths)", label, paths.len()));
+
+            let path = crate::test_module_output_dir("path_placement").join(filename);
+            image::save_buffer(&path, &img, resolution, resolution, image::ColorType::Rgb8)
+                .unwrap();
+            eprintln!("Wrote: {}", path.display());
+        }
+
+        // All methods should produce paths
+        assert!(!paths_base.is_empty());
+        assert!(!paths_a.is_empty());
+        assert!(!paths_ab.is_empty());
+        assert!(!paths_c.is_empty());
+        assert!(!paths_overscan.is_empty());
+
+        // Density should increase: A > baseline, A+B > A
+        assert!(
+            paths_a.len() > paths_base.len(),
+            "A ({}) should have more paths than baseline ({})",
+            paths_a.len(),
+            paths_base.len()
+        );
+        assert!(
+            paths_ab.len() > paths_a.len(),
+            "A+B ({}) should have more paths than A ({})",
+            paths_ab.len(),
+            paths_a.len()
+        );
     }
 }

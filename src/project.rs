@@ -388,6 +388,8 @@ mod tests {
                 max_turn_angle: 15.0,
                 color_break_threshold: None,
                 normal_break_threshold: None,
+                overlap_ratio: None,
+                overlap_dist_factor: None,
                 seed: 100 + order as u32,
             },
             guides,

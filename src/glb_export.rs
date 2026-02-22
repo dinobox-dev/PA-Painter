@@ -854,4 +854,87 @@ mod tests {
         eprintln!("Wrote: {}", path.display());
         eprintln!("  color:  {}", color_png_path.display());
     }
+
+    /// Full 3D sphere using overscan + Poisson + multi-pass path generation.
+    #[test]
+    #[ignore] // high-res benchmark
+    fn visual_sphere_overscan_poisson() {
+        use crate::compositing::composite_all_with_paths;
+        use crate::object_normal::compute_mesh_normal_data;
+        use crate::output::{
+            generate_normal_map_depicted_form, normalize_height_map,
+        };
+        use crate::path_placement::generate_paths_overscan;
+        use crate::types::{
+            BackgroundMode, Color as C, GuideVertex, NormalMode, OutputSettings, PaintLayer,
+            StrokeParams,
+        };
+
+        let mesh = make_cube_sphere(24, 0.5);
+        let res = 1024u32;
+        let nd = compute_mesh_normal_data(&mesh, res);
+
+        let layer = PaintLayer {
+            name: "overscan_test".to_string(),
+            order: 0,
+            params: StrokeParams {
+                brush_width: 50.0,
+                ridge_height: 0.25,
+                color_variation: 0.08,
+                normal_break_threshold: Some(0.5),
+                ..StrokeParams::default()
+            },
+            guides: vec![GuideVertex {
+                position: Vec2::new(0.5, 0.5),
+                direction: Vec2::new(1.0, 0.3).normalize(),
+                influence: 2.0,
+            }],
+        };
+
+        let solid = C::rgb(0.55, 0.35, 0.25);
+        let mut settings = OutputSettings::default();
+        settings.normal_mode = NormalMode::DepictedForm;
+        settings.background_mode = BackgroundMode::Transparent;
+
+        // Generate paths with overscan + Poisson + 3 passes
+        let paths = generate_paths_overscan(
+            &layer, 0, res, None, Some(&nd),
+        );
+        eprintln!("Overscan+Poisson: {} paths generated", paths.len());
+
+        let cached_paths = vec![paths];
+        let maps = composite_all_with_paths(
+            &[layer.clone()], res, None, 0, 0, solid, &settings,
+            Some(&cached_paths), Some(&nd),
+        );
+
+        let normalized_height = normalize_height_map(&maps.height, &[layer]);
+        let normals = generate_normal_map_depicted_form(
+            &normalized_height, &nd, &maps.object_normal, res, settings.normal_strength,
+        );
+
+        let out_dir = crate::test_module_output_dir("glb_export");
+
+        let glb_path = out_dir.join("sphere_overscan_poisson.glb");
+        export_preview_glb_transparent(
+            &mesh, &maps.color, &normalized_height, &normals, res, 0.0, &glb_path,
+        )
+        .expect("overscan GLB export");
+
+        let color_path = out_dir.join("sphere_overscan_poisson_color.png");
+        crate::output::export_color_png(&maps.color, res, &color_path, true)
+            .expect("save color PNG");
+
+        let normal_path = out_dir.join("sphere_overscan_poisson_normal.png");
+        crate::output::export_normal_png(&normals, res, &normal_path)
+            .expect("save normal PNG");
+
+        assert!(glb_path.exists());
+        let (doc, _, _) = gltf::import(&glb_path).expect("gltf should parse overscan GLB");
+        let mat = doc.materials().next().expect("should have a material");
+        assert_eq!(mat.alpha_mode(), gltf::material::AlphaMode::Blend);
+        eprintln!("Wrote: {}", glb_path.display());
+        eprintln!("  color:  {}", color_path.display());
+        eprintln!("  normal: {}", normal_path.display());
+    }
 }

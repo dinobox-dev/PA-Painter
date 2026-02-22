@@ -126,6 +126,16 @@ pub struct StrokeParams {
     /// Typical: 0.9 (~25°), 0.5 (~60°), 0.0 (~90°).  `None` = disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normal_break_threshold: Option<f32>,
+    /// Overlap ratio threshold for the duplicate-path filter.
+    /// A path is rejected if this fraction of its points are within
+    /// `overlap_dist_factor × brush_width_uv` of an already-accepted path.
+    /// Default (None) = 0.7.  Raise toward 1.0 to allow more overlap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlap_ratio: Option<f32>,
+    /// Distance factor for the duplicate-path filter, multiplied by `brush_width_uv`.
+    /// Default (None) = 0.3.  Lower values narrow the "too close" zone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlap_dist_factor: Option<f32>,
     pub seed: u32,
 }
 
@@ -147,6 +157,8 @@ impl Default for StrokeParams {
             max_turn_angle: 15.0,
             color_break_threshold: None,
             normal_break_threshold: None,
+            overlap_ratio: None,
+            overlap_dist_factor: None,
             seed: 42,
         }
     }
