@@ -31,6 +31,32 @@ pub fn export_preview_glb(
     displacement_scale: f32,
     path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    export_preview_glb_inner(mesh, color_map, height_map, normal_map, resolution, displacement_scale, false, path)
+}
+
+/// Export a 3D preview GLB with alpha-blended paint (transparent background).
+pub fn export_preview_glb_transparent(
+    mesh: &LoadedMesh,
+    color_map: &[Color],
+    height_map: &[f32],
+    normal_map: &[[f32; 3]],
+    resolution: u32,
+    displacement_scale: f32,
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    export_preview_glb_inner(mesh, color_map, height_map, normal_map, resolution, displacement_scale, true, path)
+}
+
+fn export_preview_glb_inner(
+    mesh: &LoadedMesh,
+    color_map: &[Color],
+    height_map: &[f32],
+    normal_map: &[[f32; 3]],
+    resolution: u32,
+    displacement_scale: f32,
+    alpha_blend: bool,
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Encode textures to in-memory PNGs
     let color_png = encode_color_png(color_map, resolution)?;
     let normal_png = encode_normal_png(normal_map, resolution)?;
@@ -42,7 +68,7 @@ pub fn export_preview_glb(
     let bin = build_bin_buffer(&subdiv, &color_png, &normal_png);
 
     // 4. Build glTF JSON
-    let json = build_gltf_json(&subdiv, &bin);
+    let json = build_gltf_json(&subdiv, &bin, alpha_blend);
 
     // 5. Write GLB
     write_glb(path, &json, &bin.data)?;
@@ -349,7 +375,7 @@ fn pad_to_4(buf: &mut Vec<u8>) {
 
 // ── glTF JSON ───────────────────────────────────────────────────────────────
 
-fn build_gltf_json(mesh: &SubdividedMesh, bin: &BinLayout) -> Vec<u8> {
+fn build_gltf_json(mesh: &SubdividedMesh, bin: &BinLayout, alpha_blend: bool) -> Vec<u8> {
     let vertex_count = mesh.positions.len();
     let index_count = mesh.indices.len();
 
@@ -384,7 +410,8 @@ fn build_gltf_json(mesh: &SubdividedMesh, bin: &BinLayout) -> Vec<u8> {
                 "metallicFactor": 0.0,
                 "roughnessFactor": 0.8
             },
-            "normalTexture": { "index": 1 }
+            "normalTexture": { "index": 1 },
+            "alphaMode": if alpha_blend { "BLEND" } else { "OPAQUE" }
         }],
         "textures": [
             { "source": 0, "sampler": 0 },
@@ -722,7 +749,7 @@ mod tests {
 
             // Dump color map PNG
             let color_png_path = out_dir.join(format!("{label}_color.png"));
-            crate::output::export_color_png(&maps.color, res, &color_png_path)
+            crate::output::export_color_png(&maps.color, res, &color_png_path, false)
                 .expect("save color PNG");
 
             assert!(path.exists());
@@ -760,5 +787,71 @@ mod tests {
         assert!(prim.indices().is_some());
         assert!(prim.material().pbr_metallic_roughness().base_color_texture().is_some());
         assert!(prim.material().normal_texture().is_some());
+    }
+
+    #[test]
+    #[ignore]
+    fn visual_transparent_sphere() {
+        use crate::compositing::composite_all;
+        use crate::object_normal::compute_mesh_normal_data;
+        use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
+        use crate::types::{
+            BackgroundMode, Color as C, GuideVertex, NormalMode, OutputSettings, PaintLayer,
+            StrokeParams,
+        };
+
+        let mesh = make_cube_sphere(24, 0.5);
+        let res = 1024u32;
+        let nd = compute_mesh_normal_data(&mesh, res);
+
+        let layer = PaintLayer {
+            name: "transparent_sphere".to_string(),
+            order: 0,
+            params: StrokeParams {
+                brush_width: 50.0,
+                ridge_height: 0.25,
+                color_variation: 0.08,
+                normal_break_threshold: Some(0.5),
+                ..StrokeParams::default()
+            },
+            guides: vec![GuideVertex {
+                position: Vec2::new(0.5, 0.5),
+                direction: Vec2::new(1.0, 0.3).normalize(),
+                influence: 2.0,
+            }],
+        };
+
+        let solid = C::rgb(0.55, 0.35, 0.25);
+        let mut settings = OutputSettings::default();
+        settings.normal_mode = NormalMode::DepictedForm;
+        settings.background_mode = BackgroundMode::Transparent;
+
+        let maps = composite_all(
+            &[layer.clone()], res, None, 0, 0, solid, &settings, Some(&nd),
+        );
+
+        let normalized_height = normalize_height_map(&maps.height, &[layer]);
+        let normals = generate_normal_map_depicted_form(
+            &normalized_height, &nd, &maps.object_normal, res, settings.normal_strength,
+        );
+
+        let out_dir = crate::test_module_output_dir("glb_export");
+        let path = out_dir.join("sphere_transparent.glb");
+        export_preview_glb_transparent(
+            &mesh, &maps.color, &normalized_height, &normals, res, 0.0, &path,
+        )
+        .expect("transparent GLB export");
+
+        // Also dump the color map PNG with alpha
+        let color_png_path = out_dir.join("sphere_transparent_color.png");
+        crate::output::export_color_png(&maps.color, res, &color_png_path, true)
+            .expect("save transparent color PNG");
+
+        assert!(path.exists());
+        let (doc, _, _) = gltf::import(&path).expect("gltf should parse transparent GLB");
+        let mat = doc.materials().next().expect("should have a material");
+        assert_eq!(mat.alpha_mode(), gltf::material::AlphaMode::Blend);
+        eprintln!("Wrote: {}", path.display());
+        eprintln!("  color:  {}", color_png_path.display());
     }
 }

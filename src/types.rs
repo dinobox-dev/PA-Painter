@@ -284,6 +284,18 @@ pub enum NormalMode {
     DepictedForm,
 }
 
+/// Background compositing mode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BackgroundMode {
+    /// Strokes blend with the base color / texture (original behavior).
+    #[default]
+    Opaque,
+    /// Paint-only blending: unpainted areas are fully transparent,
+    /// low-height edges are semi-transparent. Strokes blend only with
+    /// other strokes, never with the background.
+    Transparent,
+}
+
 /// Output resolution preset with named tiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResolutionPreset {
@@ -312,6 +324,8 @@ pub struct OutputSettings {
     pub normal_strength: f32,
     #[serde(default)]
     pub normal_mode: NormalMode,
+    #[serde(default)]
+    pub background_mode: BackgroundMode,
 }
 
 impl Default for OutputSettings {
@@ -321,6 +335,7 @@ impl Default for OutputSettings {
             output_resolution: 1024,
             normal_strength: 1.0,
             normal_mode: NormalMode::default(),
+            background_mode: BackgroundMode::default(),
         }
     }
 }

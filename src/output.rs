@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::asset_io::linear_to_srgb;
 use crate::compositing::GlobalMaps;
 use crate::object_normal::MeshNormalData;
-use crate::types::{Color, NormalMode, OutputSettings, PaintLayer};
+use crate::types::{BackgroundMode, Color, NormalMode, OutputSettings, PaintLayer};
 
 // ── Error Type ──
 
@@ -240,29 +240,41 @@ pub fn export_height_png(
 
 /// Export a color map as an sRGB PNG.
 /// Applies linear_to_srgb() per RGB channel before writing.
+/// When `with_alpha` is true, outputs RGBA8 with the alpha channel from Color.
 pub fn export_color_png(
     color: &[Color],
     resolution: u32,
     path: &Path,
+    with_alpha: bool,
 ) -> Result<(), OutputError> {
-    let pixels: Vec<u8> = color
-        .iter()
-        .flat_map(|c| {
-            [
-                (linear_to_srgb(c.r.clamp(0.0, 1.0)) * 255.0).round() as u8,
-                (linear_to_srgb(c.g.clamp(0.0, 1.0)) * 255.0).round() as u8,
-                (linear_to_srgb(c.b.clamp(0.0, 1.0)) * 255.0).round() as u8,
-            ]
-        })
-        .collect();
+    if with_alpha {
+        let pixels: Vec<u8> = color
+            .iter()
+            .flat_map(|c| {
+                [
+                    (linear_to_srgb(c.r.clamp(0.0, 1.0)) * 255.0).round() as u8,
+                    (linear_to_srgb(c.g.clamp(0.0, 1.0)) * 255.0).round() as u8,
+                    (linear_to_srgb(c.b.clamp(0.0, 1.0)) * 255.0).round() as u8,
+                    (c.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+                ]
+            })
+            .collect();
 
-    image::save_buffer(
-        path,
-        &pixels,
-        resolution,
-        resolution,
-        image::ColorType::Rgb8,
-    )?;
+        image::save_buffer(path, &pixels, resolution, resolution, image::ColorType::Rgba8)?;
+    } else {
+        let pixels: Vec<u8> = color
+            .iter()
+            .flat_map(|c| {
+                [
+                    (linear_to_srgb(c.r.clamp(0.0, 1.0)) * 255.0).round() as u8,
+                    (linear_to_srgb(c.g.clamp(0.0, 1.0)) * 255.0).round() as u8,
+                    (linear_to_srgb(c.b.clamp(0.0, 1.0)) * 255.0).round() as u8,
+                ]
+            })
+            .collect();
+
+        image::save_buffer(path, &pixels, resolution, resolution, image::ColorType::Rgb8)?;
+    }
     Ok(())
 }
 
@@ -380,27 +392,41 @@ pub fn export_height_exr(
     Ok(())
 }
 
-/// Export a color map as a 3-channel float32 EXR (linear, NO sRGB conversion).
-/// EXR consumers expect linear data.
+/// Export a color map as a float32 EXR (linear, NO sRGB conversion).
+/// When `with_alpha` is true, outputs RGBA; otherwise RGB.
 pub fn export_color_exr(
     color: &[Color],
     resolution: u32,
     path: &Path,
+    with_alpha: bool,
 ) -> Result<(), OutputError> {
     use exr::prelude::*;
 
     let res = resolution as usize;
 
-    write_rgb_file(
-        path,
-        res,
-        res,
-        |x, y| {
-            let c = &color[y * res + x];
-            (c.r, c.g, c.b)
-        },
-    )
-    .map_err(|e| OutputError::ExrError(e.to_string()))?;
+    if with_alpha {
+        write_rgba_file(
+            path,
+            res,
+            res,
+            |x, y| {
+                let c = &color[y * res + x];
+                (c.r, c.g, c.b, c.a)
+            },
+        )
+        .map_err(|e| OutputError::ExrError(e.to_string()))?;
+    } else {
+        write_rgb_file(
+            path,
+            res,
+            res,
+            |x, y| {
+                let c = &color[y * res + x];
+                (c.r, c.g, c.b)
+            },
+        )
+        .map_err(|e| OutputError::ExrError(e.to_string()))?;
+    }
 
     Ok(())
 }
@@ -430,12 +456,15 @@ pub fn export_all(
         _ => generate_normal_map(&normalized_height, global.resolution, settings.normal_strength),
     };
 
+    let with_alpha = settings.background_mode == BackgroundMode::Transparent;
+
     match format {
         ExportFormat::Png => {
             export_color_png(
                 &global.color,
                 global.resolution,
                 &output_dir.join("color_map.png"),
+                with_alpha,
             )?;
             export_height_png(
                 &normalized_height,
@@ -448,6 +477,7 @@ pub fn export_all(
                 &global.color,
                 global.resolution,
                 &output_dir.join("color_map.exr"),
+                with_alpha,
             )?;
             export_height_exr(
                 &normalized_height,
@@ -776,7 +806,7 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("srgb_test.png");
 
-        export_color_png(&colors, res, &path).unwrap();
+        export_color_png(&colors, res, &path, false).unwrap();
 
         let img = image::open(&path).unwrap().to_rgb8();
         let pixel = img.get_pixel(0, 0);
@@ -901,7 +931,7 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("color_linear_test.exr");
 
-        export_color_exr(&colors, res, &path).unwrap();
+        export_color_exr(&colors, res, &path, false).unwrap();
 
         // Read back
         let tex = load_texture(&path).unwrap();

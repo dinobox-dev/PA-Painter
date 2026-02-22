@@ -4,14 +4,14 @@ use rayon::prelude::*;
 use crate::brush_profile::generate_brush_profile;
 #[cfg(test)]
 use crate::local_frame::LocalFrameTransform;
-use crate::math::{lerp_color, perpendicular, smoothstep};
+use crate::math::{lerp, lerp_color, perpendicular, smoothstep};
 use crate::object_normal::{sample_object_normal, MeshNormalData};
 use crate::path_placement::generate_paths;
 use crate::stroke_color::ColorTextureRef;
 use crate::rng::SeededRng;
 use crate::stroke_color::{compute_stroke_color, sample_bilinear};
 use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
-use crate::types::{Color, NormalMode, OutputSettings, PaintLayer, StrokePath};
+use crate::types::{BackgroundMode, Color, NormalMode, OutputSettings, PaintLayer, StrokePath};
 
 /// Global compositing buffers in UV space.
 pub struct GlobalMaps {
@@ -30,6 +30,8 @@ pub struct GlobalMaps {
 impl GlobalMaps {
     /// Initialize global maps.
     /// Color is initialized from base_color_texture (or solid_color if None).
+    /// In `Transparent` background mode, color is initialized to fully transparent
+    /// regardless of texture/solid_color.
     pub fn new(
         resolution: u32,
         base_color_texture: Option<&[Color]>,
@@ -37,6 +39,7 @@ impl GlobalMaps {
         tex_height: u32,
         solid_color: Color,
         normal_mode: NormalMode,
+        background_mode: BackgroundMode,
     ) -> Self {
         let size = (resolution * resolution) as usize;
         let height = vec![0.0; size];
@@ -48,7 +51,9 @@ impl GlobalMaps {
             Vec::new()
         };
 
-        let color = if let Some(tex) = base_color_texture {
+        let color = if background_mode == BackgroundMode::Transparent {
+            vec![Color::new(0.0, 0.0, 0.0, 0.0); size]
+        } else if let Some(tex) = base_color_texture {
             // Resample base texture to output resolution using bilinear interpolation
             let mut colors = Vec::with_capacity(size);
             for py in 0..resolution {
@@ -113,6 +118,7 @@ pub fn composite_stroke(
     stroke_id: u32,
     base_height: f32,
     stroke_normal: Option<[f32; 3]>,
+    transparent: bool,
     global: &mut GlobalMaps,
 ) {
     let res = resolution;
@@ -223,7 +229,28 @@ pub fn composite_stroke(
                 global.height[idx] = h.max(global.height[idx]);
 
                 let opacity = smoothstep(0.0, base_height * 0.7, h);
-                global.color[idx] = lerp_color(global.color[idx], stroke_color, opacity);
+                if transparent {
+                    if global.stroke_id[idx] == 0 {
+                        // First paint on virgin pixel: set color directly
+                        global.color[idx] = Color::new(
+                            stroke_color.r,
+                            stroke_color.g,
+                            stroke_color.b,
+                            opacity,
+                        );
+                    } else {
+                        // Over-paint: blend paint colors, alpha = max
+                        let prev = global.color[idx];
+                        global.color[idx] = Color::new(
+                            lerp(prev.r, stroke_color.r, opacity),
+                            lerp(prev.g, stroke_color.g, opacity),
+                            lerp(prev.b, stroke_color.b, opacity),
+                            prev.a.max(opacity),
+                        );
+                    }
+                } else {
+                    global.color[idx] = lerp_color(global.color[idx], stroke_color, opacity);
+                }
 
                 global.stroke_id[idx] = stroke_id;
 
@@ -308,7 +335,7 @@ pub fn composite_all_with_paths(
     cached_paths: Option<&[Vec<StrokePath>]>,
     normal_data: Option<&MeshNormalData>,
 ) -> GlobalMaps {
-    let mut global = GlobalMaps::new(resolution, base_color_texture, tex_width, tex_height, solid_color, settings.normal_mode);
+    let mut global = GlobalMaps::new(resolution, base_color_texture, tex_width, tex_height, solid_color, settings.normal_mode, settings.background_mode);
 
     // Sort layers by order (ascending), preserving original index for stroke ID encoding
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
@@ -367,7 +394,7 @@ pub fn composite_layer(
     layer_index: u32,
     resolution: u32,
     global: &mut GlobalMaps,
-    _settings: &OutputSettings,
+    settings: &OutputSettings,
     base_color_texture: Option<&[Color]>,
     tex_width: u32,
     tex_height: u32,
@@ -375,6 +402,7 @@ pub fn composite_layer(
     cached_paths: Option<&[StrokePath]>,
     normal_data: Option<&MeshNormalData>,
 ) {
+    let transparent = settings.background_mode == BackgroundMode::Transparent;
     let paths_owned;
     let paths: &[StrokePath] = if let Some(cached) = cached_paths {
         cached
@@ -459,6 +487,7 @@ pub fn composite_layer(
             paths[i].stroke_id,
             layer.params.base_height,
             stroke_normals[i],
+            transparent,
             global,
         );
     }
@@ -545,7 +574,7 @@ mod tests {
 
     #[test]
     fn global_maps_dimensions() {
-        let maps = GlobalMaps::new(64, None, 0, 0, Color::WHITE, NormalMode::SurfacePaint);
+        let maps = GlobalMaps::new(64, None, 0, 0, Color::WHITE, NormalMode::SurfacePaint, BackgroundMode::Opaque);
         assert_eq!(maps.height.len(), 64 * 64);
         assert_eq!(maps.color.len(), 64 * 64);
         assert_eq!(maps.stroke_id.len(), 64 * 64);
@@ -555,7 +584,7 @@ mod tests {
     #[test]
     fn global_maps_solid_color_init() {
         let color = Color::rgb(0.3, 0.6, 0.9);
-        let maps = GlobalMaps::new(16, None, 0, 0, color, NormalMode::SurfacePaint);
+        let maps = GlobalMaps::new(16, None, 0, 0, color, NormalMode::SurfacePaint, BackgroundMode::Opaque);
         for c in &maps.color {
             assert!((c.r - 0.3).abs() < EPS);
             assert!((c.g - 0.6).abs() < EPS);
@@ -573,7 +602,7 @@ mod tests {
             Color::rgb(0.0, 0.0, 1.0),
             Color::rgb(1.0, 1.0, 0.0),
         ];
-        let maps = GlobalMaps::new(4, Some(&tex), 2, 2, Color::WHITE, NormalMode::SurfacePaint);
+        let maps = GlobalMaps::new(4, Some(&tex), 2, 2, Color::WHITE, NormalMode::SurfacePaint, BackgroundMode::Opaque);
         assert_eq!(maps.color.len(), 16);
 
         let center = maps.color[1 * 4 + 1];
@@ -584,7 +613,7 @@ mod tests {
 
     #[test]
     fn no_height_stacking() {
-        let mut global = GlobalMaps::new(16, None, 0, 0, Color::WHITE, NormalMode::SurfacePaint);
+        let mut global = GlobalMaps::new(16, None, 0, 0, Color::WHITE, NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
 
         for (i, &h) in [0.7f32, 0.3, 0.5].iter().enumerate() {
@@ -614,7 +643,7 @@ mod tests {
 
     #[test]
     fn color_full_cover() {
-        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0), NormalMode::SurfacePaint);
+        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
         let base_height = 0.5;
 
@@ -642,7 +671,7 @@ mod tests {
 
     #[test]
     fn color_transparent_bristle_gap() {
-        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0), NormalMode::SurfacePaint);
+        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
         let base_height = 0.5;
 
@@ -670,7 +699,7 @@ mod tests {
 
     #[test]
     fn color_partial_blend() {
-        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0), NormalMode::SurfacePaint);
+        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
         let base_height = 0.5;
         let h = base_height * 0.3;
@@ -695,7 +724,7 @@ mod tests {
 
     #[test]
     fn color_ridge_full_opacity() {
-        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0), NormalMode::SurfacePaint);
+        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
         let base_height = 0.5;
         let h = base_height + 0.3;
@@ -726,7 +755,7 @@ mod tests {
 
     #[test]
     fn stroke_id_records_last() {
-        let mut global = GlobalMaps::new(16, None, 0, 0, Color::WHITE, NormalMode::SurfacePaint);
+        let mut global = GlobalMaps::new(16, None, 0, 0, Color::WHITE, NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
 
         for sid in [10u32, 20, 30] {
@@ -765,7 +794,7 @@ mod tests {
         let solid_a = Color::rgb(1.0, 0.0, 0.0);
         let solid_b = Color::rgb(0.0, 0.0, 1.0);
 
-        let mut global = GlobalMaps::new(64, None, 0, 0, Color::WHITE, NormalMode::SurfacePaint);
+        let mut global = GlobalMaps::new(64, None, 0, 0, Color::WHITE, NormalMode::SurfacePaint, BackgroundMode::Opaque);
         composite_layer(
             &layer_a, 0, 64, &mut global, &settings,
             None, 0, 0, solid_a, None, None,
@@ -958,7 +987,7 @@ mod tests {
         let stroke_tex = vec![Color::rgb(0.25, 0.12, 0.05)];
         let canvas = Color::rgb(0.95, 0.92, 0.85);
 
-        let mut global = GlobalMaps::new(256, None, 0, 0, canvas, NormalMode::SurfacePaint);
+        let mut global = GlobalMaps::new(256, None, 0, 0, canvas, NormalMode::SurfacePaint, BackgroundMode::Opaque);
         composite_layer(
             &layer, 0, 256, &mut global, &settings,
             Some(&stroke_tex), 1, 1, canvas, None, None,
@@ -1046,7 +1075,7 @@ mod tests {
     #[test]
     fn zero_height_preserves_base() {
         let solid = Color::rgb(0.3, 0.7, 0.1);
-        let maps = GlobalMaps::new(16, None, 0, 0, solid, NormalMode::SurfacePaint);
+        let maps = GlobalMaps::new(16, None, 0, 0, solid, NormalMode::SurfacePaint, BackgroundMode::Opaque);
 
         for c in &maps.color {
             assert!((c.r - 0.3).abs() < EPS);
@@ -1057,7 +1086,7 @@ mod tests {
 
     #[test]
     fn skip_unpainted_pixels() {
-        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0), NormalMode::SurfacePaint);
+        let mut global = GlobalMaps::new(16, None, 0, 0, Color::rgb(1.0, 0.0, 0.0), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
 
         let height_map = make_simple_height(1, 1, 0.0);
