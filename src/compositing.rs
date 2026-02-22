@@ -133,13 +133,9 @@ pub fn composite_stroke(
         return;
     }
 
-    // Precompute cumulative arc lengths
-    let mut accum_lens = Vec::with_capacity(points.len());
-    accum_lens.push(0.0f32);
-    for w in points.windows(2) {
-        accum_lens.push(accum_lens.last().unwrap() + (w[1] - w[0]).length());
-    }
-    let total_len = *accum_lens.last().unwrap();
+    // Use cached cumulative arc lengths from StrokePath
+    let accum_lens = path.cumulative_lengths();
+    let total_len = path.arc_length();
     if total_len < 1e-8 {
         return;
     }

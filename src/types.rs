@@ -225,6 +225,11 @@ impl StrokePath {
         self.total_length
     }
 
+    /// Cached cumulative arc lengths (one entry per point, starting at 0.0).
+    pub fn cumulative_lengths(&self) -> &[f32] {
+        &self.cumulative_lengths
+    }
+
     /// Find segment index and local fraction for a given distance along the path.
     fn find_segment(&self, distance: f32) -> (usize, f32) {
         let last_seg = self.points.len() - 2;
