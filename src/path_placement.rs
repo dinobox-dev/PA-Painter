@@ -343,7 +343,7 @@ pub fn generate_paths(
     raw_paths
         .into_iter()
         .enumerate()
-        .map(|(i, path)| StrokePath::new(path, layer_index, (layer_index << 16) | (i as u32)))
+        .map(|(i, path)| StrokePath::new(path, layer_index, i as u32))
         .collect()
 }
 
@@ -388,7 +388,7 @@ pub fn generate_paths_poisson(
     raw_paths
         .into_iter()
         .enumerate()
-        .map(|(i, path)| StrokePath::new(path, layer_index, (layer_index << 16) | (i as u32)))
+        .map(|(i, path)| StrokePath::new(path, layer_index, i as u32))
         .collect()
 }
 
@@ -464,7 +464,7 @@ pub fn generate_paths_overscan(
     raw_paths
         .into_iter()
         .enumerate()
-        .map(|(i, path)| StrokePath::new(path, layer_index, (layer_index << 16) | (i as u32)))
+        .map(|(i, path)| StrokePath::new(path, layer_index, i as u32))
         .collect()
 }
 
@@ -784,21 +784,6 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), paths.len(), "all stroke IDs should be unique");
-    }
-
-    #[test]
-    fn generate_paths_stroke_id_encoding() {
-        let layer = make_layer();
-        let paths = generate_paths(&layer, 3, 256, None, None);
-
-        for (i, path) in paths.iter().enumerate() {
-            assert_eq!(path.layer_index, 3);
-            assert_eq!(
-                path.stroke_id,
-                (3 << 16) | (i as u32),
-                "stroke_id encoding mismatch at index {i}"
-            );
-        }
     }
 
     #[test]
