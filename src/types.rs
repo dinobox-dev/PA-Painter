@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 /// RGBA color in linear float [0, 1] per channel.
 /// This is the canonical color type for the entire project.
 #[derive(Debug, Clone, Copy)]
-#[repr(C)]
 pub struct Color {
     pub r: f32,
     pub g: f32,
