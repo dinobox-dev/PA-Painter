@@ -30,4 +30,5 @@ pub mod stroke_color; // Phase 07
 pub mod object_normal; // Phase 04 (object-space normals)
 pub mod compositing; // Phase 08
 pub mod output; // Phase 09
+pub mod glb_export; // Phase 09 (3D preview)
 pub mod project; // Phase 10

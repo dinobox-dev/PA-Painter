@@ -953,6 +953,12 @@ mod tests {
             let path = out_dir.join(format!("{label}_obj_normal_rgb.png"));
             image::save_buffer(&path, &obj_pixels, res, res, image::ColorType::Rgb8)
                 .expect("save obj_normal_rgb");
+
+            // GLB 3D preview
+            crate::glb_export::export_preview_glb(
+                &mesh, &maps.color, &normalized_height, &normals,
+                res, 0.05, &out_dir.join(format!("{label}.glb")),
+            ).expect("save GLB preview");
         }
 
         eprintln!("=== Normal Break Comparison ===");
