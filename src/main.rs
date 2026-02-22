@@ -46,10 +46,15 @@ fn main() {
                     eprintln!("Error: --resolution requires a number");
                     process::exit(1);
                 });
-                resolution_override = Some(val.parse().unwrap_or_else(|_| {
+                let parsed: u32 = val.parse().unwrap_or_else(|_| {
                     eprintln!("Error: invalid resolution '{val}'");
                     process::exit(1);
-                }));
+                });
+                if parsed == 0 || parsed > 16384 {
+                    eprintln!("Error: resolution must be between 1 and 16384, got {parsed}");
+                    process::exit(1);
+                }
+                resolution_override = Some(parsed);
             }
             "-f" | "--format" => {
                 i += 1;
