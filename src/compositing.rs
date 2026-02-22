@@ -112,7 +112,7 @@ fn bilinear_sample(data: &[f32], width: usize, height: usize, x: f32, y: f32) ->
 pub fn composite_stroke(
     local_height: &StrokeHeightResult,
     path: &StrokePath,
-    brush_width_px: usize,
+    _brush_width_px: usize,
     resolution: u32,
     stroke_color: Color,
     stroke_id: u32,
@@ -126,7 +126,6 @@ pub fn composite_stroke(
     let local_w = local_height.width;
     let local_h = local_height.height;
     let res_f = res as f32;
-    let _ = brush_width_px;
 
     let points = &path.points;
     if points.len() < 2 || local_w < 2 || local_h < 2 {
