@@ -120,6 +120,12 @@ pub struct StrokeParams {
     /// exceeds this threshold.  `None` = disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_break_threshold: Option<f32>,
+    /// If set, strokes terminate when the cumulative object-space normal
+    /// deviation from the stroke start exceeds the threshold.
+    /// Value is a dot-product floor: break if `dot(n_start, n_current) < threshold`.
+    /// Typical: 0.9 (~25°), 0.5 (~60°), 0.0 (~90°).  `None` = disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_break_threshold: Option<f32>,
     pub seed: u32,
 }
 
@@ -140,6 +146,7 @@ impl Default for StrokeParams {
             angle_variation: 5.0,
             max_turn_angle: 15.0,
             color_break_threshold: None,
+            normal_break_threshold: None,
             seed: 42,
         }
     }

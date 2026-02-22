@@ -147,6 +147,7 @@ pub fn generate_all_paths(
     base_color_texture: Option<&[Color]>,
     tex_width: u32,
     tex_height: u32,
+    normal_data: Option<&MeshNormalData>,
 ) -> Vec<Vec<StrokePath>> {
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
@@ -159,7 +160,7 @@ pub fn generate_all_paths(
                 width: tex_width,
                 height: tex_height,
             });
-            generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref())
+            generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref(), normal_data)
         })
         .collect()
 }
@@ -222,7 +223,7 @@ pub fn composite_all_with_paths(
                     width: tex_width,
                     height: tex_height,
                 });
-                generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref())
+                generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref(), normal_data)
             })
             .collect::<Vec<_>>();
         &generated
@@ -279,7 +280,7 @@ pub fn composite_layer(
             width: tex_width,
             height: tex_height,
         });
-        paths_owned = generate_paths(layer, layer_index, resolution, tex_ref.as_ref());
+        paths_owned = generate_paths(layer, layer_index, resolution, tex_ref.as_ref(), normal_data);
         &paths_owned
     };
 

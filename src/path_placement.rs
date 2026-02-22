@@ -4,6 +4,7 @@ use glam::Vec2;
 
 use crate::direction_field::DirectionField;
 use crate::math::rotate_vec2;
+use crate::object_normal::{sample_object_normal, MeshNormalData};
 use crate::rng::SeededRng;
 use crate::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
 use crate::types::{PaintLayer, StrokePath, StrokeParams};
@@ -50,6 +51,7 @@ pub fn trace_streamline(
     resolution: u32,
     rng: &mut SeededRng,
     color_tex: Option<&ColorTextureRef<'_>>,
+    normal_data: Option<&MeshNormalData>,
 ) -> Option<Vec<Vec2>> {
     let step_size_uv = 1.0 / resolution as f32;
 
@@ -68,6 +70,8 @@ pub fn trace_streamline(
 
     let max_turn_rad = params.max_turn_angle.to_radians();
     let angle_var_rad = params.angle_variation.to_radians();
+
+    let start_normal = normal_data.map(|nd| sample_object_normal(nd, pos));
 
     while length < target_length {
         let mut dir = field.sample(pos);
@@ -106,6 +110,16 @@ pub fn trace_streamline(
             let cur_color = sample_bilinear(tex.data, tex.width, tex.height, pos);
             let next_color = sample_bilinear(tex.data, tex.width, tex.height, next_pos);
             if channel_max_diff(cur_color, next_color) > threshold {
+                break;
+            }
+        }
+
+        // Normal boundary check (cumulative from stroke start)
+        if let (Some(threshold), Some(nd), Some(sn)) =
+            (params.normal_break_threshold, normal_data, start_normal)
+        {
+            let next_n = sample_object_normal(nd, next_pos);
+            if sn.dot(next_n) < threshold {
                 break;
             }
         }
@@ -187,6 +201,7 @@ pub fn generate_paths(
     layer_index: u32,
     resolution: u32,
     color_tex: Option<&ColorTextureRef<'_>>,
+    normal_data: Option<&MeshNormalData>,
 ) -> Vec<StrokePath> {
     let seeds = generate_seeds(&layer.params, resolution);
     let field = DirectionField::new(&layer.guides, resolution);
@@ -201,6 +216,7 @@ pub fn generate_paths(
             resolution,
             &mut rng,
             color_tex,
+            normal_data,
         ) {
             raw_paths.push(path);
         }
@@ -229,6 +245,7 @@ pub fn generate_paths(
 mod tests {
     use super::*;
     use crate::types::{GuideVertex, PaintLayer, StrokeParams};
+    use glam::Vec3;
 
     fn make_layer() -> PaintLayer {
         PaintLayer {
@@ -321,7 +338,7 @@ mod tests {
 
         let field = DirectionField::new(&layer.guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None);
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None);
 
         let path = path.expect("path should exist");
         for p in &path {
@@ -346,7 +363,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None);
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None);
 
         let path = path.expect("path should exist");
         for p in &path {
@@ -374,7 +391,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.9, 0.5), &field, &params, 512, &mut rng, None);
+        let path = trace_streamline(Vec2::new(0.9, 0.5), &field, &params, 512, &mut rng, None, None);
 
         if let Some(path) = path {
             let last = path.last().unwrap();
@@ -403,7 +420,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None);
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None);
 
         // min_length = 100/512*2 ≈ 0.39 UV, but max target ≈ 0.002 UV
         assert!(path.is_none(), "short path should be filtered out");
@@ -427,6 +444,7 @@ mod tests {
                 &params,
                 512,
                 &mut rng,
+                None,
                 None,
             ) {
                 let len: f32 = path
@@ -496,8 +514,8 @@ mod tests {
     #[test]
     fn generate_paths_determinism() {
         let layer = make_layer();
-        let paths1 = generate_paths(&layer, 0, 256, None);
-        let paths2 = generate_paths(&layer, 0, 256, None);
+        let paths1 = generate_paths(&layer, 0, 256, None, None);
+        let paths2 = generate_paths(&layer, 0, 256, None, None);
 
         assert_eq!(paths1.len(), paths2.len());
         for (a, b) in paths1.iter().zip(paths2.iter()) {
@@ -514,7 +532,7 @@ mod tests {
     #[test]
     fn generate_paths_sorted_by_y() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 256, None);
+        let paths = generate_paths(&layer, 0, 256, None, None);
 
         assert!(!paths.is_empty(), "should generate some paths");
         for i in 1..paths.len() {
@@ -532,7 +550,7 @@ mod tests {
     #[test]
     fn generate_paths_unique_stroke_ids() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 256, None);
+        let paths = generate_paths(&layer, 0, 256, None, None);
 
         let mut ids: Vec<u32> = paths.iter().map(|p| p.stroke_id).collect();
         ids.sort();
@@ -543,7 +561,7 @@ mod tests {
     #[test]
     fn generate_paths_stroke_id_encoding() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 3, 256, None);
+        let paths = generate_paths(&layer, 3, 256, None, None);
 
         for (i, path) in paths.iter().enumerate() {
             assert_eq!(path.layer_index, 3);
@@ -559,7 +577,7 @@ mod tests {
     fn area_coverage_90_percent() {
         let layer = make_layer();
         let resolution = 512u32;
-        let paths = generate_paths(&layer, 0, resolution, None);
+        let paths = generate_paths(&layer, 0, resolution, None, None);
 
         let mut covered = vec![false; (resolution * resolution) as usize];
         let brush_radius_uv = layer.params.brush_width / resolution as f32 / 2.0;
@@ -612,7 +630,7 @@ mod tests {
     #[test]
     fn paths_stay_within_uv() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 512, None);
+        let paths = generate_paths(&layer, 0, 512, None, None);
 
         for path in &paths {
             for point in &path.points {
@@ -647,7 +665,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng, None);
+        let path = trace_streamline(Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng, None, None);
 
         let path = path.expect("curved path should exist");
         assert!(path.len() > 10, "path should have enough points");
@@ -684,7 +702,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.3, 0.5), &field, &params, 512, &mut rng, None);
+        let path = trace_streamline(Vec2::new(0.3, 0.5), &field, &params, 512, &mut rng, None, None);
 
         if let Some(path) = path {
             for w in path.windows(3) {
@@ -767,7 +785,7 @@ mod tests {
     fn visual_horizontal_strokes() {
         let layer = make_layer();
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, resolution, None);
+        let paths = generate_paths(&layer, 0, resolution, None, None);
 
         eprintln!("visual_horizontal_strokes: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "horizontal_strokes.png");
@@ -810,7 +828,7 @@ mod tests {
             ],
         };
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, resolution, None);
+        let paths = generate_paths(&layer, 0, resolution, None, None);
 
         eprintln!("visual_spiral_guides: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "spiral_guides.png");
@@ -913,8 +931,8 @@ mod tests {
         let mut layer_on = layer_off.clone();
         layer_on.params.color_break_threshold = Some(0.08);
 
-        let paths_off = generate_paths(&layer_off, 0, resolution, Some(&tex_ref));
-        let paths_on = generate_paths(&layer_on, 0, resolution, Some(&tex_ref));
+        let paths_off = generate_paths(&layer_off, 0, resolution, Some(&tex_ref), None);
+        let paths_on = generate_paths(&layer_on, 0, resolution, Some(&tex_ref), None);
 
         eprintln!(
             "color_break OFF: {} paths, ON: {} paths",
@@ -953,6 +971,7 @@ mod tests {
                 &params,
                 512,
                 &mut rng,
+                None,
                 None,
             ) {
                 let len: f32 = path
@@ -993,6 +1012,7 @@ mod tests {
                 512,
                 &mut rng,
                 None,
+                None,
             ) {
                 let len: f32 = path
                     .windows(2)
@@ -1018,8 +1038,8 @@ mod tests {
 
         let mut rng1 = SeededRng::new(99);
         let mut rng2 = SeededRng::new(99);
-        let path1 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng1, None);
-        let path2 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng2, None);
+        let path1 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng1, None, None);
+        let path2 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng2, None, None);
 
         match (path1, path2) {
             (Some(p1), Some(p2)) => {
@@ -1055,6 +1075,7 @@ mod tests {
                     &params,
                     512,
                     &mut rng,
+                    None,
                     None,
                 ) {
                     let len: f32 = path
@@ -1110,7 +1131,7 @@ mod tests {
         let mut rng1 = SeededRng::new(42);
         let mut rng2 = SeededRng::new(42);
         let path_no_tex =
-            trace_streamline(Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None);
+            trace_streamline(Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None);
         let path_with_tex = trace_streamline(
             Vec2::new(0.1, 0.5),
             &field,
@@ -1118,6 +1139,7 @@ mod tests {
             512,
             &mut rng2,
             Some(&tex_ref),
+            None,
         );
 
         match (path_no_tex, path_with_tex) {
@@ -1170,6 +1192,7 @@ mod tests {
             512,
             &mut rng,
             Some(&tex_ref),
+            None,
         );
 
         // Path should exist but be shorter than without boundary
@@ -1184,6 +1207,7 @@ mod tests {
             512,
             &mut rng2,
             Some(&tex_ref),
+            None,
         );
 
         if let (Some(p), Some(p_nb)) = (path, path_no_break) {
@@ -1237,6 +1261,7 @@ mod tests {
             512,
             &mut rng1,
             Some(&tex_ref),
+            None,
         );
         let path_no_break = trace_streamline(
             Vec2::new(0.1, 0.5),
@@ -1245,6 +1270,7 @@ mod tests {
             512,
             &mut rng2,
             Some(&tex_ref),
+            None,
         );
 
         match (path_break, path_no_break) {
@@ -1292,6 +1318,7 @@ mod tests {
             512,
             &mut rng1,
             Some(&tex_ref),
+            None,
         );
         let p2 = trace_streamline(
             Vec2::new(0.2, 0.5),
@@ -1300,6 +1327,7 @@ mod tests {
             512,
             &mut rng2,
             Some(&tex_ref),
+            None,
         );
 
         match (p1, p2) {
@@ -1313,5 +1341,303 @@ mod tests {
             (None, None) => {}
             _ => panic!("determinism broken with color boundary"),
         }
+    }
+
+    // ── Normal Boundary Break Tests ──
+
+    /// Build a simple MeshNormalData with two halves: left = +Z, right = +X.
+    /// Simulates a 90° hard edge at u=0.5.
+    fn make_two_face_normal_data(resolution: u32) -> MeshNormalData {
+        let size = (resolution * resolution) as usize;
+        let mut normals = Vec::with_capacity(size);
+        let tangents = vec![Vec3::X; size];
+        let bitangents = vec![Vec3::Y; size];
+        for py in 0..resolution {
+            for px in 0..resolution {
+                let u = (px as f32 + 0.5) / resolution as f32;
+                if u < 0.5 {
+                    normals.push(Vec3::Z); // left face
+                } else {
+                    normals.push(Vec3::X); // right face (90° from left)
+                }
+                let _ = py; // suppress unused warning
+            }
+        }
+        MeshNormalData {
+            object_normals: normals,
+            tangents,
+            bitangents,
+            resolution,
+        }
+    }
+
+    #[test]
+    fn normal_boundary_breaks_path() {
+        // Horizontal stroke crossing a 90° normal boundary at u=0.5.
+        // threshold=0.5 (~60°) should break at the boundary (dot=0).
+        let guides = vec![GuideVertex {
+            position: Vec2::new(0.5, 0.5),
+            direction: Vec2::X,
+            influence: 1.5,
+        }];
+        let params = StrokeParams {
+            angle_variation: 0.0,
+            max_stroke_length: 500.0,
+            normal_break_threshold: Some(0.5),
+            ..StrokeParams::default()
+        };
+        let field = DirectionField::new(&guides, 512);
+        let nd = make_two_face_normal_data(64);
+
+        let mut rng = SeededRng::new(42);
+        let path = trace_streamline(
+            Vec2::new(0.1, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng,
+            None,
+            Some(&nd),
+        );
+
+        // Path without normal break for comparison
+        let mut rng2 = SeededRng::new(42);
+        let path_no_break = trace_streamline(
+            Vec2::new(0.1, 0.5),
+            &field,
+            &StrokeParams {
+                normal_break_threshold: None,
+                ..params.clone()
+            },
+            512,
+            &mut rng2,
+            None,
+            Some(&nd),
+        );
+
+        if let (Some(p), Some(p_nb)) = (path, path_no_break) {
+            assert!(
+                p.len() < p_nb.len(),
+                "normal boundary should shorten path: {} vs {} points",
+                p.len(),
+                p_nb.len()
+            );
+            let last_x = p.last().unwrap().x;
+            assert!(
+                last_x < 0.6,
+                "path should stop near normal boundary at u=0.5, got last x={last_x:.3}"
+            );
+        }
+    }
+
+    #[test]
+    fn normal_boundary_deterministic() {
+        let guides = vec![GuideVertex {
+            position: Vec2::new(0.5, 0.5),
+            direction: Vec2::X,
+            influence: 1.5,
+        }];
+        let params = StrokeParams {
+            angle_variation: 0.0,
+            normal_break_threshold: Some(0.5),
+            ..StrokeParams::default()
+        };
+        let field = DirectionField::new(&guides, 512);
+        let nd = make_two_face_normal_data(64);
+
+        let mut rng1 = SeededRng::new(42);
+        let mut rng2 = SeededRng::new(42);
+        let p1 = trace_streamline(
+            Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng1, None, Some(&nd),
+        );
+        let p2 = trace_streamline(
+            Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng2, None, Some(&nd),
+        );
+
+        match (p1, p2) {
+            (Some(a), Some(b)) => {
+                assert_eq!(a.len(), b.len());
+                for (pa, pb) in a.iter().zip(b.iter()) {
+                    assert_eq!(pa.x, pb.x);
+                    assert_eq!(pa.y, pb.y);
+                }
+            }
+            (None, None) => {}
+            _ => panic!("determinism broken with normal boundary"),
+        }
+    }
+
+    #[test]
+    fn threshold_none_ignores_normal() {
+        // With threshold=None, normal data should not affect paths.
+        let guides = vec![GuideVertex {
+            position: Vec2::new(0.5, 0.5),
+            direction: Vec2::X,
+            influence: 1.5,
+        }];
+        let params = StrokeParams {
+            angle_variation: 0.0,
+            normal_break_threshold: None,
+            ..StrokeParams::default()
+        };
+        let field = DirectionField::new(&guides, 512);
+        let nd = make_two_face_normal_data(64);
+
+        let mut rng1 = SeededRng::new(42);
+        let mut rng2 = SeededRng::new(42);
+        let path_no_nd = trace_streamline(
+            Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None,
+        );
+        let path_with_nd = trace_streamline(
+            Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng2, None, Some(&nd),
+        );
+
+        match (path_no_nd, path_with_nd) {
+            (Some(a), Some(b)) => {
+                assert_eq!(
+                    a.len(), b.len(),
+                    "threshold=None should not affect path length"
+                );
+            }
+            (None, None) => {}
+            _ => panic!("threshold=None should not affect path existence"),
+        }
+    }
+
+    // ── Normal Boundary Visual Tests ──
+
+    /// Build a 4-face normal data: quadrants have different normals.
+    /// Top-left=+Z, top-right=+X, bottom-left=+Y, bottom-right=(-1,1,1)/√3
+    fn make_four_face_normal_data(resolution: u32) -> MeshNormalData {
+        let size = (resolution * resolution) as usize;
+        let mut normals = Vec::with_capacity(size);
+        let tangents = vec![Vec3::X; size];
+        let bitangents = vec![Vec3::Y; size];
+        let diag = Vec3::new(-1.0, 1.0, 1.0).normalize();
+        for py in 0..resolution {
+            for px in 0..resolution {
+                let u = (px as f32 + 0.5) / resolution as f32;
+                let v = (py as f32 + 0.5) / resolution as f32;
+                let n = match (u < 0.5, v < 0.5) {
+                    (true, true) => Vec3::Z,
+                    (false, true) => Vec3::X,
+                    (true, false) => Vec3::Y,
+                    (false, false) => diag,
+                };
+                normals.push(n);
+            }
+        }
+        MeshNormalData {
+            object_normals: normals,
+            tangents,
+            bitangents,
+            resolution,
+        }
+    }
+
+    /// Draw paths on a normal-map background (normals → RGB).
+    fn draw_paths_on_normals(
+        paths: &[StrokePath],
+        nd: &MeshNormalData,
+        resolution: u32,
+        filename: &str,
+    ) {
+        let res = resolution as usize;
+        let mut img = vec![0u8; res * res * 3];
+
+        // Draw normal map background (object normal → RGB, same encoding as normal maps)
+        for py in 0..resolution {
+            for px in 0..resolution {
+                let uv = Vec2::new(
+                    (px as f32 + 0.5) / resolution as f32,
+                    (py as f32 + 0.5) / resolution as f32,
+                );
+                let n = sample_object_normal(nd, uv);
+                let i = (py as usize * res + px as usize) * 3;
+                // Map [-1,1] → [0,255], dimmed to 40% so paths stand out
+                img[i] = ((n.x * 0.5 + 0.5) * 0.4 * 255.0) as u8;
+                img[i + 1] = ((n.y * 0.5 + 0.5) * 0.4 * 255.0) as u8;
+                img[i + 2] = ((n.z * 0.5 + 0.5) * 0.4 * 255.0) as u8;
+            }
+        }
+
+        // Draw paths
+        for (idx, path) in paths.iter().enumerate() {
+            let hue = (idx as f32 * 0.618034) % 1.0;
+            let (r, g, b) = hue_to_rgb(hue);
+            for point in &path.points {
+                let px = (point.x * resolution as f32) as i32;
+                let py = (point.y * resolution as f32) as i32;
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let x = px + dx;
+                        let y = py + dy;
+                        if x >= 0 && x < resolution as i32 && y >= 0 && y < resolution as i32 {
+                            let i = (y as usize * res + x as usize) * 3;
+                            img[i] = r;
+                            img[i + 1] = g;
+                            img[i + 2] = b;
+                        }
+                    }
+                }
+            }
+        }
+
+        let path = crate::test_module_output_dir("path_placement").join(filename);
+        image::save_buffer(&path, &img, resolution, resolution, image::ColorType::Rgb8)
+            .unwrap();
+        eprintln!("Wrote visual test: {}", path.display());
+    }
+
+    #[test]
+    fn visual_normal_boundary_comparison() {
+        // INSPECT: Two images on a 4-face normal map.
+        // "normal_break_off.png" — strokes cross normal boundaries freely.
+        // "normal_break_on.png"  — strokes stop at hard normal edges.
+        // Expected: ON image shows shorter strokes confined to each face.
+
+        let resolution = 512u32;
+        let nd = make_four_face_normal_data(128);
+
+        let layer_off = PaintLayer {
+            name: String::from("off"),
+            order: 0,
+            params: StrokeParams {
+                brush_width: 15.0,
+                angle_variation: 3.0,
+                max_turn_angle: 20.0,
+                normal_break_threshold: None,
+                ..StrokeParams::default()
+            },
+            guides: vec![
+                GuideVertex {
+                    position: Vec2::new(0.25, 0.25),
+                    direction: Vec2::new(1.0, 0.3).normalize(),
+                    influence: 0.5,
+                },
+                GuideVertex {
+                    position: Vec2::new(0.75, 0.75),
+                    direction: Vec2::new(-0.3, 1.0).normalize(),
+                    influence: 0.5,
+                },
+            ],
+        };
+        let mut layer_on = layer_off.clone();
+        layer_on.params.normal_break_threshold = Some(0.5);
+
+        let paths_off = generate_paths(&layer_off, 0, resolution, None, Some(&nd));
+        let paths_on = generate_paths(&layer_on, 0, resolution, None, Some(&nd));
+
+        eprintln!(
+            "normal_break OFF: {} paths, ON: {} paths",
+            paths_off.len(),
+            paths_on.len()
+        );
+
+        draw_paths_on_normals(&paths_off, &nd, resolution, "normal_break_off.png");
+        draw_paths_on_normals(&paths_on, &nd, resolution, "normal_break_on.png");
+
+        assert!(!paths_off.is_empty());
+        assert!(!paths_on.is_empty());
     }
 }

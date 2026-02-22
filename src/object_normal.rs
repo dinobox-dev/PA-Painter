@@ -823,4 +823,140 @@ mod tests {
         eprintln!("  {}/surface_paint_normal.png     — SurfacePaint tangent-space normal", out_dir.display());
         eprintln!("  {}/depicted_obj_normal_rgb.png  — raw composited stroke normals", out_dir.display());
     }
+
+    /// INSPECT: Normal break threshold ON vs OFF on a real cube mesh.
+    /// "normal_break_off_lambert.png" — strokes cross face boundaries freely.
+    /// "normal_break_on_lambert.png"  — strokes stop at hard-edge face boundaries.
+    #[test]
+    fn visual_normal_break_comparison() {
+        use crate::compositing::composite_all;
+        use crate::output::{generate_normal_map_depicted_form, normalize_height_map, export_normal_png};
+        use crate::types::{GuideVertex, NormalMode, OutputSettings, PaintLayer, StrokeParams};
+
+        let fixtures = crate::test_fixtures_dir();
+        let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
+        let res = 256u32;
+        let nd = compute_mesh_normal_data(&mesh, res);
+
+        let base_layer = PaintLayer {
+            name: "test".to_string(),
+            order: 0,
+            params: StrokeParams {
+                brush_width: 15.0,
+                ridge_height: 0.25,
+                color_variation: 0.0,
+                angle_variation: 3.0,
+                max_turn_angle: 20.0,
+                normal_break_threshold: None,
+                ..StrokeParams::default()
+            },
+            guides: vec![GuideVertex {
+                position: Vec2::new(0.5, 0.5),
+                direction: Vec2::X,
+                influence: 1.5,
+            }],
+        };
+
+        let mut layer_on = base_layer.clone();
+        layer_on.params.normal_break_threshold = Some(0.5);
+
+        let mut settings = OutputSettings::default();
+        settings.normal_mode = NormalMode::DepictedForm;
+        let solid = crate::types::Color::rgb(0.5, 0.4, 0.3);
+
+        let maps_off = composite_all(
+            &[base_layer.clone()], res, None, 0, 0, solid, &settings, Some(&nd),
+        );
+        let maps_on = composite_all(
+            &[layer_on.clone()], res, None, 0, 0, solid, &settings, Some(&nd),
+        );
+
+        let out_dir = crate::test_module_output_dir("object_normal");
+
+        // Three-point lighting (same as depicted_form test)
+        let lights: [(Vec3, f32); 3] = [
+            (Vec3::new(1.0, 1.0, 1.0).normalize(),  0.45),
+            (Vec3::new(-1.0, 0.0, 0.5).normalize(), 0.30),
+            (Vec3::new(0.0, -1.0, 0.3).normalize(), 0.25),
+        ];
+        let ambient = 0.12;
+
+        let nd_index = |i: usize| -> usize {
+            let px = i as u32 % res;
+            let py = i as u32 / res;
+            let nx = ((px as f32 + 0.5) / res as f32 * nd.resolution as f32).floor() as u32;
+            let ny = ((py as f32 + 0.5) / res as f32 * nd.resolution as f32).floor() as u32;
+            (ny.min(nd.resolution - 1) * nd.resolution + nx.min(nd.resolution - 1)) as usize
+        };
+
+        let lambert = |obj_n: Vec3| -> f32 {
+            let diffuse: f32 = lights.iter()
+                .map(|(dir, intensity)| obj_n.dot(*dir).max(0.0) * intensity)
+                .sum();
+            (ambient + diffuse).clamp(0.0, 1.0)
+        };
+
+        let reconstruct = |i: usize, n: &[f32; 3]| -> Option<Vec3> {
+            let ts = Vec3::new(n[0] * 2.0 - 1.0, n[1] * 2.0 - 1.0, n[2] * 2.0 - 1.0);
+            let ni = nd_index(i);
+            let t = nd.tangents[ni];
+            let b = nd.bitangents[ni];
+            let n_geom = nd.object_normals[ni];
+            if n_geom.length_squared() < 0.5 {
+                return None;
+            }
+            Some((ts.x * t + ts.y * b + ts.z * n_geom).normalize_or_zero())
+        };
+
+        // Render both variants
+        for (label, maps, layer) in [
+            ("normal_break_off", &maps_off, &base_layer),
+            ("normal_break_on", &maps_on, &layer_on),
+        ] {
+            let normalized_height = normalize_height_map(&maps.height, &[layer.clone()]);
+            let normals = generate_normal_map_depicted_form(
+                &normalized_height, &nd, &maps.object_normal, res, settings.normal_strength,
+            );
+
+            // Lambert shading
+            let lambert_pixels: Vec<u8> = normals.iter().enumerate().map(|(i, n)| {
+                match reconstruct(i, n) {
+                    Some(obj_n) => (lambert(obj_n) * 255.0) as u8,
+                    None => 0u8,
+                }
+            }).collect();
+
+            let path = out_dir.join(format!("{label}_lambert.png"));
+            image::save_buffer(&path, &lambert_pixels, res, res, image::ColorType::L8)
+                .expect("save lambert");
+
+            // Normal map
+            let path = out_dir.join(format!("{label}_normal.png"));
+            export_normal_png(&normals, res, &path).expect("save normal");
+
+            // Raw object-space stroke normals (diagnostic)
+            let obj_pixels: Vec<u8> = (0..(res * res) as usize).flat_map(|i| {
+                let sn = maps.object_normal[i];
+                let n = Vec3::new(sn[0], sn[1], sn[2]);
+                if n.length_squared() > 0.5 {
+                    let nn = n.normalize();
+                    [
+                        ((nn.x * 0.5 + 0.5) * 255.0) as u8,
+                        ((nn.y * 0.5 + 0.5) * 255.0) as u8,
+                        ((nn.z * 0.5 + 0.5) * 255.0) as u8,
+                    ]
+                } else {
+                    [0, 0, 0]
+                }
+            }).collect();
+
+            let path = out_dir.join(format!("{label}_obj_normal_rgb.png"));
+            image::save_buffer(&path, &obj_pixels, res, res, image::ColorType::Rgb8)
+                .expect("save obj_normal_rgb");
+        }
+
+        eprintln!("=== Normal Break Comparison ===");
+        eprintln!("  {}/normal_break_off_lambert.png  — no threshold (strokes cross faces)", out_dir.display());
+        eprintln!("  {}/normal_break_on_lambert.png   — threshold=0.5 (strokes stop at edges)", out_dir.display());
+    }
 }

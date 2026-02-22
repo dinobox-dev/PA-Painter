@@ -387,6 +387,7 @@ mod tests {
                 angle_variation: 5.0,
                 max_turn_angle: 15.0,
                 color_break_threshold: None,
+                normal_break_threshold: None,
                 seed: 100 + order as u32,
             },
             guides,

@@ -137,6 +137,7 @@ fn main() {
             base_colors.as_deref(),
             tw,
             th,
+            normal_data.as_ref(),
         );
         project.set_cached_paths(paths, resolution);
     }
