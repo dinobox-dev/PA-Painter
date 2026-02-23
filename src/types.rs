@@ -1,5 +1,6 @@
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
+use std::hash::{Hash, Hasher};
 
 // ── Color Types ──
 
@@ -125,7 +126,7 @@ impl<'a> BaseColorSource<'a> {
 // ── Enums ──
 
 /// Pressure curve preset determining how brush pressure varies along a stroke.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PressurePreset {
     Uniform,
     FadeOut,
@@ -224,6 +225,434 @@ pub struct PaintLayer {
     pub order: i32,
     pub params: StrokeParams,
     pub guides: Vec<GuideVertex>,
+}
+
+// ── Mesh Groups ──
+
+/// A sub-group within a loaded mesh (vertex group / submesh / OBJ object).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshGroup {
+    /// Group name (OBJ `g` name or glTF primitive/material name).
+    pub name: String,
+    /// Start offset into the mesh's indices array.
+    pub index_offset: u32,
+    /// Number of indices belonging to this group (always a multiple of 3).
+    pub index_count: u32,
+}
+
+// ── Preset System ──
+
+/// Brush physics values extracted from StrokeParams.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StrokeValues {
+    pub brush_width: f32,
+    pub load: f32,
+    pub base_height: f32,
+    pub ridge_height: f32,
+    pub ridge_width: f32,
+    pub ridge_variation: f32,
+    pub body_wiggle: f32,
+    pub pressure_preset: PressurePreset,
+}
+
+impl Default for StrokeValues {
+    fn default() -> Self {
+        let d = StrokeParams::default();
+        Self {
+            brush_width: d.brush_width,
+            load: d.load,
+            base_height: d.base_height,
+            ridge_height: d.ridge_height,
+            ridge_width: d.ridge_width,
+            ridge_variation: d.ridge_variation,
+            body_wiggle: d.body_wiggle,
+            pressure_preset: d.pressure_preset,
+        }
+    }
+}
+
+impl Hash for StrokeValues {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.brush_width.to_bits().hash(state);
+        self.load.to_bits().hash(state);
+        self.base_height.to_bits().hash(state);
+        self.ridge_height.to_bits().hash(state);
+        self.ridge_width.to_bits().hash(state);
+        self.ridge_variation.to_bits().hash(state);
+        self.body_wiggle.to_bits().hash(state);
+        self.pressure_preset.hash(state);
+    }
+}
+
+/// Placement strategy values extracted from StrokeParams.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatternValues {
+    pub guides: Vec<GuideVertex>,
+    pub stroke_spacing: f32,
+    pub max_stroke_length: f32,
+    pub angle_variation: f32,
+    pub max_turn_angle: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_break_threshold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_break_threshold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlap_ratio: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlap_dist_factor: Option<f32>,
+    pub color_variation: f32,
+}
+
+impl Default for PatternValues {
+    fn default() -> Self {
+        let d = StrokeParams::default();
+        Self {
+            guides: vec![GuideVertex::default()],
+            stroke_spacing: d.stroke_spacing,
+            max_stroke_length: d.max_stroke_length,
+            angle_variation: d.angle_variation,
+            max_turn_angle: d.max_turn_angle,
+            color_break_threshold: d.color_break_threshold,
+            normal_break_threshold: d.normal_break_threshold,
+            overlap_ratio: d.overlap_ratio,
+            overlap_dist_factor: d.overlap_dist_factor,
+            color_variation: d.color_variation,
+        }
+    }
+}
+
+impl Hash for PatternValues {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for g in &self.guides {
+            g.position.x.to_bits().hash(state);
+            g.position.y.to_bits().hash(state);
+            g.direction.x.to_bits().hash(state);
+            g.direction.y.to_bits().hash(state);
+            g.influence.to_bits().hash(state);
+        }
+        self.stroke_spacing.to_bits().hash(state);
+        self.max_stroke_length.to_bits().hash(state);
+        self.angle_variation.to_bits().hash(state);
+        self.max_turn_angle.to_bits().hash(state);
+        self.color_break_threshold.map(|v| v.to_bits()).hash(state);
+        self.normal_break_threshold.map(|v| v.to_bits()).hash(state);
+        self.overlap_ratio.map(|v| v.to_bits()).hash(state);
+        self.overlap_dist_factor.map(|v| v.to_bits()).hash(state);
+        self.color_variation.to_bits().hash(state);
+    }
+}
+
+/// A named stroke preset (brush physics template).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StrokePreset {
+    pub name: String,
+    #[serde(flatten)]
+    pub values: StrokeValues,
+}
+
+/// A named pattern preset (placement strategy template).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatternPreset {
+    pub name: String,
+    #[serde(flatten)]
+    pub values: PatternValues,
+}
+
+/// A paint slot binding a mesh group to stroke/pattern settings.
+/// Replaces PaintLayer as the user-facing representation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaintSlot {
+    /// Name of the corresponding MeshGroup (or `"__full_uv__"` for whole UV).
+    pub group_name: String,
+    /// Compositing order (lower = painted first).
+    pub order: i32,
+    /// Stroke settings (brush physics).
+    pub stroke: StrokeValues,
+    /// Pattern settings (placement strategy).
+    pub pattern: PatternValues,
+    /// Random seed.
+    pub seed: u32,
+}
+
+impl PaintSlot {
+    /// Convert to PaintLayer for downstream pipeline compatibility.
+    pub fn to_paint_layer(&self) -> PaintLayer {
+        PaintLayer {
+            name: self.group_name.clone(),
+            order: self.order,
+            params: StrokeParams::from_values(&self.stroke, &self.pattern, self.seed),
+            guides: self.pattern.guides.clone(),
+        }
+    }
+
+    /// Create a PaintSlot from a PaintLayer (used for v2→v3 migration).
+    pub fn from_paint_layer(layer: &PaintLayer) -> Self {
+        let p = &layer.params;
+        PaintSlot {
+            group_name: "__full_uv__".to_string(),
+            order: layer.order,
+            stroke: StrokeValues {
+                brush_width: p.brush_width,
+                load: p.load,
+                base_height: p.base_height,
+                ridge_height: p.ridge_height,
+                ridge_width: p.ridge_width,
+                ridge_variation: p.ridge_variation,
+                body_wiggle: p.body_wiggle,
+                pressure_preset: p.pressure_preset,
+            },
+            pattern: PatternValues {
+                guides: layer.guides.clone(),
+                stroke_spacing: p.stroke_spacing,
+                max_stroke_length: p.max_stroke_length,
+                angle_variation: p.angle_variation,
+                max_turn_angle: p.max_turn_angle,
+                color_break_threshold: p.color_break_threshold,
+                normal_break_threshold: p.normal_break_threshold,
+                overlap_ratio: p.overlap_ratio,
+                overlap_dist_factor: p.overlap_dist_factor,
+                color_variation: p.color_variation,
+            },
+            seed: p.seed,
+        }
+    }
+
+    /// Apply a stroke preset (value copy).
+    pub fn apply_stroke_preset(&mut self, preset: &StrokePreset) {
+        self.stroke = preset.values.clone();
+    }
+
+    /// Apply a pattern preset (value copy).
+    pub fn apply_pattern_preset(&mut self, preset: &PatternPreset) {
+        self.pattern = preset.values.clone();
+    }
+}
+
+impl StrokeParams {
+    /// Reconstruct StrokeParams from split values.
+    pub fn from_values(stroke: &StrokeValues, pattern: &PatternValues, seed: u32) -> StrokeParams {
+        StrokeParams {
+            brush_width: stroke.brush_width,
+            load: stroke.load,
+            base_height: stroke.base_height,
+            ridge_height: stroke.ridge_height,
+            ridge_width: stroke.ridge_width,
+            ridge_variation: stroke.ridge_variation,
+            body_wiggle: stroke.body_wiggle,
+            pressure_preset: stroke.pressure_preset,
+            stroke_spacing: pattern.stroke_spacing,
+            max_stroke_length: pattern.max_stroke_length,
+            angle_variation: pattern.angle_variation,
+            max_turn_angle: pattern.max_turn_angle,
+            color_break_threshold: pattern.color_break_threshold,
+            normal_break_threshold: pattern.normal_break_threshold,
+            overlap_ratio: pattern.overlap_ratio,
+            overlap_dist_factor: pattern.overlap_dist_factor,
+            color_variation: pattern.color_variation,
+            seed,
+        }
+    }
+}
+
+/// Global library of reusable presets.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PresetLibrary {
+    pub strokes: Vec<StrokePreset>,
+    pub patterns: Vec<PatternPreset>,
+}
+
+impl PresetLibrary {
+    /// Find a stroke preset whose values match exactly.
+    pub fn matching_stroke_preset(&self, values: &StrokeValues) -> Option<&str> {
+        self.strokes
+            .iter()
+            .find(|p| &p.values == values)
+            .map(|p| p.name.as_str())
+    }
+
+    /// Find a pattern preset whose values match exactly.
+    pub fn matching_pattern_preset(&self, values: &PatternValues) -> Option<&str> {
+        self.patterns
+            .iter()
+            .find(|p| &p.values == values)
+            .map(|p| p.name.as_str())
+    }
+
+    /// Add a stroke preset if no duplicate exists. Returns Err with the existing name.
+    pub fn try_add_stroke_preset(&mut self, preset: StrokePreset) -> Result<(), String> {
+        if let Some(name) = self.matching_stroke_preset(&preset.values) {
+            return Err(name.to_string());
+        }
+        self.strokes.push(preset);
+        Ok(())
+    }
+
+    /// Add a pattern preset if no duplicate exists. Returns Err with the existing name.
+    pub fn try_add_pattern_preset(&mut self, preset: PatternPreset) -> Result<(), String> {
+        if let Some(name) = self.matching_pattern_preset(&preset.values) {
+            return Err(name.to_string());
+        }
+        self.patterns.push(preset);
+        Ok(())
+    }
+
+    /// Built-in default presets.
+    pub fn built_in() -> PresetLibrary {
+        PresetLibrary {
+            strokes: vec![
+                StrokePreset {
+                    name: "flat_wide".to_string(),
+                    values: StrokeValues {
+                        brush_width: 40.0,
+                        load: 0.8,
+                        base_height: 0.5,
+                        ridge_height: 0.3,
+                        ridge_width: 5.0,
+                        ridge_variation: 0.1,
+                        body_wiggle: 0.15,
+                        pressure_preset: PressurePreset::FadeOut,
+                    },
+                },
+                StrokePreset {
+                    name: "round_thin".to_string(),
+                    values: StrokeValues {
+                        brush_width: 15.0,
+                        load: 0.9,
+                        base_height: 0.6,
+                        ridge_height: 0.2,
+                        ridge_width: 3.0,
+                        ridge_variation: 0.05,
+                        body_wiggle: 0.1,
+                        pressure_preset: PressurePreset::Taper,
+                    },
+                },
+                StrokePreset {
+                    name: "dry_brush".to_string(),
+                    values: StrokeValues {
+                        brush_width: 50.0,
+                        load: 0.3,
+                        base_height: 0.3,
+                        ridge_height: 0.1,
+                        ridge_width: 6.0,
+                        ridge_variation: 0.2,
+                        body_wiggle: 0.2,
+                        pressure_preset: PressurePreset::FadeOut,
+                    },
+                },
+                StrokePreset {
+                    name: "impasto".to_string(),
+                    values: StrokeValues {
+                        brush_width: 30.0,
+                        load: 1.0,
+                        base_height: 0.8,
+                        ridge_height: 0.5,
+                        ridge_width: 4.0,
+                        ridge_variation: 0.15,
+                        body_wiggle: 0.1,
+                        pressure_preset: PressurePreset::Bell,
+                    },
+                },
+                StrokePreset {
+                    name: "glaze".to_string(),
+                    values: StrokeValues {
+                        brush_width: 35.0,
+                        load: 0.5,
+                        base_height: 0.15,
+                        ridge_height: 0.05,
+                        ridge_width: 5.0,
+                        ridge_variation: 0.05,
+                        body_wiggle: 0.1,
+                        pressure_preset: PressurePreset::Uniform,
+                    },
+                },
+            ],
+            patterns: vec![
+                PatternPreset {
+                    name: "uniform_horizontal".to_string(),
+                    values: PatternValues {
+                        guides: vec![GuideVertex {
+                            position: Vec2::new(0.5, 0.5),
+                            direction: Vec2::X,
+                            influence: 1.0,
+                        }],
+                        stroke_spacing: 1.0,
+                        max_stroke_length: 240.0,
+                        angle_variation: 0.0,
+                        max_turn_angle: 15.0,
+                        color_break_threshold: None,
+                        normal_break_threshold: None,
+                        overlap_ratio: None,
+                        overlap_dist_factor: None,
+                        color_variation: 0.1,
+                    },
+                },
+                PatternPreset {
+                    name: "crosshatch".to_string(),
+                    values: PatternValues {
+                        guides: vec![
+                            GuideVertex {
+                                position: Vec2::new(0.3, 0.5),
+                                direction: Vec2::new(1.0, 0.3).normalize(),
+                                influence: 0.6,
+                            },
+                            GuideVertex {
+                                position: Vec2::new(0.7, 0.5),
+                                direction: Vec2::new(-0.3, 1.0).normalize(),
+                                influence: 0.6,
+                            },
+                        ],
+                        stroke_spacing: 0.8,
+                        max_stroke_length: 120.0,
+                        angle_variation: 5.0,
+                        max_turn_angle: 20.0,
+                        color_break_threshold: None,
+                        normal_break_threshold: None,
+                        overlap_ratio: None,
+                        overlap_dist_factor: None,
+                        color_variation: 0.1,
+                    },
+                },
+                PatternPreset {
+                    name: "loose_organic".to_string(),
+                    values: PatternValues {
+                        guides: vec![GuideVertex {
+                            position: Vec2::new(0.5, 0.5),
+                            direction: Vec2::X,
+                            influence: 0.5,
+                        }],
+                        stroke_spacing: 1.2,
+                        max_stroke_length: 300.0,
+                        angle_variation: 15.0,
+                        max_turn_angle: 30.0,
+                        color_break_threshold: None,
+                        normal_break_threshold: None,
+                        overlap_ratio: None,
+                        overlap_dist_factor: None,
+                        color_variation: 0.15,
+                    },
+                },
+                PatternPreset {
+                    name: "tight_fill".to_string(),
+                    values: PatternValues {
+                        guides: vec![GuideVertex {
+                            position: Vec2::new(0.5, 0.5),
+                            direction: Vec2::X,
+                            influence: 0.8,
+                        }],
+                        stroke_spacing: 0.6,
+                        max_stroke_length: 180.0,
+                        angle_variation: 3.0,
+                        max_turn_angle: 15.0,
+                        color_break_threshold: None,
+                        normal_break_threshold: None,
+                        overlap_ratio: Some(0.8),
+                        overlap_dist_factor: Some(0.2),
+                        color_variation: 0.08,
+                    },
+                },
+            ],
+        }
+    }
 }
 
 /// A stroke path: ordered list of UV-space points with cached arc-length table.

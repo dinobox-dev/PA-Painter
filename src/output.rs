@@ -937,6 +937,7 @@ mod tests {
             &BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)),
             &settings,
             None,
+            &[],
         );
 
         let dir = std::env::temp_dir().join("pap_test_output").join("export_all_png");
@@ -963,6 +964,7 @@ mod tests {
             &BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)),
             &settings,
             None,
+            &[],
         );
 
         let dir = std::env::temp_dir().join("pap_test_output").join("export_all_exr");
@@ -986,7 +988,7 @@ mod tests {
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.6, 0.4, 0.3);
-        let maps = composite_all(&[layer.clone()], 256, &BaseColorSource::solid(solid), &settings, None);
+        let maps = composite_all(&[layer.clone()], 256, &BaseColorSource::solid(solid), &settings, None, &[]);
 
         let dir = crate::test_module_output_dir("export");
         let _ = std::fs::create_dir_all(&dir);

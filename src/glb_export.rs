@@ -540,6 +540,7 @@ mod tests {
                 Vec2::new(0.0, 1.0),
             ],
             indices: vec![0, 1, 2],
+            groups: vec![],
         }
     }
 
@@ -657,7 +658,7 @@ mod tests {
             }
         }
 
-        LoadedMesh { positions, uvs, indices }
+        LoadedMesh { positions, uvs, indices, groups: vec![] }
     }
 
     #[test]
@@ -711,7 +712,7 @@ mod tests {
             };
 
             let maps = composite_all(
-                &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, mesh_nd,
+                &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, mesh_nd, &[],
             );
 
             let normalized_height = normalize_height_map(&maps.height, &[layer.clone()]);
@@ -813,7 +814,7 @@ mod tests {
         settings.background_mode = BackgroundMode::Transparent;
 
         let maps = composite_all(
-            &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, Some(&nd),
+            &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, Some(&nd), &[],
         );
 
         let normalized_height = normalize_height_map(&maps.height, &[layer]);
@@ -884,14 +885,14 @@ mod tests {
 
         // Generate paths with overscan + Poisson + 3 passes
         let paths = generate_paths(
-            &layer, 0, res, None, Some(&nd),
+            &layer, 0, res, None, Some(&nd), None,
         );
         eprintln!("Overscan+Poisson: {} paths generated", paths.len());
 
         let cached_paths = vec![paths];
         let maps = composite_all_with_paths(
             &[layer.clone()], res, &BaseColorSource::solid(solid), &settings,
-            Some(&cached_paths), Some(&nd),
+            Some(&cached_paths), Some(&nd), &[],
         );
 
         let normalized_height = normalize_height_map(&maps.height, &[layer]);

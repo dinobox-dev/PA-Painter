@@ -1,6 +1,8 @@
 use glam::Vec2;
 
-use crate::types::{GuideVertex, PaintLayer, StrokeParams};
+use crate::types::{
+    GuideVertex, PaintLayer, PaintSlot, PatternValues, StrokeParams, StrokeValues,
+};
 
 pub fn make_layer_with_order(order: i32) -> PaintLayer {
     PaintLayer {
@@ -12,6 +14,23 @@ pub fn make_layer_with_order(order: i32) -> PaintLayer {
             direction: Vec2::X,
             influence: 1.5,
         }],
+    }
+}
+
+pub fn make_slot_with_order(order: i32) -> PaintSlot {
+    PaintSlot {
+        group_name: format!("group_{}", order),
+        order,
+        stroke: StrokeValues::default(),
+        pattern: PatternValues {
+            guides: vec![GuideVertex {
+                position: Vec2::new(0.5, 0.5),
+                direction: Vec2::X,
+                influence: 1.5,
+            }],
+            ..PatternValues::default()
+        },
+        seed: 42,
     }
 }
 

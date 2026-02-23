@@ -8,6 +8,7 @@ use crate::object_normal::{sample_object_normal, MeshNormalData};
 use crate::rng::SeededRng;
 use crate::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
 use crate::types::{PaintLayer, StrokePath, StrokeParams};
+use crate::uv_mask::UvMask;
 
 /// Generate Poisson disk seeds within an arbitrary UV rectangle `[lo, hi]`.
 ///
@@ -118,6 +119,7 @@ pub fn trace_streamline(
     color_tex: Option<&ColorTextureRef<'_>>,
     normal_data: Option<&MeshNormalData>,
     uv_bounds: (Vec2, Vec2),
+    mask: Option<&UvMask>,
 ) -> Option<Vec<Vec2>> {
     let step_size_uv = 1.0 / resolution as f32;
 
@@ -170,6 +172,13 @@ pub fn trace_streamline(
         let (uv_lo, uv_hi) = uv_bounds;
         if next_pos.x < uv_lo.x || next_pos.x > uv_hi.x || next_pos.y < uv_lo.y || next_pos.y > uv_hi.y {
             break;
+        }
+
+        // Mask boundary check
+        if let Some(mask) = mask {
+            if !mask.sample(next_pos) {
+                break;
+            }
         }
 
         // Color boundary check
@@ -276,20 +285,39 @@ pub fn generate_paths(
     resolution: u32,
     color_tex: Option<&ColorTextureRef<'_>>,
     normal_data: Option<&MeshNormalData>,
+    mask: Option<&UvMask>,
 ) -> Vec<StrokePath> {
     let field = DirectionField::new(&layer.guides, resolution);
     let brush_width_uv = layer.params.brush_width / resolution as f32;
     let overlap_ratio = layer.params.overlap_ratio.unwrap_or(0.7);
     let overlap_dist_factor = layer.params.overlap_dist_factor.unwrap_or(0.3);
     let margin = brush_width_uv * 3.0;
-    let uv_lo = Vec2::splat(-margin);
-    let uv_hi = Vec2::splat(1.0 + margin);
     let min_length = brush_width_uv;
 
-    let seeds = generate_seeds_poisson_in(&layer.params, resolution, uv_lo, uv_hi);
+    // When a mask is provided, seed within its AABB (expanded by overscan margin).
+    // Otherwise use the full [0,1]² with overscan.
+    let (seed_lo, seed_hi) = if let Some(m) = mask {
+        let (mlo, mhi) = m.aabb();
+        (
+            Vec2::new((mlo.x - margin).max(-margin), (mlo.y - margin).max(-margin)),
+            Vec2::new((mhi.x + margin).min(1.0 + margin), (mhi.y + margin).min(1.0 + margin)),
+        )
+    } else {
+        (Vec2::splat(-margin), Vec2::splat(1.0 + margin))
+    };
+
+    let seeds = generate_seeds_poisson_in(&layer.params, resolution, seed_lo, seed_hi);
+
+    // Filter seeds by mask
+    let filtered_seeds: Vec<Vec2> = if let Some(m) = mask {
+        seeds.into_iter().filter(|s| m.sample(*s)).collect()
+    } else {
+        seeds
+    };
+
     let mut rng = SeededRng::new(layer.params.seed);
     let mut raw_paths: Vec<Vec<Vec2>> = Vec::new();
-    for seed_point in &seeds {
+    for seed_point in &filtered_seeds {
         if let Some(path) = trace_streamline(
             *seed_point,
             &field,
@@ -298,7 +326,8 @@ pub fn generate_paths(
             &mut rng,
             color_tex,
             normal_data,
-            (uv_lo, uv_hi),
+            (seed_lo, seed_hi),
+            mask,
         ) {
             if let Some(clipped) = clip_path_to_uv(path) {
                 let length: f32 = clipped
@@ -443,7 +472,7 @@ mod tests {
 
         let field = DirectionField::new(&layer.guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
 
         let path = path.expect("path should exist");
         for p in &path {
@@ -468,7 +497,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
 
         let path = path.expect("path should exist");
         for p in &path {
@@ -496,7 +525,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.9, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
+        let path = trace_streamline(Vec2::new(0.9, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
 
         if let Some(path) = path {
             let last = path.last().unwrap();
@@ -525,7 +554,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
+        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
 
         // min_length = 100/512 ≈ 0.195 UV, but max target ≈ 0.002 UV
         assert!(path.is_none(), "short path should be filtered out");
@@ -552,6 +581,7 @@ mod tests {
                 None,
                 None,
                 (Vec2::ZERO, Vec2::ONE),
+                None,
             ) {
                 let len: f32 = path
                     .windows(2)
@@ -620,8 +650,8 @@ mod tests {
     #[test]
     fn generate_paths_determinism() {
         let layer = make_layer();
-        let paths1 = generate_paths(&layer, 0, 256, None, None);
-        let paths2 = generate_paths(&layer, 0, 256, None, None);
+        let paths1 = generate_paths(&layer, 0, 256, None, None, None);
+        let paths2 = generate_paths(&layer, 0, 256, None, None, None);
 
         assert_eq!(paths1.len(), paths2.len());
         for (a, b) in paths1.iter().zip(paths2.iter()) {
@@ -638,7 +668,7 @@ mod tests {
     #[test]
     fn generate_paths_sorted_by_y() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 256, None, None);
+        let paths = generate_paths(&layer, 0, 256, None, None, None);
 
         assert!(!paths.is_empty(), "should generate some paths");
         for i in 1..paths.len() {
@@ -656,7 +686,7 @@ mod tests {
     #[test]
     fn generate_paths_unique_stroke_ids() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 256, None, None);
+        let paths = generate_paths(&layer, 0, 256, None, None, None);
 
         let mut ids: Vec<u32> = paths.iter().map(|p| p.stroke_id).collect();
         ids.sort();
@@ -668,7 +698,7 @@ mod tests {
     fn area_coverage_90_percent() {
         let layer = make_layer();
         let resolution = 512u32;
-        let paths = generate_paths(&layer, 0, resolution, None, None);
+        let paths = generate_paths(&layer, 0, resolution, None, None, None);
 
         let mut covered = vec![false; (resolution * resolution) as usize];
         let brush_radius_uv = layer.params.brush_width / resolution as f32 / 2.0;
@@ -721,7 +751,7 @@ mod tests {
     #[test]
     fn paths_stay_within_uv() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 512, None, None);
+        let paths = generate_paths(&layer, 0, 512, None, None, None);
 
         for path in &paths {
             for point in &path.points {
@@ -756,7 +786,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
+        let path = trace_streamline(Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
 
         let path = path.expect("curved path should exist");
         assert!(path.len() > 10, "path should have enough points");
@@ -793,7 +823,7 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.3, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE));
+        let path = trace_streamline(Vec2::new(0.3, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
 
         if let Some(path) = path {
             for w in path.windows(3) {
@@ -876,7 +906,7 @@ mod tests {
     fn visual_horizontal_strokes() {
         let layer = make_layer();
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, resolution, None, None);
+        let paths = generate_paths(&layer, 0, resolution, None, None, None);
 
         eprintln!("visual_horizontal_strokes: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "horizontal_strokes.png");
@@ -919,7 +949,7 @@ mod tests {
             ],
         };
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, resolution, None, None);
+        let paths = generate_paths(&layer, 0, resolution, None, None, None);
 
         eprintln!("visual_spiral_guides: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "spiral_guides.png");
@@ -1022,8 +1052,8 @@ mod tests {
         let mut layer_on = layer_off.clone();
         layer_on.params.color_break_threshold = Some(0.08);
 
-        let paths_off = generate_paths(&layer_off, 0, resolution, Some(&tex_ref), None);
-        let paths_on = generate_paths(&layer_on, 0, resolution, Some(&tex_ref), None);
+        let paths_off = generate_paths(&layer_off, 0, resolution, Some(&tex_ref), None, None);
+        let paths_on = generate_paths(&layer_on, 0, resolution, Some(&tex_ref), None, None);
 
         eprintln!(
             "color_break OFF: {} paths, ON: {} paths",
@@ -1065,6 +1095,7 @@ mod tests {
                 None,
                 None,
                 (Vec2::ZERO, Vec2::ONE),
+                None,
             ) {
                 let len: f32 = path
                     .windows(2)
@@ -1106,6 +1137,7 @@ mod tests {
                 None,
                 None,
                 (Vec2::ZERO, Vec2::ONE),
+                None,
             ) {
                 let len: f32 = path
                     .windows(2)
@@ -1131,8 +1163,8 @@ mod tests {
 
         let mut rng1 = SeededRng::new(99);
         let mut rng2 = SeededRng::new(99);
-        let path1 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE));
-        let path2 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng2, None, None, (Vec2::ZERO, Vec2::ONE));
+        let path1 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE), None);
+        let path2 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng2, None, None, (Vec2::ZERO, Vec2::ONE), None);
 
         match (path1, path2) {
             (Some(p1), Some(p2)) => {
@@ -1171,6 +1203,7 @@ mod tests {
                     None,
                     None,
                     (Vec2::ZERO, Vec2::ONE),
+                    None,
                 ) {
                     let len: f32 = path
                         .windows(2)
@@ -1225,7 +1258,7 @@ mod tests {
         let mut rng1 = SeededRng::new(42);
         let mut rng2 = SeededRng::new(42);
         let path_no_tex =
-            trace_streamline(Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE));
+            trace_streamline(Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE), None);
         let path_with_tex = trace_streamline(
             Vec2::new(0.1, 0.5),
             &field,
@@ -1235,6 +1268,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
         );
 
         match (path_no_tex, path_with_tex) {
@@ -1289,6 +1323,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
         );
 
         // Path should exist but be shorter than without boundary
@@ -1305,6 +1340,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
         );
 
         if let (Some(p), Some(p_nb)) = (path, path_no_break) {
@@ -1360,6 +1396,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
         );
         let path_no_break = trace_streamline(
             Vec2::new(0.1, 0.5),
@@ -1370,6 +1407,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
         );
 
         match (path_break, path_no_break) {
@@ -1419,6 +1457,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
         );
         let p2 = trace_streamline(
             Vec2::new(0.2, 0.5),
@@ -1429,6 +1468,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
         );
 
         match (p1, p2) {
@@ -1500,6 +1540,7 @@ mod tests {
             None,
             Some(&nd),
             (Vec2::ZERO, Vec2::ONE),
+            None,
         );
 
         // Path without normal break for comparison
@@ -1516,6 +1557,7 @@ mod tests {
             None,
             Some(&nd),
             (Vec2::ZERO, Vec2::ONE),
+            None,
         );
 
         if let (Some(p), Some(p_nb)) = (path, path_no_break) {
@@ -1552,9 +1594,11 @@ mod tests {
         let mut rng2 = SeededRng::new(42);
         let p1 = trace_streamline(
             Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng1, None, Some(&nd), (Vec2::ZERO, Vec2::ONE),
+            None,
         );
         let p2 = trace_streamline(
             Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng2, None, Some(&nd), (Vec2::ZERO, Vec2::ONE),
+            None,
         );
 
         match (p1, p2) {
@@ -1590,9 +1634,11 @@ mod tests {
         let mut rng2 = SeededRng::new(42);
         let path_no_nd = trace_streamline(
             Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE),
+            None,
         );
         let path_with_nd = trace_streamline(
             Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng2, None, Some(&nd), (Vec2::ZERO, Vec2::ONE),
+            None,
         );
 
         match (path_no_nd, path_with_nd) {
@@ -1728,8 +1774,8 @@ mod tests {
         let mut layer_on = layer_off.clone();
         layer_on.params.normal_break_threshold = Some(0.5);
 
-        let paths_off = generate_paths(&layer_off, 0, resolution, None, Some(&nd));
-        let paths_on = generate_paths(&layer_on, 0, resolution, None, Some(&nd));
+        let paths_off = generate_paths(&layer_off, 0, resolution, None, Some(&nd), None);
+        let paths_on = generate_paths(&layer_on, 0, resolution, None, Some(&nd), None);
 
         eprintln!(
             "normal_break OFF: {} paths, ON: {} paths",
@@ -1819,7 +1865,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_base = generate_paths(&layer_base, 0, resolution, None, None);
+        let paths_base = generate_paths(&layer_base, 0, resolution, None, None, None);
 
         // ── 2. Method A: tight spacing ──
         let layer_a = PaintLayer {
@@ -1831,7 +1877,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_a = generate_paths(&layer_a, 0, resolution, None, None);
+        let paths_a = generate_paths(&layer_a, 0, resolution, None, None, None);
 
         // ── 3. Method A+B: tight spacing + relaxed overlap filter ──
         let layer_ab = PaintLayer {
@@ -1845,7 +1891,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_ab = generate_paths(&layer_ab, 0, resolution, None, None);
+        let paths_ab = generate_paths(&layer_ab, 0, resolution, None, None, None);
 
         eprintln!("=== Density Comparison ===");
         eprintln!("  Baseline:      {} paths", paths_base.len());

@@ -315,6 +315,7 @@ mod tests {
                 Vec2::new(0.0, 1.0),
             ],
             indices: vec![0, 1, 2],
+            groups: vec![],
         }
     }
 
@@ -334,6 +335,7 @@ mod tests {
                 Vec2::new(0.0, 1.0),
             ],
             indices: vec![0, 1, 2, 0, 2, 3],
+            groups: vec![],
         }
     }
 
@@ -598,6 +600,7 @@ mod tests {
                 Vec2::new(0.0, 0.05),
             ],
             indices: vec![0, 1, 2],
+            groups: vec![],
         };
 
         let data = compute_mesh_normal_data(&mesh, 32);
@@ -733,7 +736,7 @@ mod tests {
 
         let solid = crate::types::Color::rgb(0.5, 0.4, 0.3);
         let maps = composite_all(
-            &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, Some(&nd),
+            &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, Some(&nd), &[],
         );
 
         let out_dir = crate::test_module_output_dir("object_normal");
@@ -893,10 +896,10 @@ mod tests {
 
         let base_color = BaseColorSource::solid(solid);
         let maps_off = composite_all(
-            &[base_layer.clone()], res, &base_color, &settings, Some(&nd),
+            &[base_layer.clone()], res, &base_color, &settings, Some(&nd), &[],
         );
         let maps_on = composite_all(
-            &[layer_on.clone()], res, &base_color, &settings, Some(&nd),
+            &[layer_on.clone()], res, &base_color, &settings, Some(&nd), &[],
         );
 
         let out_dir = crate::test_module_output_dir("object_normal");

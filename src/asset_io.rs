@@ -2,6 +2,8 @@ use glam::{Vec2, Vec3};
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::types::MeshGroup;
+
 // ---------------------------------------------------------------------------
 // Mesh types
 // ---------------------------------------------------------------------------
@@ -15,6 +17,8 @@ pub struct LoadedMesh {
     /// Triangle indices (always triangulated, even if source was quads).
     /// Length is always a multiple of 3.
     pub indices: Vec<u32>,
+    /// Vertex groups (submeshes). Empty means whole mesh is one group.
+    pub groups: Vec<MeshGroup>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -109,6 +113,7 @@ fn load_obj(path: &Path) -> Result<LoadedMesh, MeshError> {
     let mut positions = Vec::new();
     let mut uvs = Vec::new();
     let mut indices = Vec::new();
+    let mut groups = Vec::new();
 
     for model in &models {
         let mesh = &model.mesh;
@@ -118,6 +123,7 @@ fn load_obj(path: &Path) -> Result<LoadedMesh, MeshError> {
         }
 
         let base_vertex = positions.len() as u32;
+        let index_offset = indices.len() as u32;
 
         // Extract positions (x, y, z triples)
         for chunk in mesh.positions.chunks_exact(3) {
@@ -187,12 +193,20 @@ fn load_obj(path: &Path) -> Result<LoadedMesh, MeshError> {
                 idx_offset += arity;
             }
         }
+
+        let index_count = indices.len() as u32 - index_offset;
+        groups.push(MeshGroup {
+            name: model.name.clone(),
+            index_offset,
+            index_count,
+        });
     }
 
     Ok(LoadedMesh {
         positions,
         uvs,
         indices,
+        groups,
     })
 }
 
@@ -200,45 +214,75 @@ fn load_gltf(path: &Path) -> Result<LoadedMesh, MeshError> {
     let (document, buffers, _) =
         gltf::import(path).map_err(|e| MeshError::ParseError(e.to_string()))?;
 
-    let mesh = document
-        .meshes()
-        .next()
-        .ok_or_else(|| MeshError::ParseError("No meshes in glTF file".to_string()))?;
+    let mut positions = Vec::new();
+    let mut uvs = Vec::new();
+    let mut indices = Vec::new();
+    let mut groups = Vec::new();
+    let mut prim_idx = 0u32;
 
-    let primitive = mesh
-        .primitives()
-        .next()
-        .ok_or_else(|| MeshError::ParseError("No primitives in mesh".to_string()))?;
+    for mesh in document.meshes() {
+        for primitive in mesh.primitives() {
+            let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
 
-    let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+            let prim_positions: Vec<Vec3> = reader
+                .read_positions()
+                .ok_or_else(|| MeshError::ParseError("No position data".to_string()))?
+                .map(Vec3::from)
+                .collect();
 
-    let positions: Vec<Vec3> = reader
-        .read_positions()
-        .ok_or_else(|| MeshError::ParseError("No position data".to_string()))?
-        .map(Vec3::from)
-        .collect();
+            let prim_uvs: Vec<Vec2> = reader
+                .read_tex_coords(0)
+                .ok_or(MeshError::NoUvChannel)?
+                .into_f32()
+                .map(Vec2::from)
+                .collect();
 
-    let uvs: Vec<Vec2> = reader
-        .read_tex_coords(0)
-        .ok_or(MeshError::NoUvChannel)?
-        .into_f32()
-        .map(Vec2::from)
-        .collect();
+            if prim_uvs.is_empty() {
+                return Err(MeshError::NoUvChannel);
+            }
 
-    if uvs.is_empty() {
-        return Err(MeshError::NoUvChannel);
+            let prim_indices: Vec<u32> = reader
+                .read_indices()
+                .ok_or_else(|| MeshError::ParseError("No index data".to_string()))?
+                .into_u32()
+                .collect();
+
+            let base_vertex = positions.len() as u32;
+            let index_offset = indices.len() as u32;
+
+            positions.extend_from_slice(&prim_positions);
+            uvs.extend_from_slice(&prim_uvs);
+            for &idx in &prim_indices {
+                indices.push(base_vertex + idx);
+            }
+
+            let index_count = prim_indices.len() as u32;
+
+            let group_name = primitive
+                .material()
+                .name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("primitive_{prim_idx}"));
+
+            groups.push(MeshGroup {
+                name: group_name,
+                index_offset,
+                index_count,
+            });
+
+            prim_idx += 1;
+        }
     }
 
-    let indices: Vec<u32> = reader
-        .read_indices()
-        .ok_or_else(|| MeshError::ParseError("No index data".to_string()))?
-        .into_u32()
-        .collect();
+    if positions.is_empty() {
+        return Err(MeshError::ParseError("No meshes in glTF file".to_string()));
+    }
 
     Ok(LoadedMesh {
         positions,
         uvs,
         indices,
+        groups,
     })
 }
 
@@ -560,6 +604,7 @@ f 1 2 3
                 Vec2::new(0.0, 1.0),
             ],
             indices: vec![0, 1, 2],
+            groups: vec![],
         };
         let edges = extract_uv_edges(&mesh);
         assert_eq!(edges.len(), 3);
@@ -577,6 +622,7 @@ f 1 2 3
                 Vec2::new(0.0, 1.0),
             ],
             indices: vec![0, 1, 2, 0, 2, 3],
+            groups: vec![],
         };
         let edges = extract_uv_edges(&mesh);
         // 5 unique edges: 0-1, 1-2, 0-2, 2-3, 0-3
@@ -620,6 +666,7 @@ f 1 2 3
             positions,
             uvs,
             indices,
+            groups: vec![],
         };
         let edges = extract_uv_edges(&mesh);
         assert_eq!(edges.len(), 18);

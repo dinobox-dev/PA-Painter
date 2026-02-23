@@ -7,6 +7,7 @@ use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNorm
 use practical_arcana_painter::output::{export_all, ExportFormat};
 use practical_arcana_painter::project::load_project;
 use practical_arcana_painter::types::{pixels_to_colors, BaseColorSource, Color, NormalMode};
+use practical_arcana_painter::uv_mask::UvMask;
 
 fn usage() -> ! {
     eprintln!("Usage: practical-arcana-painter <project.pap> [options]");
@@ -88,7 +89,7 @@ fn main() {
 
     let resolution = resolution_override.unwrap_or(project.settings.resolution_preset.resolution());
     eprintln!("Resolution: {resolution}px");
-    eprintln!("Layers: {}", project.layers.len());
+    eprintln!("Slots: {}", project.slots.len());
 
     // Load base color texture if referenced
     let (base_colors, tw, th) = if let Some(ref tex_path) = project.color_ref.path {
@@ -118,50 +119,69 @@ fn main() {
         None => BaseColorSource::solid(sc),
     };
 
-    // Load mesh and compute normal data (DepictedForm mode only)
+    // Load mesh and compute normal data / build masks
+    let mesh_file = resolve_asset_path(&project_path, &project.mesh_ref.path);
+    let loaded_mesh = match load_mesh(&mesh_file) {
+        Ok(mesh) => {
+            eprintln!("Loaded mesh: {} groups", mesh.groups.len());
+            Some(mesh)
+        }
+        Err(e) => {
+            eprintln!("Warning: failed to load mesh: {e}");
+            None
+        }
+    };
+
     let normal_data: Option<MeshNormalData> =
         if project.settings.normal_mode == NormalMode::DepictedForm {
-            let mesh_file = resolve_asset_path(&project_path, &project.mesh_ref.path);
-            eprintln!("Loading mesh: {}", mesh_file.display());
-            match load_mesh(&mesh_file) {
-                Ok(mesh) => {
-                    eprintln!("Computing mesh normals...");
-                    Some(compute_mesh_normal_data(&mesh, resolution))
-                }
-                Err(e) => {
-                    eprintln!("Warning: failed to load mesh: {e}");
-                    eprintln!("  Falling back to SurfacePaint normals.");
-                    None
-                }
+            if let Some(ref mesh) = loaded_mesh {
+                eprintln!("Computing mesh normals...");
+                Some(compute_mesh_normal_data(mesh, resolution))
+            } else {
+                eprintln!("  Falling back to SurfacePaint normals.");
+                None
             }
         } else {
             None
         };
 
+    // Build UV masks from mesh groups
+    let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = loaded_mesh {
+        project.build_masks(mesh, resolution)
+    } else {
+        (0..project.slots.len()).map(|_| None).collect()
+    };
+    let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
+
+    // Convert slots to paint layers for pipeline
+    let layers = project.paint_layers();
+
     // Generate (with path cache)
     eprintln!("Generating...");
     if project.cached_paths_if_valid(resolution).is_none() {
         let paths = generate_all_paths(
-            &project.layers,
+            &layers,
             resolution,
             &base_color,
             normal_data.as_ref(),
+            &mask_refs,
         );
         project.set_cached_paths(paths, resolution);
     }
 
     let global = composite_all_with_paths(
-        &project.layers,
+        &layers,
         resolution,
         &base_color,
         &project.settings,
         project.cached_paths.as_deref(),
         normal_data.as_ref(),
+        &mask_refs,
     );
 
     // Export
     eprintln!("Exporting to: {}", output_dir.display());
-    export_all(&global, &project.layers, &project.settings, &output_dir, format, normal_data.as_ref())
+    export_all(&global, &layers, &project.settings, &output_dir, format, normal_data.as_ref())
         .unwrap_or_else(|e| {
             eprintln!("Error exporting: {e:?}");
             process::exit(1);

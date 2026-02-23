@@ -6,6 +6,7 @@ use crate::math::{lerp, lerp_color, perpendicular, smoothstep};
 use crate::object_normal::{sample_object_normal, MeshNormalData};
 use crate::path_placement::generate_paths;
 use crate::stroke_color::ColorTextureRef;
+use crate::uv_mask::UvMask;
 use crate::rng::SeededRng;
 use crate::stroke_color::{compute_stroke_color, sample_bilinear};
 use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
@@ -275,6 +276,7 @@ pub fn generate_all_paths(
     resolution: u32,
     base_color: &BaseColorSource,
     normal_data: Option<&MeshNormalData>,
+    masks: &[Option<&UvMask>],
 ) -> Vec<Vec<StrokePath>> {
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
@@ -287,7 +289,8 @@ pub fn generate_all_paths(
                 width: base_color.tex_width,
                 height: base_color.tex_height,
             });
-            generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref(), normal_data)
+            let mask = masks.get(layer_index).and_then(|m| *m);
+            generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref(), normal_data, mask)
         })
         .collect()
 }
@@ -302,9 +305,10 @@ pub fn composite_all(
     base_color: &BaseColorSource,
     settings: &OutputSettings,
     normal_data: Option<&MeshNormalData>,
+    masks: &[Option<&UvMask>],
 ) -> GlobalMaps {
     composite_all_with_paths(
-        layers, resolution, base_color, settings, None, normal_data,
+        layers, resolution, base_color, settings, None, normal_data, masks,
     )
 }
 
@@ -321,6 +325,7 @@ pub fn composite_all_with_paths(
     settings: &OutputSettings,
     cached_paths: Option<&[Vec<StrokePath>]>,
     normal_data: Option<&MeshNormalData>,
+    masks: &[Option<&UvMask>],
 ) -> GlobalMaps {
     let mut global = GlobalMaps::new(resolution, base_color, settings.normal_mode, settings.background_mode);
 
@@ -341,7 +346,8 @@ pub fn composite_all_with_paths(
                     width: base_color.tex_width,
                     height: base_color.tex_height,
                 });
-                generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref(), normal_data)
+                let mask = masks.get(layer_index).and_then(|m| *m);
+                generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref(), normal_data, mask)
             })
             .collect::<Vec<_>>();
         &generated
@@ -349,14 +355,17 @@ pub fn composite_all_with_paths(
 
     // Phase B: Composite sequentially (preserves deterministic blending order)
     for (sorted_idx, &(_, layer)) in sorted.iter().enumerate() {
+        let layer_index = sorted[sorted_idx].0;
+        let mask = masks.get(layer_index).and_then(|m| *m);
         composite_layer(
             layer,
-            sorted[sorted_idx].0 as u32,
+            layer_index as u32,
             &mut global,
             settings,
             base_color,
             Some(&all_paths[sorted_idx]),
             normal_data,
+            mask,
         );
     }
 
@@ -379,6 +388,7 @@ pub fn composite_layer(
     base_color: &BaseColorSource,
     cached_paths: Option<&[StrokePath]>,
     normal_data: Option<&MeshNormalData>,
+    mask: Option<&UvMask>,
 ) {
     let resolution = global.resolution;
     let transparent = settings.background_mode == BackgroundMode::Transparent;
@@ -391,7 +401,7 @@ pub fn composite_layer(
             width: base_color.tex_width,
             height: base_color.tex_height,
         });
-        paths_owned = generate_paths(layer, layer_index, resolution, tex_ref.as_ref(), normal_data);
+        paths_owned = generate_paths(layer, layer_index, resolution, tex_ref.as_ref(), normal_data, mask);
         &paths_owned
     };
 
@@ -772,11 +782,11 @@ mod tests {
         let mut global = GlobalMaps::new(64, &BaseColorSource::solid(Color::WHITE), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         composite_layer(
             &layer_a, 0, &mut global, &settings,
-            &BaseColorSource::solid(solid_a), None, None,
+            &BaseColorSource::solid(solid_a), None, None, None,
         );
         composite_layer(
             &layer_b, 1, &mut global, &settings,
-            &BaseColorSource::solid(solid_b), None, None,
+            &BaseColorSource::solid(solid_b), None, None, None,
         );
 
         let center = 32 * 64 + 32;
@@ -799,6 +809,7 @@ mod tests {
             &BaseColorSource::solid(Color::rgb(0.8, 0.6, 0.4)),
             &settings,
             None,
+            &[],
         );
 
         assert_eq!(maps.height.len(), 128 * 128);
@@ -814,8 +825,8 @@ mod tests {
         let settings = OutputSettings::default();
         let solid = Color::rgb(0.5, 0.5, 0.5);
 
-        let maps1 = composite_all(&[layer.clone()], 64, &BaseColorSource::solid(solid), &settings, None);
-        let maps2 = composite_all(&[layer], 64, &BaseColorSource::solid(solid), &settings, None);
+        let maps1 = composite_all(&[layer.clone()], 64, &BaseColorSource::solid(solid), &settings, None, &[]);
+        let maps2 = composite_all(&[layer], 64, &BaseColorSource::solid(solid), &settings, None, &[]);
 
         assert_eq!(maps1.height, maps2.height);
         assert_eq!(maps1.stroke_id, maps2.stroke_id);
@@ -833,7 +844,7 @@ mod tests {
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.6, 0.4, 0.3);
-        let maps = composite_all(&[layer], 256, &BaseColorSource::solid(solid), &settings, None);
+        let maps = composite_all(&[layer], 256, &BaseColorSource::solid(solid), &settings, None, &[]);
 
         let out_dir = crate::test_module_output_dir("compositing");
 
@@ -889,7 +900,7 @@ mod tests {
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.5, 0.7, 0.3);
-        let maps = composite_all(&[layer], 256, &BaseColorSource::solid(solid), &settings, None);
+        let maps = composite_all(&[layer], 256, &BaseColorSource::solid(solid), &settings, None, &[]);
 
         let max_h = maps.height.iter().cloned().fold(0.0f32, f32::max).max(1e-10);
         let pixels: Vec<u8> = maps
@@ -921,7 +932,7 @@ mod tests {
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.5, 0.3, 0.6);
-        let maps = composite_all(&[layer], 256, &BaseColorSource::solid(solid), &settings, None);
+        let maps = composite_all(&[layer], 256, &BaseColorSource::solid(solid), &settings, None, &[]);
 
         let max_h = maps.height.iter().cloned().fold(0.0f32, f32::max).max(1e-10);
         let pixels: Vec<u8> = maps
@@ -959,7 +970,7 @@ mod tests {
         let mut global = GlobalMaps::new(256, &BaseColorSource::solid(canvas), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         composite_layer(
             &layer, 0, &mut global, &settings,
-            &BaseColorSource::textured(&stroke_tex, 1, 1, canvas), None, None,
+            &BaseColorSource::textured(&stroke_tex, 1, 1, canvas), None, None, None,
         );
         let maps = global;
 
@@ -1012,6 +1023,7 @@ mod tests {
             &BaseColorSource::textured(&tex, 4, 4, Color::WHITE),
             &settings,
             None,
+            &[],
         );
 
         let color_pixels: Vec<u8> = maps
