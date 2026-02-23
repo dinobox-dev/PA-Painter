@@ -8,36 +8,15 @@ use crate::types::{BackgroundMode, Color, NormalMode, OutputSettings, PaintLayer
 // ── Error Type ──
 
 /// Error type for output operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum OutputError {
-    Io(std::io::Error),
-    ImageError(image::ImageError),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Image error: {0}")]
+    ImageError(#[from] image::ImageError),
+    #[error("EXR error: {0}")]
     ExrError(String),
 }
-
-impl From<std::io::Error> for OutputError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<image::ImageError> for OutputError {
-    fn from(e: image::ImageError) -> Self {
-        Self::ImageError(e)
-    }
-}
-
-impl std::fmt::Display for OutputError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OutputError::Io(e) => write!(f, "IO error: {e}"),
-            OutputError::ImageError(e) => write!(f, "Image error: {e}"),
-            OutputError::ExrError(s) => write!(f, "EXR error: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for OutputError {}
 
 // ── Export Format ──
 

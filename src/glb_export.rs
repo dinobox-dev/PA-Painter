@@ -31,7 +31,7 @@ pub fn export_preview_glb(
     resolution: u32,
     displacement_scale: f32,
     path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::output::OutputError> {
     export_preview_glb_inner(mesh, color_map, height_map, normal_map, resolution, displacement_scale, false, path)
 }
 
@@ -44,7 +44,7 @@ pub fn export_preview_glb_transparent(
     resolution: u32,
     displacement_scale: f32,
     path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::output::OutputError> {
     export_preview_glb_inner(mesh, color_map, height_map, normal_map, resolution, displacement_scale, true, path)
 }
 
@@ -57,7 +57,7 @@ fn export_preview_glb_inner(
     displacement_scale: f32,
     alpha_blend: bool,
     path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::output::OutputError> {
     // 1. Encode textures to in-memory PNGs
     let color_png = encode_color_png(color_map, resolution)?;
     let normal_png = encode_normal_png(normal_map, resolution)?;
@@ -212,7 +212,7 @@ fn sample_map_bilinear(map: &[f32], resolution: u32, uv: Vec2) -> f32 {
 
 // ── Texture Encoding ────────────────────────────────────────────────────────
 
-fn encode_color_png(color_map: &[Color], resolution: u32) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn encode_color_png(color_map: &[Color], resolution: u32) -> Result<Vec<u8>, crate::output::OutputError> {
     let pixels: Vec<u8> = color_map
         .iter()
         .flat_map(|c| {
@@ -237,7 +237,7 @@ fn encode_color_png(color_map: &[Color], resolution: u32) -> Result<Vec<u8>, Box
     Ok(buf)
 }
 
-fn encode_normal_png(normal_map: &[[f32; 3]], resolution: u32) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn encode_normal_png(normal_map: &[[f32; 3]], resolution: u32) -> Result<Vec<u8>, crate::output::OutputError> {
     let pixels: Vec<u8> = normal_map
         .iter()
         .flat_map(|n| {

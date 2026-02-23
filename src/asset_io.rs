@@ -1,6 +1,5 @@
 use glam::{Vec2, Vec3};
 use std::collections::HashSet;
-use std::fmt;
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -18,31 +17,16 @@ pub struct LoadedMesh {
     pub indices: Vec<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum MeshError {
-    Io(std::io::Error),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Parse error: {0}")]
     ParseError(String),
+    #[error("Mesh has no UV channel")]
     NoUvChannel,
+    #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
-}
-
-impl fmt::Display for MeshError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MeshError::Io(e) => write!(f, "IO error: {e}"),
-            MeshError::ParseError(s) => write!(f, "Parse error: {s}"),
-            MeshError::NoUvChannel => write!(f, "Mesh has no UV channel"),
-            MeshError::UnsupportedFormat(s) => write!(f, "Unsupported format: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for MeshError {}
-
-impl From<std::io::Error> for MeshError {
-    fn from(e: std::io::Error) -> Self {
-        MeshError::Io(e)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -57,29 +41,14 @@ pub struct LoadedTexture {
     pub height: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TextureError {
-    Io(std::io::Error),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Decode error: {0}")]
     DecodeError(String),
+    #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
-}
-
-impl fmt::Display for TextureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TextureError::Io(e) => write!(f, "IO error: {e}"),
-            TextureError::DecodeError(s) => write!(f, "Decode error: {s}"),
-            TextureError::UnsupportedFormat(s) => write!(f, "Unsupported format: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for TextureError {}
-
-impl From<std::io::Error> for TextureError {
-    fn from(e: std::io::Error) -> Self {
-        TextureError::Io(e)
-    }
 }
 
 // ---------------------------------------------------------------------------

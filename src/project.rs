@@ -95,52 +95,19 @@ impl Project {
 
 // ── Error Type ──
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
-    Io(std::io::Error),
-    Zip(zip::result::ZipError),
-    Json(serde_json::Error),
-    Bincode(bincode::Error),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Zip error: {0}")]
+    Zip(#[from] zip::result::ZipError),
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("Bincode error: {0}")]
+    Bincode(#[from] bincode::Error),
+    #[error("Invalid format: {0}")]
     InvalidFormat(String),
 }
-
-impl From<std::io::Error> for ProjectError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<zip::result::ZipError> for ProjectError {
-    fn from(e: zip::result::ZipError) -> Self {
-        Self::Zip(e)
-    }
-}
-
-impl From<serde_json::Error> for ProjectError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
-    }
-}
-
-impl From<bincode::Error> for ProjectError {
-    fn from(e: bincode::Error) -> Self {
-        Self::Bincode(e)
-    }
-}
-
-impl std::fmt::Display for ProjectError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProjectError::Io(e) => write!(f, "IO error: {e}"),
-            ProjectError::Zip(e) => write!(f, "Zip error: {e}"),
-            ProjectError::Json(e) => write!(f, "JSON error: {e}"),
-            ProjectError::Bincode(e) => write!(f, "Bincode error: {e}"),
-            ProjectError::InvalidFormat(s) => write!(f, "Invalid format: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for ProjectError {}
 
 // ── Thumbnail Generation ──
 
