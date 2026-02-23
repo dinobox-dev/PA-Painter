@@ -60,6 +60,34 @@ pub struct Project {
     path_cache_key: Option<PathCacheKey>,
 }
 
+impl Default for Project {
+    fn default() -> Self {
+        Self {
+            manifest: Manifest {
+                version: "3".to_string(),
+                app_name: "PracticalArcanaPainter".to_string(),
+                created_at: String::new(),
+                modified_at: String::new(),
+            },
+            mesh_ref: MeshRef {
+                path: String::new(),
+                format: String::new(),
+            },
+            color_ref: ColorRef {
+                path: None,
+                solid_color: [0.5, 0.5, 0.5],
+            },
+            slots: Vec::new(),
+            presets: PresetLibrary::built_in(),
+            settings: OutputSettings::default(),
+            cached_height: None,
+            cached_color: None,
+            cached_paths: None,
+            path_cache_key: None,
+        }
+    }
+}
+
 impl Project {
     /// Convert all slots to PaintLayers for downstream pipeline compatibility.
     pub fn paint_layers(&self) -> Vec<PaintLayer> {

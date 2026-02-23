@@ -7,6 +7,10 @@ edition = "2021"
 name = "practical-arcana-painter"
 path = "src/main.rs"
 
+[[bin]]
+name = "practical-arcana-painter-gui"
+path = "src/main_gui.rs"
+
 [lib]
 name = "practical_arcana_painter"
 path = "src/lib.rs"
@@ -26,6 +30,8 @@ zip = "2.1"
 thiserror = "2"
 noise = "0.9"
 rayon = "1.10"
+eframe = "0.30"
+rfd = "0.15"
 
 [dev-dependencies]
 smallvec = "1"
