@@ -705,7 +705,7 @@ mod tests {
     fn visual_depicted_form_normal_map() {
         use crate::compositing::composite_all;
         use crate::output::{export_normal_png, generate_normal_map, generate_normal_map_depicted_form, normalize_height_map};
-        use crate::types::{GuideVertex, NormalMode, OutputSettings, PaintLayer, StrokeParams};
+        use crate::types::{BaseColorSource, GuideVertex, NormalMode, OutputSettings, PaintLayer, StrokeParams};
 
         let fixtures = crate::test_fixtures_dir();
         let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
@@ -733,7 +733,7 @@ mod tests {
 
         let solid = crate::types::Color::rgb(0.5, 0.4, 0.3);
         let maps = composite_all(
-            &[layer.clone()], res, None, 0, 0, solid, &settings, Some(&nd),
+            &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, Some(&nd),
         );
 
         let out_dir = crate::test_module_output_dir("object_normal");
@@ -858,7 +858,7 @@ mod tests {
     fn visual_normal_break_comparison() {
         use crate::compositing::composite_all;
         use crate::output::{generate_normal_map_depicted_form, normalize_height_map, export_normal_png};
-        use crate::types::{GuideVertex, NormalMode, OutputSettings, PaintLayer, StrokeParams};
+        use crate::types::{BaseColorSource, GuideVertex, NormalMode, OutputSettings, PaintLayer, StrokeParams};
 
         let fixtures = crate::test_fixtures_dir();
         let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
@@ -891,11 +891,12 @@ mod tests {
         settings.normal_mode = NormalMode::DepictedForm;
         let solid = crate::types::Color::rgb(0.5, 0.4, 0.3);
 
+        let base_color = BaseColorSource::solid(solid);
         let maps_off = composite_all(
-            &[base_layer.clone()], res, None, 0, 0, solid, &settings, Some(&nd),
+            &[base_layer.clone()], res, &base_color, &settings, Some(&nd),
         );
         let maps_on = composite_all(
-            &[layer_on.clone()], res, None, 0, 0, solid, &settings, Some(&nd),
+            &[layer_on.clone()], res, &base_color, &settings, Some(&nd),
         );
 
         let out_dir = crate::test_module_output_dir("object_normal");

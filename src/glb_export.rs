@@ -48,6 +48,7 @@ pub fn export_preview_glb_transparent(
     export_preview_glb_inner(mesh, color_map, height_map, normal_map, resolution, displacement_scale, true, path)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export_preview_glb_inner(
     mesh: &LoadedMesh,
     color_map: &[Color],
@@ -667,7 +668,8 @@ mod tests {
             generate_normal_map, generate_normal_map_depicted_form, normalize_height_map,
         };
         use crate::types::{
-            Color as C, GuideVertex, NormalMode, OutputSettings, PaintLayer, StrokeParams,
+            BaseColorSource, Color as C, GuideVertex, NormalMode, OutputSettings, PaintLayer,
+            StrokeParams,
         };
 
         let mesh = make_cube_sphere(24, 0.5);
@@ -709,7 +711,7 @@ mod tests {
             };
 
             let maps = composite_all(
-                &[layer.clone()], res, None, 0, 0, solid, &settings, mesh_nd,
+                &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, mesh_nd,
             );
 
             let normalized_height = normalize_height_map(&maps.height, &[layer.clone()]);
@@ -780,8 +782,8 @@ mod tests {
         use crate::object_normal::compute_mesh_normal_data;
         use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::types::{
-            BackgroundMode, Color as C, GuideVertex, NormalMode, OutputSettings, PaintLayer,
-            StrokeParams,
+            BackgroundMode, BaseColorSource, Color as C, GuideVertex, NormalMode, OutputSettings,
+            PaintLayer, StrokeParams,
         };
 
         let mesh = make_cube_sphere(24, 0.5);
@@ -811,7 +813,7 @@ mod tests {
         settings.background_mode = BackgroundMode::Transparent;
 
         let maps = composite_all(
-            &[layer.clone()], res, None, 0, 0, solid, &settings, Some(&nd),
+            &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, Some(&nd),
         );
 
         let normalized_height = normalize_height_map(&maps.height, &[layer]);
@@ -850,8 +852,8 @@ mod tests {
         };
         use crate::path_placement::generate_paths;
         use crate::types::{
-            BackgroundMode, Color as C, GuideVertex, NormalMode, OutputSettings, PaintLayer,
-            StrokeParams,
+            BackgroundMode, BaseColorSource, Color as C, GuideVertex, NormalMode, OutputSettings,
+            PaintLayer, StrokeParams,
         };
 
         let mesh = make_cube_sphere(24, 0.5);
@@ -888,7 +890,7 @@ mod tests {
 
         let cached_paths = vec![paths];
         let maps = composite_all_with_paths(
-            &[layer.clone()], res, None, 0, 0, solid, &settings,
+            &[layer.clone()], res, &BaseColorSource::solid(solid), &settings,
             Some(&cached_paths), Some(&nd),
         );
 

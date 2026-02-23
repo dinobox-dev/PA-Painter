@@ -87,6 +87,41 @@ pub fn pixels_to_colors(pixels: &[[f32; 4]]) -> Vec<Color> {
     pixels.iter().map(|&p| Color::from(p)).collect()
 }
 
+// ── Base Color Source ──
+
+/// Reference to the base color for compositing — either a texture or solid color.
+///
+/// Groups the recurring `(texture, tex_width, tex_height, solid_color)` tuple
+/// passed through the compositing pipeline.
+pub struct BaseColorSource<'a> {
+    pub texture: Option<&'a [Color]>,
+    pub tex_width: u32,
+    pub tex_height: u32,
+    pub solid_color: Color,
+}
+
+impl<'a> BaseColorSource<'a> {
+    /// Solid color with no texture.
+    pub fn solid(color: Color) -> Self {
+        Self {
+            texture: None,
+            tex_width: 0,
+            tex_height: 0,
+            solid_color: color,
+        }
+    }
+
+    /// Texture with fallback solid color.
+    pub fn textured(data: &'a [Color], width: u32, height: u32, fallback: Color) -> Self {
+        Self {
+            texture: Some(data),
+            tex_width: width,
+            tex_height: height,
+            solid_color: fallback,
+        }
+    }
+}
+
 // ── Enums ──
 
 /// Pressure curve preset determining how brush pressure varies along a stroke.

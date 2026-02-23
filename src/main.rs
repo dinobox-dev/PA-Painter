@@ -6,7 +6,7 @@ use practical_arcana_painter::compositing::{composite_all_with_paths, generate_a
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::output::{export_all, ExportFormat};
 use practical_arcana_painter::project::load_project;
-use practical_arcana_painter::types::{pixels_to_colors, Color, NormalMode};
+use practical_arcana_painter::types::{pixels_to_colors, BaseColorSource, Color, NormalMode};
 
 fn usage() -> ! {
     eprintln!("Usage: practical-arcana-painter <project.pap> [options]");
@@ -113,6 +113,11 @@ fn main() {
         Color::rgb(c[0], c[1], c[2])
     };
 
+    let base_color = match base_colors {
+        Some(ref colors) => BaseColorSource::textured(colors, tw, th, sc),
+        None => BaseColorSource::solid(sc),
+    };
+
     // Load mesh and compute normal data (DepictedForm mode only)
     let normal_data: Option<MeshNormalData> =
         if project.settings.normal_mode == NormalMode::DepictedForm {
@@ -139,9 +144,7 @@ fn main() {
         let paths = generate_all_paths(
             &project.layers,
             resolution,
-            base_colors.as_deref(),
-            tw,
-            th,
+            &base_color,
             normal_data.as_ref(),
         );
         project.set_cached_paths(paths, resolution);
@@ -150,10 +153,7 @@ fn main() {
     let global = composite_all_with_paths(
         &project.layers,
         resolution,
-        base_colors.as_deref(),
-        tw,
-        th,
-        sc,
+        &base_color,
         &project.settings,
         project.cached_paths.as_deref(),
         normal_data.as_ref(),

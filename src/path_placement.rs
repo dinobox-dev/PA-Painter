@@ -108,6 +108,7 @@ fn generate_seeds_poisson_in(
 ///
 /// Returns `None` if the resulting path is shorter than `brush_width * 2` (in UV
 /// units).
+#[allow(clippy::too_many_arguments)]
 pub fn trace_streamline(
     seed: Vec2,
     field: &DirectionField,

@@ -1,6 +1,6 @@
 use crate::math::{interpolate_array, lerp};
 use crate::pressure::evaluate_pressure;
-use crate::types::PressurePreset;
+use crate::types::StrokeParams;
 use noise::{NoiseFn, Perlin};
 
 // ── Constants ──
@@ -31,17 +31,19 @@ fn ridge_profile(d: f32, w: f32) -> f32 {
 /// Generate a complete stroke height map (body + ridges).
 pub fn generate_stroke_height(
     brush_profile: &[f32],
-    brush_width_px: usize,
     stroke_length_px: usize,
-    load: f32,
-    base_height: f32,
-    ridge_height: f32,
-    ridge_width_px: usize,
-    ridge_variation: f32,
-    body_wiggle: f32,
-    pressure_preset: PressurePreset,
+    params: &StrokeParams,
     seed: u32,
 ) -> StrokeHeightResult {
+    let brush_width_px = params.brush_width.round() as usize;
+    let ridge_width_px = params.ridge_width.round() as usize;
+    let load = params.load;
+    let base_height = params.base_height;
+    let ridge_height = params.ridge_height;
+    let ridge_variation = params.ridge_variation;
+    let body_wiggle = params.body_wiggle;
+    let pressure_preset = params.pressure_preset;
+
     let margin = ridge_width_px;
     let local_width = stroke_length_px + margin;
     let local_height = brush_width_px + margin * 2;
@@ -204,23 +206,23 @@ pub fn generate_stroke_height(
 mod tests {
     use super::*;
     use crate::brush_profile::generate_brush_profile;
+    use crate::types::PressurePreset;
+
+    #[allow(clippy::too_many_arguments)]
+    fn params(bw: f32, load: f32, base_h: f32, ridge_h: f32, rw: f32, rv: f32, wiggle: f32, preset: PressurePreset) -> StrokeParams {
+        StrokeParams {
+            brush_width: bw, load, base_height: base_h, ridge_height: ridge_h,
+            ridge_width: rw, ridge_variation: rv, body_wiggle: wiggle,
+            pressure_preset: preset, seed: 42,
+            ..StrokeParams::default()
+        }
+    }
 
     #[test]
     fn dimensions() {
+        let p = params(30.0, 0.8, 0.5, 0.3, 5.0, 0.1, 0.0, PressurePreset::FadeOut);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile,
-            30,
-            100,
-            0.8,
-            0.5,
-            0.3,
-            5,
-            0.1,
-            0.0,
-            PressurePreset::FadeOut,
-            42,
-        );
+        let result = generate_stroke_height(&profile, 100, &p, 42);
         assert_eq!(result.width, 105); // stroke_length + ridge_width
         assert_eq!(result.height, 40); // brush_width + ridge_width * 2
         assert_eq!(result.margin, 5);
@@ -229,20 +231,9 @@ mod tests {
 
     #[test]
     fn full_load_uniform_max_body() {
+        let p = params(30.0, 1.0, 0.5, 0.0, 5.0, 0.0, 0.0, PressurePreset::Uniform);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile,
-            30,
-            100,
-            1.0,
-            0.5,
-            0.0, // no ridges
-            5,
-            0.0,
-            0.0,
-            PressurePreset::Uniform,
-            42,
-        );
+        let result = generate_stroke_height(&profile, 100, &p, 42);
 
         // Find max in body zone
         let margin = result.margin;
@@ -274,20 +265,9 @@ mod tests {
 
     #[test]
     fn ridge_peaks() {
+        let p = params(30.0, 1.0, 0.5, 0.5, 5.0, 0.0, 0.0, PressurePreset::Uniform);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile,
-            30,
-            100,
-            1.0,
-            0.5,
-            0.5,
-            5,
-            0.0,
-            0.0,
-            PressurePreset::Uniform,
-            42,
-        );
+        let result = generate_stroke_height(&profile, 100, &p, 42);
 
         let max_pixel = result.data.iter().cloned().fold(0.0f32, f32::max);
         // Max pixel in ridge zone should be approximately base_height + ridge_height
@@ -300,20 +280,9 @@ mod tests {
 
     #[test]
     fn no_ridges_no_outside_paint() {
+        let p = params(30.0, 1.0, 0.5, 0.0, 5.0, 0.0, 0.0, PressurePreset::Uniform);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile,
-            30,
-            100,
-            1.0,
-            0.5,
-            0.0, // no ridges
-            5,
-            0.0,
-            0.0,
-            PressurePreset::Uniform,
-            42,
-        );
+        let result = generate_stroke_height(&profile, 100, &p, 42);
 
         let margin = result.margin;
         // Check pixels outside body zone are 0
@@ -339,20 +308,9 @@ mod tests {
 
     #[test]
     fn dry_brush() {
+        let p = params(30.0, 0.3, 0.5, 0.0, 5.0, 0.0, 0.0, PressurePreset::Uniform);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile,
-            30,
-            100,
-            0.3,
-            0.5,
-            0.0,
-            5,
-            0.0,
-            0.0,
-            PressurePreset::Uniform,
-            42,
-        );
+        let result = generate_stroke_height(&profile, 100, &p, 42);
 
         let margin = result.margin;
         let mut max_body = 0.0f32;
@@ -372,20 +330,9 @@ mod tests {
 
     #[test]
     fn depletion() {
+        let p = params(30.0, 1.0, 0.5, 0.0, 5.0, 0.0, 0.0, PressurePreset::Uniform);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile,
-            30,
-            200,
-            1.0,
-            0.5,
-            0.0,
-            5,
-            0.0,
-            0.0,
-            PressurePreset::Uniform,
-            42,
-        );
+        let result = generate_stroke_height(&profile, 200, &p, 42);
 
         let margin = result.margin;
         // Average height at start (x=0..10) vs end (x=190..200)
@@ -412,20 +359,9 @@ mod tests {
 
     #[test]
     fn pressure_narrowing() {
+        let p = params(30.0, 1.0, 0.5, 0.0, 5.0, 0.0, 0.0, PressurePreset::FadeOut);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile,
-            30,
-            100,
-            1.0,
-            0.5,
-            0.0,
-            5,
-            0.0,
-            0.0,
-            PressurePreset::FadeOut,
-            42,
-        );
+        let result = generate_stroke_height(&profile, 100, &p, 42);
 
         let margin = result.margin;
 
@@ -462,52 +398,18 @@ mod tests {
 
     #[test]
     fn determinism() {
+        let p = params(30.0, 0.8, 0.5, 0.3, 5.0, 0.1, 0.15, PressurePreset::FadeOut);
         let profile = generate_brush_profile(30, 42);
-        let a = generate_stroke_height(
-            &profile,
-            30,
-            100,
-            0.8,
-            0.5,
-            0.3,
-            5,
-            0.1,
-            0.15,
-            PressurePreset::FadeOut,
-            42,
-        );
-        let b = generate_stroke_height(
-            &profile,
-            30,
-            100,
-            0.8,
-            0.5,
-            0.3,
-            5,
-            0.1,
-            0.15,
-            PressurePreset::FadeOut,
-            42,
-        );
+        let a = generate_stroke_height(&profile, 100, &p, 42);
+        let b = generate_stroke_height(&profile, 100, &p, 42);
         assert_eq!(a.data, b.data);
     }
 
     #[test]
     fn visual_stroke_height() {
+        let p = params(30.0, 0.8, 0.5, 0.3, 5.0, 0.1, 0.15, PressurePreset::FadeOut);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile,
-            30,
-            150,
-            0.8,
-            0.5,
-            0.3,
-            5,
-            0.1,
-            0.15,
-            PressurePreset::FadeOut,
-            42,
-        );
+        let result = generate_stroke_height(&profile, 150, &p, 42);
 
         // Save as grayscale PNG
         let max_val = result.data.iter().cloned().fold(0.0f32, f32::max).max(1e-10);
@@ -531,11 +433,9 @@ mod tests {
     #[test]
     fn body_wiggle_off_centered() {
         // With wiggle=0, body center should be constant at brush_width/2
+        let p = params(30.0, 1.0, 0.5, 0.0, 5.0, 0.0, 0.0, PressurePreset::Uniform);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile, 30, 100, 1.0, 0.5, 0.0, 5, 0.0, 0.0,
-            PressurePreset::Uniform, 42,
-        );
+        let result = generate_stroke_height(&profile, 100, &p, 42);
         let margin = result.margin;
         // Find center of mass for each column — should all be at ~15
         for x in 0..100 {
@@ -560,11 +460,9 @@ mod tests {
 
     #[test]
     fn body_wiggle_on_deviates() {
+        let p = params(30.0, 1.0, 0.5, 0.0, 5.0, 0.0, 0.3, PressurePreset::Uniform);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile, 30, 200, 1.0, 0.5, 0.0, 5, 0.0, 0.3,
-            PressurePreset::Uniform, 42,
-        );
+        let result = generate_stroke_height(&profile, 200, &p, 42);
         let margin = result.margin;
         // Collect center of mass per column
         let mut centers = Vec::new();
@@ -594,11 +492,9 @@ mod tests {
     #[test]
     fn body_wiggle_stays_in_bounds() {
         // Max wiggle should not cause OOB writes
+        let p = params(30.0, 1.0, 0.5, 0.3, 5.0, 0.0, 0.5, PressurePreset::Uniform);
         let profile = generate_brush_profile(30, 42);
-        let result = generate_stroke_height(
-            &profile, 30, 100, 1.0, 0.5, 0.3, 5, 0.0, 0.5,
-            PressurePreset::Uniform, 42,
-        );
+        let result = generate_stroke_height(&profile, 100, &p, 42);
         // If we got here without panic, bounds are respected
         assert_eq!(result.data.len(), result.width * result.height);
     }

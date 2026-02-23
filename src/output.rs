@@ -489,9 +489,7 @@ mod tests {
     use crate::asset_io::{linear_to_srgb, load_texture};
     use crate::compositing::composite_all;
     use crate::test_util::make_layer_with_order;
-    use crate::types::{
-        Color, OutputSettings, PaintLayer,
-    };
+    use crate::types::{BaseColorSource, Color, OutputSettings};
 
     const EPS: f32 = 1e-4;
 
@@ -936,10 +934,7 @@ mod tests {
         let maps = composite_all(
             &[layer.clone()],
             res,
-            None,
-            0,
-            0,
-            Color::rgb(0.5, 0.5, 0.5),
+            &BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)),
             &settings,
             None,
         );
@@ -965,10 +960,7 @@ mod tests {
         let maps = composite_all(
             &[layer.clone()],
             res,
-            None,
-            0,
-            0,
-            Color::rgb(0.5, 0.5, 0.5),
+            &BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)),
             &settings,
             None,
         );
@@ -994,7 +986,7 @@ mod tests {
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.6, 0.4, 0.3);
-        let maps = composite_all(&[layer.clone()], 256, None, 0, 0, solid, &settings, None);
+        let maps = composite_all(&[layer.clone()], 256, &BaseColorSource::solid(solid), &settings, None);
 
         let dir = crate::test_module_output_dir("export");
         let _ = std::fs::create_dir_all(&dir);
