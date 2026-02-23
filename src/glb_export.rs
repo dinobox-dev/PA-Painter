@@ -848,7 +848,7 @@ mod tests {
         use crate::output::{
             generate_normal_map_depicted_form, normalize_height_map,
         };
-        use crate::path_placement::generate_paths_overscan;
+        use crate::path_placement::generate_paths;
         use crate::types::{
             BackgroundMode, Color as C, GuideVertex, NormalMode, OutputSettings, PaintLayer,
             StrokeParams,
@@ -881,7 +881,7 @@ mod tests {
         settings.background_mode = BackgroundMode::Transparent;
 
         // Generate paths with overscan + Poisson + 3 passes
-        let paths = generate_paths_overscan(
+        let paths = generate_paths(
             &layer, 0, res, None, Some(&nd),
         );
         eprintln!("Overscan+Poisson: {} paths generated", paths.len());

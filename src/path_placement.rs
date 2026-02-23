@@ -9,48 +9,11 @@ use crate::rng::SeededRng;
 use crate::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
 use crate::types::{PaintLayer, StrokePath, StrokeParams};
 
-/// Generate seed points across the full UV space [0,1]².
-///
-/// Returns UV-space seed points distributed on a uniform grid with 20% jitter.
-pub fn generate_seeds(params: &StrokeParams, resolution: u32) -> Vec<Vec2> {
-    let spacing = params.brush_width / resolution as f32 * params.stroke_spacing;
-    if spacing <= 0.0 || !spacing.is_finite() {
-        return Vec::new();
-    }
-    let jitter_amount = spacing * 0.2;
-    let mut rng = SeededRng::new(params.seed);
-
-    let mut seeds = Vec::new();
-    let mut y = 0.0f32;
-    while y <= 1.0 {
-        let mut x = 0.0f32;
-        while x <= 1.0 {
-            let pos = Vec2::new(x, y) + rng.random_in_circle(jitter_amount);
-
-            if pos.x >= 0.0 && pos.x <= 1.0 && pos.y >= 0.0 && pos.y <= 1.0 {
-                seeds.push(pos);
-            }
-
-            x += spacing;
-        }
-        y += spacing;
-    }
-
-    seeds
-}
-
-/// Generate seed points using Poisson disk sampling (Bridson's algorithm).
-///
-/// Produces a blue-noise distribution with minimum spacing guarantee,
-/// filling the UV space more naturally than a jittered grid.
-pub fn generate_seeds_poisson(params: &StrokeParams, resolution: u32) -> Vec<Vec2> {
-    generate_seeds_poisson_in(params, resolution, Vec2::ZERO, Vec2::ONE)
-}
-
 /// Generate Poisson disk seeds within an arbitrary UV rectangle `[lo, hi]`.
 ///
-/// Used by overscan variants to generate seeds outside the standard [0,1]² region.
-pub fn generate_seeds_poisson_in(
+/// Uses Bridson's algorithm to produce a blue-noise distribution with minimum
+/// spacing guarantee.
+fn generate_seeds_poisson_in(
     params: &StrokeParams,
     resolution: u32,
     lo: Vec2,
@@ -301,121 +264,12 @@ pub fn filter_overlapping_paths(
 
 /// Generate all stroke paths for a layer.
 ///
+/// Uses Poisson disk seeds in an overscan region `[-margin, 1+margin]²` to
+/// eliminate density drop at UV boundaries, then clips results to `[0,1]²`.
+///
 /// Returns paths in paint order (sorted by seed y-coordinate, top to bottom).
 /// Each path is assigned a globally unique stroke ID: `(layer_index << 16) | index`.
 pub fn generate_paths(
-    layer: &PaintLayer,
-    layer_index: u32,
-    resolution: u32,
-    color_tex: Option<&ColorTextureRef<'_>>,
-    normal_data: Option<&MeshNormalData>,
-) -> Vec<StrokePath> {
-    let seeds = generate_seeds(&layer.params, resolution);
-    let field = DirectionField::new(&layer.guides, resolution);
-
-    let mut rng = SeededRng::new(layer.params.seed);
-    let mut raw_paths: Vec<Vec<Vec2>> = Vec::new();
-    for seed_point in &seeds {
-        if let Some(path) = trace_streamline(
-            *seed_point,
-            &field,
-            &layer.params,
-            resolution,
-            &mut rng,
-            color_tex,
-            normal_data,
-            (Vec2::ZERO, Vec2::ONE),
-        ) {
-            raw_paths.push(path);
-        }
-    }
-
-    let brush_width_uv = layer.params.brush_width / resolution as f32;
-    let overlap_ratio = layer.params.overlap_ratio.unwrap_or(0.7);
-    let overlap_dist_factor = layer.params.overlap_dist_factor.unwrap_or(0.3);
-    filter_overlapping_paths(&mut raw_paths, brush_width_uv, overlap_ratio, overlap_dist_factor);
-
-    // Sort paths by seed point y-coordinate (top-to-bottom row order).
-    // Critical for correct wet-on-wet compositing order in Phase 08.
-    raw_paths.sort_by(|a, b| a[0].y.total_cmp(&b[0].y));
-
-    // Convert to StrokePath with globally unique IDs
-    raw_paths
-        .into_iter()
-        .enumerate()
-        .map(|(i, path)| StrokePath::new(path, layer_index, i as u32))
-        .collect()
-}
-
-/// Generate paths using Poisson disk seed distribution.
-///
-/// Same pipeline as `generate_paths` but uses blue-noise seed placement
-/// instead of a jittered grid.
-pub fn generate_paths_poisson(
-    layer: &PaintLayer,
-    layer_index: u32,
-    resolution: u32,
-    color_tex: Option<&ColorTextureRef<'_>>,
-    normal_data: Option<&MeshNormalData>,
-) -> Vec<StrokePath> {
-    let seeds = generate_seeds_poisson(&layer.params, resolution);
-    let field = DirectionField::new(&layer.guides, resolution);
-
-    let mut rng = SeededRng::new(layer.params.seed);
-    let mut raw_paths: Vec<Vec<Vec2>> = Vec::new();
-    for seed_point in &seeds {
-        if let Some(path) = trace_streamline(
-            *seed_point,
-            &field,
-            &layer.params,
-            resolution,
-            &mut rng,
-            color_tex,
-            normal_data,
-            (Vec2::ZERO, Vec2::ONE),
-        ) {
-            raw_paths.push(path);
-        }
-    }
-
-    let brush_width_uv = layer.params.brush_width / resolution as f32;
-    let overlap_ratio = layer.params.overlap_ratio.unwrap_or(0.7);
-    let overlap_dist_factor = layer.params.overlap_dist_factor.unwrap_or(0.3);
-    filter_overlapping_paths(&mut raw_paths, brush_width_uv, overlap_ratio, overlap_dist_factor);
-
-    raw_paths.sort_by(|a, b| a[0].y.total_cmp(&b[0].y));
-
-    raw_paths
-        .into_iter()
-        .enumerate()
-        .map(|(i, path)| StrokePath::new(path, layer_index, i as u32))
-        .collect()
-}
-
-/// Clip a path to the [0,1]² UV region by trimming points outside the bounds.
-///
-/// Since streamlines trace monotonically from boundary to boundary, out-of-bounds
-/// points only appear at the start or end.  Returns `None` if fewer than 2 points
-/// remain after clipping.
-fn clip_path_to_uv(path: Vec<Vec2>) -> Option<Vec<Vec2>> {
-    let clipped: Vec<Vec2> = path
-        .into_iter()
-        .filter(|p| p.x >= 0.0 && p.x <= 1.0 && p.y >= 0.0 && p.y <= 1.0)
-        .collect();
-    if clipped.len() >= 2 {
-        Some(clipped)
-    } else {
-        None
-    }
-}
-
-/// Generate paths using Poisson disk seeds in an overscan region.
-///
-/// Combines two techniques:
-/// - **Overscan**: seeds are generated and traced in `[-margin, 1+margin]²`,
-///   then clipped to `[0,1]²`.  This eliminates the density drop at UV boundaries.
-/// - **Poisson disk**: blue-noise seed distribution avoids grid artifacts.
-pub fn generate_paths_overscan(
     layer: &PaintLayer,
     layer_index: u32,
     resolution: u32,
@@ -459,14 +313,35 @@ pub fn generate_paths_overscan(
 
     filter_overlapping_paths(&mut raw_paths, brush_width_uv, overlap_ratio, overlap_dist_factor);
 
+    // Sort paths by seed point y-coordinate (top-to-bottom row order).
+    // Critical for correct wet-on-wet compositing order in Phase 08.
     raw_paths.sort_by(|a, b| a[0].y.total_cmp(&b[0].y));
 
+    // Convert to StrokePath with globally unique IDs
     raw_paths
         .into_iter()
         .enumerate()
         .map(|(i, path)| StrokePath::new(path, layer_index, i as u32))
         .collect()
 }
+
+/// Clip a path to the [0,1]² UV region by trimming points outside the bounds.
+///
+/// Since streamlines trace monotonically from boundary to boundary, out-of-bounds
+/// points only appear at the start or end.  Returns `None` if fewer than 2 points
+/// remain after clipping.
+fn clip_path_to_uv(path: Vec<Vec2>) -> Option<Vec<Vec2>> {
+    let clipped: Vec<Vec2> = path
+        .into_iter()
+        .filter(|p| p.x >= 0.0 && p.x <= 1.0 && p.y >= 0.0 && p.y <= 1.0)
+        .collect();
+    if clipped.len() >= 2 {
+        Some(clipped)
+    } else {
+        None
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -487,25 +362,28 @@ mod tests {
         }
     }
 
-    // ── Seed Distribution Tests ──
+    // ── Seed Distribution Tests (Poisson) ──
 
     #[test]
-    fn seed_grid_coverage() {
+    fn seed_poisson_coverage() {
         let layer = make_layer();
-        let seeds = generate_seeds(&layer.params, 512);
-        // Expected: ~(512/30)^2 ≈ 291 seeds
-        let expected = ((512.0 / 30.0) as u32).pow(2);
-        let count = seeds.len() as u32;
+        let seeds = generate_seeds_poisson_in(
+            &layer.params, 512, Vec2::ZERO, Vec2::ONE,
+        );
+        // Poisson disk should produce a reasonable number of seeds
         assert!(
-            count > expected / 2 && count < expected * 2,
-            "seed count {count} not near expected ~{expected}"
+            seeds.len() > 50 && seeds.len() < 1000,
+            "unexpected seed count: {}",
+            seeds.len()
         );
     }
 
     #[test]
-    fn seeds_within_uv_bounds() {
+    fn seeds_poisson_within_bounds() {
         let layer = make_layer();
-        let seeds = generate_seeds(&layer.params, 512);
+        let seeds = generate_seeds_poisson_in(
+            &layer.params, 512, Vec2::ZERO, Vec2::ONE,
+        );
         assert!(!seeds.is_empty());
         for seed in &seeds {
             assert!(
@@ -518,10 +396,14 @@ mod tests {
     }
 
     #[test]
-    fn seed_determinism() {
+    fn seed_poisson_determinism() {
         let layer = make_layer();
-        let seeds1 = generate_seeds(&layer.params, 512);
-        let seeds2 = generate_seeds(&layer.params, 512);
+        let seeds1 = generate_seeds_poisson_in(
+            &layer.params, 512, Vec2::ZERO, Vec2::ONE,
+        );
+        let seeds2 = generate_seeds_poisson_in(
+            &layer.params, 512, Vec2::ZERO, Vec2::ONE,
+        );
         assert_eq!(seeds1.len(), seeds2.len());
         for (a, b) in seeds1.iter().zip(seeds2.iter()) {
             assert_eq!(a.x, b.x);
@@ -530,28 +412,23 @@ mod tests {
     }
 
     #[test]
-    fn seed_jitter_bounds() {
+    fn seed_poisson_minimum_spacing() {
         let layer = make_layer();
-        let spacing = layer.params.brush_width / 512.0 * layer.params.stroke_spacing;
-        let max_jitter = spacing * 0.2 * 2.0_f32.sqrt(); // diagonal of circle
-        let grid_origin = Vec2::ZERO;
-
-        let seeds = generate_seeds(&layer.params, 512);
-
-        for seed in &seeds {
-            let gx = ((seed.x - grid_origin.x) / spacing).round() * spacing + grid_origin.x;
-            let gy = ((seed.y - grid_origin.y) / spacing).round() * spacing + grid_origin.y;
-            let dist = (*seed - Vec2::new(gx, gy)).length();
-            assert!(
-                dist <= max_jitter + 1e-6,
-                "seed ({:.4}, {:.4}) is {:.4} from grid ({:.4}, {:.4}), max jitter = {:.4}",
-                seed.x,
-                seed.y,
-                dist,
-                gx,
-                gy,
-                max_jitter
-            );
+        let resolution = 512u32;
+        let min_dist = layer.params.brush_width / resolution as f32 * layer.params.stroke_spacing;
+        let seeds = generate_seeds_poisson_in(
+            &layer.params, resolution, Vec2::ZERO, Vec2::ONE,
+        );
+        // Verify all pairs respect minimum distance
+        for (i, a) in seeds.iter().enumerate() {
+            for b in &seeds[i + 1..] {
+                let dist = (*a - *b).length();
+                assert!(
+                    dist >= min_dist - 1e-6,
+                    "seeds ({:.4},{:.4}) and ({:.4},{:.4}) are {:.6} apart, min_dist = {:.6}",
+                    a.x, a.y, b.x, b.y, dist, min_dist
+                );
+            }
         }
     }
 
@@ -1907,14 +1784,13 @@ mod tests {
 
     #[test]
     fn visual_density_comparison() {
-        // INSPECT: Five images comparing density improvement methods.
+        // INSPECT: Three images comparing density improvement methods.
         // All use the same guide setup (horizontal + slight diagonal).
+        // Baseline uses Poisson disk + overscan (the unified pipeline).
         //
-        // 1. density_baseline.png        — default params
+        // 1. density_baseline.png        — default params (Poisson + overscan)
         // 2. density_A_tight_spacing.png  — stroke_spacing=0.5
         // 3. density_AB_relaxed.png       — spacing=0.5 + overlap_ratio=0.85, dist_factor=0.15
-        // 4. density_C_poisson.png        — Poisson disk seeds
-        // 5. density_D_multipass.png      — 3-pass layering
 
         let resolution = 512u32;
         let guides = vec![
@@ -1930,7 +1806,7 @@ mod tests {
             },
         ];
 
-        // ── 1. Baseline ──
+        // ── 1. Baseline (Poisson + overscan) ──
         let layer_base = PaintLayer {
             name: String::from("baseline"),
             order: 0,
@@ -1970,25 +1846,15 @@ mod tests {
         };
         let paths_ab = generate_paths(&layer_ab, 0, resolution, None, None);
 
-        // ── 4. Method C: Poisson disk seeds ──
-        let paths_c = generate_paths_poisson(&layer_base, 0, resolution, None, None);
-
-        // ── 5. Overscan + Poisson ──
-        let paths_overscan = generate_paths_overscan(&layer_base, 0, resolution, None, None);
-
         eprintln!("=== Density Comparison ===");
         eprintln!("  Baseline:      {} paths", paths_base.len());
         eprintln!("  A (spacing):   {} paths", paths_a.len());
         eprintln!("  A+B (relaxed): {} paths", paths_ab.len());
-        eprintln!("  C (Poisson):   {} paths", paths_c.len());
-        eprintln!("  Overscan+C:    {} paths", paths_overscan.len());
 
         let cases: &[(&[StrokePath], &str, &str)] = &[
-            (&paths_base, "density_1_baseline.png", "BASELINE"),
+            (&paths_base, "density_1_baseline.png", "BASELINE (Poisson+overscan)"),
             (&paths_a, "density_2_A_tight_spacing.png", "A: spacing=0.5"),
             (&paths_ab, "density_3_AB_relaxed.png", "A+B: spacing+filter"),
-            (&paths_c, "density_4_C_poisson.png", "C: Poisson disk"),
-            (&paths_overscan, "density_5_overscan_poisson.png", "Overscan+Poisson"),
         ];
 
         for &(paths, filename, label) in cases {
@@ -2028,8 +1894,6 @@ mod tests {
         assert!(!paths_base.is_empty());
         assert!(!paths_a.is_empty());
         assert!(!paths_ab.is_empty());
-        assert!(!paths_c.is_empty());
-        assert!(!paths_overscan.is_empty());
 
         // Density should increase: A > baseline, A+B > A
         assert!(
