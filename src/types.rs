@@ -140,10 +140,6 @@ pub enum PressurePreset {
 pub struct StrokeParams {
     pub brush_width: f32,
     pub load: f32,
-    pub base_height: f32,
-    pub ridge_height: f32,
-    pub ridge_width: f32,
-    pub ridge_variation: f32,
     pub body_wiggle: f32,
     pub stroke_spacing: f32,
     pub pressure_preset: PressurePreset,
@@ -179,10 +175,6 @@ impl Default for StrokeParams {
         Self {
             brush_width: 30.0,
             load: 0.8,
-            base_height: 0.5,
-            ridge_height: 0.3,
-            ridge_width: 5.0,
-            ridge_variation: 0.1,
             body_wiggle: 0.15,
             stroke_spacing: 1.0,
             pressure_preset: PressurePreset::FadeOut,
@@ -247,10 +239,6 @@ pub struct MeshGroup {
 pub struct StrokeValues {
     pub brush_width: f32,
     pub load: f32,
-    pub base_height: f32,
-    pub ridge_height: f32,
-    pub ridge_width: f32,
-    pub ridge_variation: f32,
     pub body_wiggle: f32,
     pub pressure_preset: PressurePreset,
 }
@@ -261,10 +249,6 @@ impl Default for StrokeValues {
         Self {
             brush_width: d.brush_width,
             load: d.load,
-            base_height: d.base_height,
-            ridge_height: d.ridge_height,
-            ridge_width: d.ridge_width,
-            ridge_variation: d.ridge_variation,
             body_wiggle: d.body_wiggle,
             pressure_preset: d.pressure_preset,
         }
@@ -275,10 +259,6 @@ impl Hash for StrokeValues {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.brush_width.to_bits().hash(state);
         self.load.to_bits().hash(state);
-        self.base_height.to_bits().hash(state);
-        self.ridge_height.to_bits().hash(state);
-        self.ridge_width.to_bits().hash(state);
-        self.ridge_variation.to_bits().hash(state);
         self.body_wiggle.to_bits().hash(state);
         self.pressure_preset.hash(state);
     }
@@ -394,10 +374,6 @@ impl PaintSlot {
             stroke: StrokeValues {
                 brush_width: p.brush_width,
                 load: p.load,
-                base_height: p.base_height,
-                ridge_height: p.ridge_height,
-                ridge_width: p.ridge_width,
-                ridge_variation: p.ridge_variation,
                 body_wiggle: p.body_wiggle,
                 pressure_preset: p.pressure_preset,
             },
@@ -434,10 +410,6 @@ impl StrokeParams {
         StrokeParams {
             brush_width: stroke.brush_width,
             load: stroke.load,
-            base_height: stroke.base_height,
-            ridge_height: stroke.ridge_height,
-            ridge_width: stroke.ridge_width,
-            ridge_variation: stroke.ridge_variation,
             body_wiggle: stroke.body_wiggle,
             pressure_preset: stroke.pressure_preset,
             stroke_spacing: pattern.stroke_spacing,
@@ -505,10 +477,6 @@ impl PresetLibrary {
                     values: StrokeValues {
                         brush_width: 40.0,
                         load: 0.8,
-                        base_height: 0.5,
-                        ridge_height: 0.3,
-                        ridge_width: 5.0,
-                        ridge_variation: 0.1,
                         body_wiggle: 0.15,
                         pressure_preset: PressurePreset::FadeOut,
                     },
@@ -518,10 +486,6 @@ impl PresetLibrary {
                     values: StrokeValues {
                         brush_width: 15.0,
                         load: 0.9,
-                        base_height: 0.6,
-                        ridge_height: 0.2,
-                        ridge_width: 3.0,
-                        ridge_variation: 0.05,
                         body_wiggle: 0.1,
                         pressure_preset: PressurePreset::Taper,
                     },
@@ -531,10 +495,6 @@ impl PresetLibrary {
                     values: StrokeValues {
                         brush_width: 50.0,
                         load: 0.3,
-                        base_height: 0.3,
-                        ridge_height: 0.1,
-                        ridge_width: 6.0,
-                        ridge_variation: 0.2,
                         body_wiggle: 0.2,
                         pressure_preset: PressurePreset::FadeOut,
                     },
@@ -544,10 +504,6 @@ impl PresetLibrary {
                     values: StrokeValues {
                         brush_width: 30.0,
                         load: 1.0,
-                        base_height: 0.8,
-                        ridge_height: 0.5,
-                        ridge_width: 4.0,
-                        ridge_variation: 0.15,
                         body_wiggle: 0.1,
                         pressure_preset: PressurePreset::Bell,
                     },
@@ -557,10 +513,6 @@ impl PresetLibrary {
                     values: StrokeValues {
                         brush_width: 35.0,
                         load: 0.5,
-                        base_height: 0.15,
-                        ridge_height: 0.05,
-                        ridge_width: 5.0,
-                        ridge_variation: 0.05,
                         body_wiggle: 0.1,
                         pressure_preset: PressurePreset::Uniform,
                     },

@@ -9,8 +9,12 @@ use crate::stroke_color::ColorTextureRef;
 use crate::uv_mask::UvMask;
 use crate::rng::SeededRng;
 use crate::stroke_color::{compute_stroke_color, sample_bilinear};
-use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
+use crate::stroke_height::{compute_stroke_gradients, generate_stroke_height, StrokeGradientResult, StrokeHeightResult};
 use crate::types::{BackgroundMode, BaseColorSource, Color, NormalMode, OutputSettings, PaintLayer, StrokePath};
+
+/// Density threshold at which a stroke pixel becomes fully opaque.
+/// Below this, opacity ramps smoothly from 0 (via smoothstep).
+const DENSITY_OPACITY_THRESHOLD: f32 = 0.7;
 
 /// Global compositing buffers in UV space.
 pub struct GlobalMaps {
@@ -23,6 +27,10 @@ pub struct GlobalMaps {
     /// Object-space normal per pixel (composited from strokes).
     /// Empty in SurfacePaint mode.
     pub object_normal: Vec<[f32; 3]>,
+    /// Paint detail gradient (X component in UV space), composited per-stroke.
+    pub gradient_x: Vec<f32>,
+    /// Paint detail gradient (Y component in UV space), composited per-stroke.
+    pub gradient_y: Vec<f32>,
     pub resolution: u32,
 }
 
@@ -66,11 +74,16 @@ impl GlobalMaps {
             vec![base_color.solid_color; size]
         };
 
+        let gradient_x = vec![0.0f32; size];
+        let gradient_y = vec![0.0f32; size];
+
         Self {
             height,
             color,
             stroke_id,
             object_normal,
+            gradient_x,
+            gradient_y,
             resolution,
         }
     }
@@ -100,7 +113,6 @@ fn bilinear_sample(data: &[f32], width: usize, height: usize, x: f32, y: f32) ->
 pub struct StrokeAppearance {
     pub color: Color,
     pub id: u32,
-    pub base_height: f32,
     pub normal: Option<[f32; 3]>,
     pub transparent: bool,
 }
@@ -115,6 +127,7 @@ pub struct StrokeAppearance {
 /// the per-pixel cost constant (no full-path scan).
 pub fn composite_stroke(
     local_height: &StrokeHeightResult,
+    local_gradient: &StrokeGradientResult,
     path: &StrokePath,
     resolution: u32,
     appearance: &StrokeAppearance,
@@ -122,11 +135,9 @@ pub fn composite_stroke(
 ) {
     let stroke_color = appearance.color;
     let stroke_id = appearance.id;
-    let base_height = appearance.base_height;
     let stroke_normal = appearance.normal;
     let transparent = appearance.transparent;
     let res = resolution;
-    let margin = local_height.margin;
     let local_w = local_height.width;
     let local_h = local_height.height;
     let res_f = res as f32;
@@ -144,7 +155,6 @@ pub fn composite_stroke(
     }
 
     let stroke_length_px = (total_len * res_f).ceil() as usize;
-    let margin_uv = margin as f32 / res_f;
     let half_lateral_uv = local_h as f32 / 2.0 / res_f;
     // Half-pixel overlap at segment junctions to avoid gaps
     let junction_pad = 0.5 / res_f;
@@ -161,18 +171,13 @@ pub fn composite_stroke(
         let normal = perpendicular(seg_dir);
 
         // Projection bounds along this segment
-        let proj_lo = if seg_idx == 0 { -margin_uv } else { -junction_pad };
+        let proj_lo = if seg_idx == 0 { 0.0 } else { -junction_pad };
         let proj_hi = seg_len + junction_pad;
 
         // Tight bounding box for this segment
         let ext = Vec2::splat(half_lateral_uv + 1.0 / res_f);
-        let mut seg_min = a.min(b) - ext;
-        let mut seg_max = a.max(b) + ext;
-        if seg_idx == 0 {
-            let front = a - seg_dir * margin_uv;
-            seg_min = seg_min.min(front - ext);
-            seg_max = seg_max.max(front + ext);
-        }
+        let seg_min = a.min(b) - ext;
+        let seg_max = a.max(b) + ext;
 
         let gx_min = ((seg_min.x * res_f).floor() as i32).max(0) as u32;
         let gy_min = ((seg_min.y * res_f).floor() as i32).max(0) as u32;
@@ -201,7 +206,7 @@ pub fn composite_stroke(
 
                 // Local frame coordinates
                 let t = (accum + proj) / total_len;
-                let lx_f = t * stroke_length_px as f32 + margin as f32;
+                let lx_f = t * stroke_length_px as f32;
                 let ly_f = lateral * res_f + local_h as f32 / 2.0;
 
                 if lx_f < 0.0
@@ -225,9 +230,23 @@ pub fn composite_stroke(
 
                 let idx = (gy * res + gx) as usize;
 
-                global.height[idx] = h.max(global.height[idx]);
+                let prev_h = global.height[idx];
+                global.height[idx] = h.max(prev_h);
 
-                let opacity = smoothstep(0.0, base_height * 0.7, h);
+                // Gradient compositing: winner (highest density) takes gradient
+                if h >= prev_h {
+                    let local_gx = bilinear_sample(
+                        &local_gradient.gx, local_w, local_h, lx_f, ly_f,
+                    );
+                    let local_gy = bilinear_sample(
+                        &local_gradient.gy, local_w, local_h, lx_f, ly_f,
+                    );
+                    // Rotate from local frame to global UV space
+                    global.gradient_x[idx] = local_gx * seg_dir.x + local_gy * normal.x;
+                    global.gradient_y[idx] = local_gx * seg_dir.y + local_gy * normal.y;
+                }
+
+                let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h);
                 if transparent {
                     if global.stroke_id[idx] == 0 {
                         // First paint on virgin pixel: set color directly
@@ -440,31 +459,33 @@ pub fn composite_layer(
         vec![None; paths.len()]
     };
 
-    // Step 2: Build height maps in parallel (no local frame transform needed)
-    let heights: Vec<StrokeHeightResult> = paths
+    // Step 2: Build height maps and gradients in parallel
+    let heights_and_gradients: Vec<(StrokeHeightResult, StrokeGradientResult)> = paths
         .par_iter()
         .enumerate()
         .map(|(i, path)| {
             let stroke_length_px = (path.arc_length() * resolution as f32).ceil() as usize;
-            generate_stroke_height(
+            let height = generate_stroke_height(
                 &brush_profile,
                 stroke_length_px,
                 &layer.params,
                 layer.params.seed + i as u32,
-            )
+            );
+            let gradient = compute_stroke_gradients(&height);
+            (height, gradient)
         })
         .collect();
 
     // Step 3: Composite sequentially using gather (no scatter-write gaps)
-    for (i, local_height) in heights.iter().enumerate() {
+    for (i, (local_height, local_gradient)) in heights_and_gradients.iter().enumerate() {
         composite_stroke(
             local_height,
+            local_gradient,
             &paths[i],
             resolution,
             &StrokeAppearance {
                 color: stroke_colors[i],
                 id: paths[i].stroke_id,
-                base_height: layer.params.base_height,
                 normal: stroke_normals[i],
                 transparent,
             },
@@ -508,7 +529,6 @@ mod tests {
         transform: &LocalFrameTransform,
         stroke_color: Color,
         stroke_id: u32,
-        base_height: f32,
         stroke_normal: Option<[f32; 3]>,
         global: &mut GlobalMaps,
     ) {
@@ -525,7 +545,7 @@ mod tests {
                 if px < 0 || py < 0 || px >= res as i32 || py >= res as i32 { continue; }
                 let idx = (py as u32 * res + px as u32) as usize;
                 global.height[idx] = h.max(global.height[idx]);
-                let opacity = smoothstep(0.0, base_height * 0.7, h);
+                let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h);
                 global.color[idx] = lerp_color(global.color[idx], stroke_color, opacity);
                 global.stroke_id[idx] = stroke_id;
                 if let Some(sn) = stroke_normal {
@@ -542,7 +562,6 @@ mod tests {
             data: vec![value; width * height],
             width,
             height,
-            margin: 0,
         }
     }
 
@@ -609,7 +628,6 @@ mod tests {
                 &transform,
                 Color::rgb(0.5, 0.5, 0.5),
                 (i + 1) as u32,
-                1.0,
                 None,
                 &mut global,
             );
@@ -630,16 +648,14 @@ mod tests {
     fn color_full_cover() {
         let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
-        let base_height = 0.5;
 
-        let height_map = make_simple_height(1, 1, base_height);
+        let height_map = make_simple_height(1, 1, 0.8);
         let transform = make_simple_transform(1, 1, uv);
         composite_stroke_scatter(
             &height_map,
             &transform,
             Color::rgb(0.0, 0.0, 1.0),
             1,
-            base_height,
             None,
             &mut global,
         );
@@ -658,7 +674,6 @@ mod tests {
     fn color_transparent_bristle_gap() {
         let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
-        let base_height = 0.5;
 
         let height_map = make_simple_height(1, 1, 0.001);
         let transform = make_simple_transform(1, 1, uv);
@@ -667,7 +682,6 @@ mod tests {
             &transform,
             Color::rgb(0.0, 0.0, 1.0),
             1,
-            base_height,
             None,
             &mut global,
         );
@@ -686,17 +700,14 @@ mod tests {
     fn color_partial_blend() {
         let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
-        let base_height = 0.5;
-        let h = base_height * 0.3;
 
-        let height_map = make_simple_height(1, 1, h);
+        let height_map = make_simple_height(1, 1, 0.15);
         let transform = make_simple_transform(1, 1, uv);
         composite_stroke_scatter(
             &height_map,
             &transform,
             Color::rgb(0.0, 0.0, 1.0),
             1,
-            base_height,
             None,
             &mut global,
         );
@@ -708,20 +719,17 @@ mod tests {
     }
 
     #[test]
-    fn color_ridge_full_opacity() {
+    fn color_high_density_full_opacity() {
         let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)), NormalMode::SurfacePaint, BackgroundMode::Opaque);
         let uv = Vec2::new(0.5, 0.5);
-        let base_height = 0.5;
-        let h = base_height + 0.3;
 
-        let height_map = make_simple_height(1, 1, h);
+        let height_map = make_simple_height(1, 1, 0.9);
         let transform = make_simple_transform(1, 1, uv);
         composite_stroke_scatter(
             &height_map,
             &transform,
             Color::rgb(0.0, 0.0, 1.0),
             1,
-            base_height,
             None,
             &mut global,
         );
@@ -731,7 +739,7 @@ mod tests {
         let c = global.color[idx];
         assert!(
             c.b > 0.95,
-            "ridge: should be fully covered, got ({:.3}, {:.3}, {:.3})",
+            "high density: should be fully covered, got ({:.3}, {:.3}, {:.3})",
             c.r, c.g, c.b
         );
     }
@@ -751,7 +759,6 @@ mod tests {
                 &transform,
                 Color::WHITE,
                 sid,
-                0.5,
                 None,
                 &mut global,
             );
@@ -838,7 +845,6 @@ mod tests {
     fn visual_compositing() {
         let mut layer = make_layer_with_order(0);
         layer.params.brush_width = 25.0;
-        layer.params.ridge_height = 0.3;
         layer.params.color_variation = 0.1;
 
         let settings = OutputSettings::default();
@@ -890,75 +896,10 @@ mod tests {
     }
 
     #[test]
-    fn visual_flat_stroke_no_impasto() {
-        let mut layer = make_layer_with_order(0);
-        layer.params.base_height = 0.5;
-        layer.params.ridge_height = 0.0;
-        layer.params.brush_width = 25.0;
-        layer.params.color_variation = 0.0;
-
-        let settings = OutputSettings::default();
-
-        let solid = Color::rgb(0.5, 0.7, 0.3);
-        let maps = composite_all(&[layer], 256, &BaseColorSource::solid(solid), &settings, None, &[]);
-
-        let max_h = maps.height.iter().cloned().fold(0.0f32, f32::max).max(1e-10);
-        let pixels: Vec<u8> = maps
-            .height
-            .iter()
-            .map(|&h| ((h / max_h).clamp(0.0, 1.0) * 255.0) as u8)
-            .collect();
-
-        let out_path = crate::test_module_output_dir("compositing").join("flat.png");
-        image::save_buffer(
-            &out_path,
-            &pixels,
-            256,
-            256,
-            image::ColorType::L8,
-        )
-        .expect("Failed to save");
-        eprintln!("Wrote: {}", out_path.display());
-    }
-
-    #[test]
-    fn visual_prominent_impasto() {
-        let mut layer = make_layer_with_order(0);
-        layer.params.base_height = 0.3;
-        layer.params.ridge_height = 0.5;
-        layer.params.brush_width = 25.0;
-        layer.params.color_variation = 0.0;
-
-        let settings = OutputSettings::default();
-
-        let solid = Color::rgb(0.5, 0.3, 0.6);
-        let maps = composite_all(&[layer], 256, &BaseColorSource::solid(solid), &settings, None, &[]);
-
-        let max_h = maps.height.iter().cloned().fold(0.0f32, f32::max).max(1e-10);
-        let pixels: Vec<u8> = maps
-            .height
-            .iter()
-            .map(|&h| ((h / max_h).clamp(0.0, 1.0) * 255.0) as u8)
-            .collect();
-
-        let out_path = crate::test_module_output_dir("compositing").join("impasto.png");
-        image::save_buffer(
-            &out_path,
-            &pixels,
-            256,
-            256,
-            image::ColorType::L8,
-        )
-        .expect("Failed to save");
-        eprintln!("Wrote: {}", out_path.display());
-    }
-
-    #[test]
     fn visual_dry_brush() {
         let mut layer = make_layer_with_order(0);
         layer.params.load = 0.3;
-        layer.params.base_height = 0.5;
-        layer.params.ridge_height = 0.0;
+        // density-only: no height/ridge params
         layer.params.brush_width = 25.0;
         layer.params.color_variation = 0.0;
 
@@ -1074,7 +1015,6 @@ mod tests {
             &transform,
             Color::rgb(0.0, 0.0, 1.0),
             1,
-            0.5,
             None,
             &mut global,
         );

@@ -415,10 +415,6 @@ mod tests {
             stroke: StrokeValues {
                 brush_width: 20.0 + order as f32,
                 load: 0.7,
-                base_height: 0.4,
-                ridge_height: 0.2,
-                ridge_width: 4.0,
-                ridge_variation: 0.1,
                 body_wiggle: 0.1,
                 pressure_preset: PressurePreset::FadeOut,
             },
@@ -514,10 +510,6 @@ mod tests {
             assert_eq!(a.order, b.order);
             assert_eq!(a.stroke.brush_width, b.stroke.brush_width);
             assert_eq!(a.stroke.load, b.stroke.load);
-            assert_eq!(a.stroke.base_height, b.stroke.base_height);
-            assert_eq!(a.stroke.ridge_height, b.stroke.ridge_height);
-            assert_eq!(a.stroke.ridge_width, b.stroke.ridge_width);
-            assert_eq!(a.stroke.ridge_variation, b.stroke.ridge_variation);
             assert_eq!(a.stroke.body_wiggle, b.stroke.body_wiggle);
             assert_eq!(a.stroke.pressure_preset, b.stroke.pressure_preset);
             assert_eq!(a.pattern.stroke_spacing, b.pattern.stroke_spacing);
@@ -923,10 +915,6 @@ mod tests {
                 params: StrokeParams {
                     brush_width: 30.0,
                     load: 0.8,
-                    base_height: 0.5,
-                    ridge_height: 0.3,
-                    ridge_width: 5.0,
-                    ridge_variation: 0.1,
                     body_wiggle: 0.15,
                     stroke_spacing: 1.0,
                     pressure_preset: PressurePreset::FadeOut,
@@ -1006,8 +994,7 @@ mod tests {
                     "mask": [{"vertices": [[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]]}],
                     "order": 0,
                     "params": {
-                        "brush_width": 30.0, "load": 0.8, "base_height": 0.5,
-                        "ridge_height": 0.3, "ridge_width": 5.0, "ridge_variation": 0.1,
+                        "brush_width": 30.0, "load": 0.8,
                         "body_wiggle": 0.15, "stroke_spacing": 1.0,
                         "pressure_preset": "FadeOut", "color_variation": 0.1,
                         "max_stroke_length": 240.0, "angle_variation": 5.0,

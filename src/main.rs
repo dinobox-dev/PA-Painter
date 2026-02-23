@@ -181,7 +181,7 @@ fn main() {
 
     // Export
     eprintln!("Exporting to: {}", output_dir.display());
-    export_all(&global, &layers, &project.settings, &output_dir, format, normal_data.as_ref())
+    export_all(&global, &project.settings, &output_dir, format, normal_data.as_ref())
         .unwrap_or_else(|e| {
             eprintln!("Error exporting: {e:?}");
             process::exit(1);

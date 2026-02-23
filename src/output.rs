@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::asset_io::linear_to_srgb;
 use crate::compositing::GlobalMaps;
 use crate::object_normal::MeshNormalData;
-use crate::types::{BackgroundMode, Color, NormalMode, OutputSettings, PaintLayer};
+use crate::types::{BackgroundMode, Color, NormalMode, OutputSettings};
 
 // ── Error Type ──
 
@@ -29,99 +29,67 @@ pub enum ExportFormat {
 
 // ── Height Map Normalization ──
 
-/// Normalize a height map for export.
+/// Normalize a height (density) map for export.
 ///
-/// Uses the maximum possible height (base_height + ridge_height across all layers)
-/// as a reference, with display_cap = 2x that value.
+/// Density values are already in [0, 1] range (effective_density × remaining).
 ///
 /// Returns a new Vec<f32> with values in [0, 1].
-pub fn normalize_height_map(height: &[f32], layers: &[PaintLayer]) -> Vec<f32> {
-    let mut max_possible: f32 = 0.0;
-    for layer in layers {
-        let layer_max = layer.params.base_height + layer.params.ridge_height;
-        max_possible = max_possible.max(layer_max);
-    }
-
-    let mut display_cap = 2.0 * max_possible;
-    if display_cap <= 0.0 {
-        display_cap = 1.0;
-    }
-
+pub fn normalize_height_map(height: &[f32]) -> Vec<f32> {
     height
         .iter()
-        .map(|&h| (h / display_cap).clamp(0.0, 1.0))
+        .map(|&h| h.clamp(0.0, 1.0))
         .collect()
 }
 
-// ── Normal Map Generation (Sobel Filter) ──
+// ── Normal Map Generation ──
 
-/// Generate a tangent-space normal map from a height map.
+/// Generate a tangent-space normal map from pre-composited gradients.
 ///
-/// - `height`: normalized height map [0, 1], row-major, resolution x resolution
-/// - `resolution`: map dimensions (square)
-/// - `normal_strength`: depth intensity multiplier (default 1.0)
+/// Gradients are computed per-stroke in local space and composited into
+/// global UV space during `composite_stroke()`, so no Sobel pass is needed here.
 ///
 /// Returns Vec<[f32; 3]> of normal vectors encoded as (R, G, B) where
 /// flat = (0.5, 0.5, 1.0). Row-major, resolution x resolution.
 pub fn generate_normal_map(
-    height: &[f32],
+    gradient_x: &[f32],
+    gradient_y: &[f32],
     resolution: u32,
     normal_strength: f32,
 ) -> Vec<[f32; 3]> {
-    let res = resolution;
-    let mut normals = vec![[0.5f32, 0.5, 1.0]; (res * res) as usize];
+    let size = (resolution * resolution) as usize;
+    let mut normals = vec![[0.5f32, 0.5, 1.0]; size];
 
-    let idx = |x: u32, y: u32| -> usize { (y * res + x) as usize };
+    for i in 0..size {
+        let gx = gradient_x[i];
+        let gy = gradient_y[i];
 
-    for y in 1..(res - 1) {
-        for x in 1..(res - 1) {
-            // Sobel X kernel:  [-1 0 1]
-            //                  [-2 0 2]
-            //                  [-1 0 1]
-            let gx = -height[idx(x - 1, y - 1)]
-                - 2.0 * height[idx(x - 1, y)]
-                - height[idx(x - 1, y + 1)]
-                + height[idx(x + 1, y - 1)]
-                + 2.0 * height[idx(x + 1, y)]
-                + height[idx(x + 1, y + 1)];
+        let nx = -gx * normal_strength;
+        let ny = -gy * normal_strength;
+        let nz = 1.0f32;
 
-            // Sobel Y kernel:  [-1 -2 -1]
-            //                  [ 0  0  0]
-            //                  [ 1  2  1]
-            let gy = -height[idx(x - 1, y - 1)]
-                - 2.0 * height[idx(x, y - 1)]
-                - height[idx(x + 1, y - 1)]
-                + height[idx(x - 1, y + 1)]
-                + 2.0 * height[idx(x, y + 1)]
-                + height[idx(x + 1, y + 1)];
-
-            let nx = -gx * normal_strength;
-            let ny = -gy * normal_strength;
-            let nz = 1.0f32;
-
-            let len = (nx * nx + ny * ny + nz * nz).sqrt();
-            let nx = nx / len;
-            let ny = ny / len;
-            let nz = nz / len;
-
-            normals[idx(x, y)] = [nx * 0.5 + 0.5, ny * 0.5 + 0.5, nz * 0.5 + 0.5];
-        }
+        let len = (nx * nx + ny * ny + nz * nz).sqrt();
+        normals[i] = [
+            nx / len * 0.5 + 0.5,
+            ny / len * 0.5 + 0.5,
+            nz / len * 0.5 + 0.5,
+        ];
     }
 
     normals
 }
 
 /// Generate a tangent-space normal map using object-space normals from mesh geometry,
-/// perturbed by the paint height field.
+/// perturbed by pre-composited paint gradients.
 ///
 /// For each pixel:
-/// 1. Compute Sobel gradient from the height map (same as SurfacePaint).
+/// 1. Read pre-composited gradient (gx, gy) from global gradient buffers.
 /// 2. Look up the composited object-space normal N_obj, tangent T, and bitangent B.
-/// 3. Perturb: `perturbed = normalize(N_obj + strength * (dH/dx * T + dH/dy * B))`
+/// 3. Perturb: `perturbed = normalize(N_obj + strength * (-gx * T + -gy * B))`
 /// 4. Convert to tangent space: `ts = (perturbed·T, perturbed·B, perturbed·N_geom)`
 /// 5. Encode to [0, 1].
 pub fn generate_normal_map_depicted_form(
-    height: &[f32],
+    gradient_x: &[f32],
+    gradient_y: &[f32],
     normal_data: &MeshNormalData,
     global_object_normals: &[[f32; 3]],
     resolution: u32,
@@ -131,42 +99,23 @@ pub fn generate_normal_map_depicted_form(
     let nd_res = normal_data.resolution;
     let mut normals = vec![[0.5f32, 0.5, 1.0]; (res * res) as usize];
 
-    let idx = |x: u32, y: u32| -> usize { (y * res + x) as usize };
+    for y in 0..res {
+        for x in 0..res {
+            let pixel_idx = (y * res + x) as usize;
+            let gx = gradient_x[pixel_idx];
+            let gy = gradient_y[pixel_idx];
 
-    for y in 1..(res - 1) {
-        for x in 1..(res - 1) {
-            // Step 1: Sobel gradient (identical to SurfacePaint)
-            let gx = -height[idx(x - 1, y - 1)]
-                - 2.0 * height[idx(x - 1, y)]
-                - height[idx(x - 1, y + 1)]
-                + height[idx(x + 1, y - 1)]
-                + 2.0 * height[idx(x + 1, y)]
-                + height[idx(x + 1, y + 1)];
-
-            let gy = -height[idx(x - 1, y - 1)]
-                - 2.0 * height[idx(x, y - 1)]
-                - height[idx(x + 1, y - 1)]
-                + height[idx(x - 1, y + 1)]
-                + 2.0 * height[idx(x, y + 1)]
-                + height[idx(x + 1, y + 1)];
-
-            let pixel_idx = idx(x, y);
-
-            // Step 2: Look up mesh TBN at this pixel
             // Map from output resolution to normal_data resolution
             let nd_x = ((x as f32 + 0.5) / res as f32 * nd_res as f32).floor() as u32;
             let nd_y = ((y as f32 + 0.5) / res as f32 * nd_res as f32).floor() as u32;
-            let nd_x = nd_x.min(nd_res - 1);
-            let nd_y = nd_y.min(nd_res - 1);
-            let nd_idx = (nd_y * nd_res + nd_x) as usize;
+            let nd_idx = (nd_y.min(nd_res - 1) * nd_res + nd_x.min(nd_res - 1)) as usize;
 
             let n_geom = normal_data.object_normals[nd_idx];
             let t = normal_data.tangents[nd_idx];
             let b = normal_data.bitangents[nd_idx];
 
-            // If no mesh coverage here, fall back to flat tangent-space normal
+            // If no mesh coverage here, fall back to SurfacePaint normal
             if n_geom.length_squared() < 0.5 {
-                // Use standard SurfacePaint normal for uncovered pixels
                 let nx = -gx * normal_strength;
                 let ny = -gy * normal_strength;
                 let nz = 1.0f32;
@@ -184,15 +133,14 @@ pub fn generate_normal_map_depicted_form(
                 n_geom
             };
 
-            // Step 3: Perturb the object-space normal by height gradient
+            // Perturb the object-space normal by paint gradient
             let perturbed = (n_obj + normal_strength * (-gx * t + -gy * b)).normalize();
 
-            // Step 4: Convert to tangent space
+            // Convert to tangent space
             let ts_x = perturbed.dot(t);
             let ts_y = perturbed.dot(b);
             let ts_z = perturbed.dot(n_geom);
 
-            // Step 5: Encode [-1,1] → [0,1]
             normals[pixel_idx] = [ts_x * 0.5 + 0.5, ts_y * 0.5 + 0.5, ts_z * 0.5 + 0.5];
         }
     }
@@ -415,7 +363,6 @@ pub fn export_color_exr(
 /// Export all textures at once.
 pub fn export_all(
     global: &GlobalMaps,
-    layers: &[PaintLayer],
     settings: &OutputSettings,
     output_dir: &Path,
     format: ExportFormat,
@@ -423,16 +370,22 @@ pub fn export_all(
 ) -> Result<(), OutputError> {
     std::fs::create_dir_all(output_dir)?;
 
-    let normalized_height = normalize_height_map(&global.height, layers);
+    let normalized_height = normalize_height_map(&global.height);
     let normals = match (settings.normal_mode, normal_data) {
         (NormalMode::DepictedForm, Some(nd)) => generate_normal_map_depicted_form(
-            &normalized_height,
+            &global.gradient_x,
+            &global.gradient_y,
             nd,
             &global.object_normal,
             global.resolution,
             settings.normal_strength,
         ),
-        _ => generate_normal_map(&normalized_height, global.resolution, settings.normal_strength),
+        _ => generate_normal_map(
+            &global.gradient_x,
+            &global.gradient_y,
+            global.resolution,
+            settings.normal_strength,
+        ),
     };
 
     let with_alpha = settings.background_mode == BackgroundMode::Transparent;
@@ -498,127 +451,64 @@ mod tests {
     #[test]
     fn normalize_all_zeros() {
         let height = vec![0.0f32; 64];
-        let layer = make_layer_with_order(0);
-        let normalized = normalize_height_map(&height, &[layer]);
+        let normalized = normalize_height_map(&height);
         assert!(normalized.iter().all(|&v| v == 0.0));
     }
 
     #[test]
-    fn normalize_at_display_cap() {
-        // max_possible = 0.5 + 0.3 = 0.8, display_cap = 1.6
-        let mut layer = make_layer_with_order(0);
-        layer.params.base_height = 0.5;
-        layer.params.ridge_height = 0.3;
-
-        let height = vec![1.6f32; 1]; // exactly at display_cap
-        let normalized = normalize_height_map(&height, &[layer]);
+    fn normalize_clamps_above_one() {
+        let height = vec![3.0f32; 1];
+        let normalized = normalize_height_map(&height);
         assert!(
             (normalized[0] - 1.0).abs() < EPS,
-            "at display_cap: expected 1.0, got {}",
-            normalized[0]
-        );
-    }
-
-    #[test]
-    fn normalize_half_of_cap() {
-        let mut layer = make_layer_with_order(0);
-        layer.params.base_height = 0.5;
-        layer.params.ridge_height = 0.3;
-        // display_cap = 1.6
-
-        let height = vec![0.8f32; 1]; // half of 1.6
-        let normalized = normalize_height_map(&height, &[layer]);
-        assert!(
-            (normalized[0] - 0.5).abs() < EPS,
-            "half of cap: expected 0.5, got {}",
-            normalized[0]
-        );
-    }
-
-    #[test]
-    fn normalize_no_layers() {
-        let height = vec![0.5f32; 4];
-        let normalized = normalize_height_map(&height, &[]);
-        // display_cap = 1.0 (fallback)
-        assert!(
-            (normalized[0] - 0.5).abs() < EPS,
-            "no layers: expected 0.5, got {}",
-            normalized[0]
-        );
-    }
-
-    #[test]
-    fn normalize_clamps_above_cap() {
-        let mut layer = make_layer_with_order(0);
-        layer.params.base_height = 0.5;
-        layer.params.ridge_height = 0.3;
-        // display_cap = 1.6
-
-        let height = vec![3.0f32; 1]; // above display_cap
-        let normalized = normalize_height_map(&height, &[layer]);
-        assert!(
-            (normalized[0] - 1.0).abs() < EPS,
-            "above cap: expected 1.0, got {}",
+            "above 1.0: expected 1.0, got {}",
             normalized[0]
         );
     }
 
     // ── Normal Map Tests ──
 
+    fn zeros(n: usize) -> Vec<f32> { vec![0.0f32; n] }
+
     #[test]
     fn normal_flat_surface() {
         let res = 16u32;
-        let height = vec![0.5f32; (res * res) as usize];
-        let normals = generate_normal_map(&height, res, 1.0);
+        let size = (res * res) as usize;
+        let normals = generate_normal_map(&zeros(size), &zeros(size), res, 1.0);
 
-        // All interior pixels should be flat
-        for y in 1..(res - 1) {
-            for x in 1..(res - 1) {
-                let n = normals[(y * res + x) as usize];
-                assert!(
-                    (n[0] - 0.5).abs() < EPS && (n[1] - 0.5).abs() < EPS && (n[2] - 1.0).abs() < EPS,
-                    "flat surface at ({x},{y}): expected (0.5, 0.5, 1.0), got ({:.4}, {:.4}, {:.4})",
-                    n[0], n[1], n[2]
-                );
-            }
+        for i in 0..size {
+            let n = normals[i];
+            assert!(
+                (n[0] - 0.5).abs() < EPS && (n[1] - 0.5).abs() < EPS && (n[2] - 1.0).abs() < EPS,
+                "flat at {i}: expected (0.5, 0.5, 1.0), got ({:.4}, {:.4}, {:.4})",
+                n[0], n[1], n[2]
+            );
         }
     }
 
     #[test]
     fn normal_slope_right() {
-        // Height increases left to right → normal tilts left (nx < 0.5)
         let res = 16u32;
-        let mut height = vec![0.0f32; (res * res) as usize];
-        for y in 0..res {
-            for x in 0..res {
-                height[(y * res + x) as usize] = x as f32 / res as f32;
-            }
-        }
-
-        let normals = generate_normal_map(&height, res, 1.0);
-        // Check center pixel
+        let size = (res * res) as usize;
+        // Positive gx → normal tilts left (nx < 0.5)
+        let gx = vec![1.0f32; size];
+        let gy = zeros(size);
+        let normals = generate_normal_map(&gx, &gy, res, 1.0);
         let center = normals[(8 * res + 8) as usize];
         assert!(
             center[0] < 0.5,
-            "slope right: nx should be < 0.5 (tilts left), got {:.4}",
+            "slope right: nx should be < 0.5, got {:.4}",
             center[0]
         );
     }
 
     #[test]
     fn normal_slope_up() {
-        // Height increases bottom (y=0, V=0) to top (y=res, V=1) → ny < 0.5
         let res = 16u32;
-        let mut height = vec![0.0f32; (res * res) as usize];
-        for y in 0..res {
-            for x in 0..res {
-                // In UV space, V=0 is bottom (row 0), V=1 is top (row res-1)
-                // "Height increases bottom to top" = height grows with y
-                height[(y * res + x) as usize] = y as f32 / res as f32;
-            }
-        }
-
-        let normals = generate_normal_map(&height, res, 1.0);
+        let size = (res * res) as usize;
+        let gx = zeros(size);
+        let gy = vec![1.0f32; size];
+        let normals = generate_normal_map(&gx, &gy, res, 1.0);
         let center = normals[(8 * res + 8) as usize];
         assert!(
             center[1] < 0.5,
@@ -630,116 +520,62 @@ mod tests {
     #[test]
     fn normal_strength_zero() {
         let res = 16u32;
-        let mut height = vec![0.0f32; (res * res) as usize];
-        for y in 0..res {
-            for x in 0..res {
-                height[(y * res + x) as usize] = x as f32 / res as f32;
-            }
-        }
-
-        let normals = generate_normal_map(&height, res, 0.0);
-        // All should be near-flat
-        for y in 1..(res - 1) {
-            for x in 1..(res - 1) {
-                let n = normals[(y * res + x) as usize];
-                assert!(
-                    (n[0] - 0.5).abs() < EPS && (n[1] - 0.5).abs() < EPS,
-                    "strength=0 at ({x},{y}): expected near (0.5, 0.5, 1.0), got ({:.4}, {:.4}, {:.4})",
-                    n[0], n[1], n[2]
-                );
-            }
+        let size = (res * res) as usize;
+        let gx = vec![1.0f32; size];
+        let normals = generate_normal_map(&gx, &zeros(size), res, 0.0);
+        for i in 0..size {
+            let n = normals[i];
+            assert!(
+                (n[0] - 0.5).abs() < EPS && (n[1] - 0.5).abs() < EPS,
+                "strength=0 at {i}: expected flat, got ({:.4}, {:.4}, {:.4})",
+                n[0], n[1], n[2]
+            );
         }
     }
 
     #[test]
     fn normal_strength_scales() {
         let res = 16u32;
-        let mut height = vec![0.0f32; (res * res) as usize];
-        for y in 0..res {
-            for x in 0..res {
-                height[(y * res + x) as usize] = x as f32 / res as f32;
-            }
-        }
-
-        let normals_1 = generate_normal_map(&height, res, 1.0);
-        let normals_2 = generate_normal_map(&height, res, 2.0);
-
+        let size = (res * res) as usize;
+        let gx = vec![1.0f32; size];
+        let gy = zeros(size);
+        let normals_1 = generate_normal_map(&gx, &gy, res, 1.0);
+        let normals_2 = generate_normal_map(&gx, &gy, res, 2.0);
         let n1 = normals_1[(8 * res + 8) as usize];
         let n2 = normals_2[(8 * res + 8) as usize];
-
-        // strength=2 should tilt more (further from 0.5 in x)
-        let deviation_1 = (n1[0] - 0.5).abs();
-        let deviation_2 = (n2[0] - 0.5).abs();
+        let dev_1 = (n1[0] - 0.5).abs();
+        let dev_2 = (n2[0] - 0.5).abs();
         assert!(
-            deviation_2 > deviation_1,
-            "strength=2 should have more deviation: s1={:.4}, s2={:.4}",
-            deviation_1, deviation_2
+            dev_2 > dev_1,
+            "strength=2 should tilt more: s1={dev_1:.4}, s2={dev_2:.4}",
         );
-    }
-
-    #[test]
-    fn normal_edge_pixels_flat() {
-        let res = 16u32;
-        let mut height = vec![0.0f32; (res * res) as usize];
-        for i in 0..height.len() {
-            height[i] = (i as f32) / height.len() as f32;
-        }
-
-        let normals = generate_normal_map(&height, res, 1.0);
-
-        // Check edge pixels
-        for x in 0..res {
-            let top = normals[(0 * res + x) as usize];
-            let bottom = normals[((res - 1) * res + x) as usize];
-            assert!(
-                (top[0] - 0.5).abs() < EPS && (top[1] - 0.5).abs() < EPS && (top[2] - 1.0).abs() < EPS,
-                "top edge pixel ({x},0) should be flat"
-            );
-            assert!(
-                (bottom[0] - 0.5).abs() < EPS && (bottom[1] - 0.5).abs() < EPS && (bottom[2] - 1.0).abs() < EPS,
-                "bottom edge pixel ({x},{}) should be flat", res - 1
-            );
-        }
-        for y in 0..res {
-            let left = normals[(y * res + 0) as usize];
-            let right = normals[(y * res + res - 1) as usize];
-            assert!(
-                (left[0] - 0.5).abs() < EPS && (left[1] - 0.5).abs() < EPS && (left[2] - 1.0).abs() < EPS,
-                "left edge pixel (0,{y}) should be flat"
-            );
-            assert!(
-                (right[0] - 0.5).abs() < EPS && (right[1] - 0.5).abs() < EPS && (right[2] - 1.0).abs() < EPS,
-                "right edge pixel ({},{y}) should be flat", res - 1
-            );
-        }
     }
 
     #[test]
     fn normal_unit_length() {
         let res = 32u32;
-        let mut height = vec![0.0f32; (res * res) as usize];
+        let size = (res * res) as usize;
+        let mut gx = vec![0.0f32; size];
+        let mut gy = vec![0.0f32; size];
         for y in 0..res {
             for x in 0..res {
-                height[(y * res + x) as usize] =
-                    ((x as f32 * 0.5).sin() * 0.5 + 0.5) * ((y as f32 * 0.3).cos() * 0.5 + 0.5);
+                let i = (y * res + x) as usize;
+                gx[i] = (x as f32 * 0.5).sin();
+                gy[i] = (y as f32 * 0.3).cos();
             }
         }
 
-        let normals = generate_normal_map(&height, res, 1.5);
-
-        for y in 1..(res - 1) {
-            for x in 1..(res - 1) {
-                let n = normals[(y * res + x) as usize];
-                // Decode from [0,1] to [-1,1]
-                let dx = n[0] * 2.0 - 1.0;
-                let dy = n[1] * 2.0 - 1.0;
-                let dz = n[2] * 2.0 - 1.0;
-                let len = (dx * dx + dy * dy + dz * dz).sqrt();
-                assert!(
-                    (len - 1.0).abs() < 0.01,
-                    "normal at ({x},{y}) not unit length: {len:.4}"
-                );
-            }
+        let normals = generate_normal_map(&gx, &gy, res, 1.5);
+        for i in 0..size {
+            let n = normals[i];
+            let dx = n[0] * 2.0 - 1.0;
+            let dy = n[1] * 2.0 - 1.0;
+            let dz = n[2] * 2.0 - 1.0;
+            let len = (dx * dx + dy * dy + dz * dz).sqrt();
+            assert!(
+                (len - 1.0).abs() < 0.01,
+                "normal at {i} not unit length: {len:.4}"
+            );
         }
     }
 
@@ -941,7 +777,7 @@ mod tests {
         );
 
         let dir = std::env::temp_dir().join("pap_test_output").join("export_all_png");
-        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Png, None).unwrap();
+        export_all(&maps, &settings, &dir, ExportFormat::Png, None).unwrap();
 
         // Verify files exist
         assert!(dir.join("color_map.png").exists(), "color_map.png should exist");
@@ -968,7 +804,7 @@ mod tests {
         );
 
         let dir = std::env::temp_dir().join("pap_test_output").join("export_all_exr");
-        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Exr, None).unwrap();
+        export_all(&maps, &settings, &dir, ExportFormat::Exr, None).unwrap();
 
         assert!(dir.join("color_map.exr").exists(), "color_map.exr should exist");
         assert!(dir.join("height_map.exr").exists(), "height_map.exr should exist");
@@ -982,7 +818,6 @@ mod tests {
     fn visual_full_output() {
         let mut layer = make_layer_with_order(0);
         layer.params.brush_width = 25.0;
-        layer.params.ridge_height = 0.3;
         layer.params.color_variation = 0.1;
 
         let settings = OutputSettings::default();
@@ -993,7 +828,7 @@ mod tests {
         let dir = crate::test_module_output_dir("export");
         let _ = std::fs::create_dir_all(&dir);
 
-        export_all(&maps, &[layer], &settings, &dir, ExportFormat::Png, None).unwrap();
+        export_all(&maps, &settings, &dir, ExportFormat::Png, None).unwrap();
 
         eprintln!("Wrote: {}/color_map.png", dir.display());
         eprintln!("Wrote: {}/height_map.png", dir.display());

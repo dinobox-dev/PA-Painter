@@ -707,7 +707,7 @@ mod tests {
     #[test]
     fn visual_depicted_form_normal_map() {
         use crate::compositing::composite_all;
-        use crate::output::{export_normal_png, generate_normal_map, generate_normal_map_depicted_form, normalize_height_map};
+        use crate::output::{export_normal_png, generate_normal_map, generate_normal_map_depicted_form};
         use crate::types::{BaseColorSource, GuideVertex, NormalMode, OutputSettings, PaintLayer, StrokeParams};
 
         let fixtures = crate::test_fixtures_dir();
@@ -720,7 +720,6 @@ mod tests {
             order: 0,
             params: StrokeParams {
                 brush_width: 20.0,
-                ridge_height: 0.3,
                 color_variation: 0.0,
                 ..StrokeParams::default()
             },
@@ -740,16 +739,15 @@ mod tests {
         );
 
         let out_dir = crate::test_module_output_dir("object_normal");
-        let normalized_height = normalize_height_map(&maps.height, &[layer.clone()]);
 
         // SurfacePaint normal map (tangent-space, for comparison)
-        let normals_surface = generate_normal_map(&normalized_height, res, settings.normal_strength);
+        let normals_surface = generate_normal_map(&maps.gradient_x, &maps.gradient_y, res, settings.normal_strength);
         export_normal_png(&normals_surface, res, &out_dir.join("surface_paint_normal.png"))
             .expect("save surface_paint_normal.png");
 
         // DepictedForm normal map (tangent-space)
         let normals_depicted = generate_normal_map_depicted_form(
-            &normalized_height, &nd, &maps.object_normal, res, settings.normal_strength,
+            &maps.gradient_x, &maps.gradient_y, &nd, &maps.object_normal, res, settings.normal_strength,
         );
         export_normal_png(&normals_depicted, res, &out_dir.join("depicted_form_normal.png"))
             .expect("save depicted_form_normal.png");
@@ -873,7 +871,6 @@ mod tests {
             order: 0,
             params: StrokeParams {
                 brush_width: 15.0,
-                ridge_height: 0.25,
                 color_variation: 0.0,
                 angle_variation: 3.0,
                 max_turn_angle: 20.0,
@@ -940,13 +937,13 @@ mod tests {
         };
 
         // Render both variants
-        for (label, maps, layer) in [
+        for (label, maps, _layer) in [
             ("normal_break_off", &maps_off, &base_layer),
             ("normal_break_on", &maps_on, &layer_on),
         ] {
-            let normalized_height = normalize_height_map(&maps.height, &[layer.clone()]);
+            let normalized_height = normalize_height_map(&maps.height);
             let normals = generate_normal_map_depicted_form(
-                &normalized_height, &nd, &maps.object_normal, res, settings.normal_strength,
+                &maps.gradient_x, &maps.gradient_y, &nd, &maps.object_normal, res, settings.normal_strength,
             );
 
             // Lambert shading

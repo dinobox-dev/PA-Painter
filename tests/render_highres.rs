@@ -21,7 +21,6 @@ fn make_layer() -> PaintLayer {
 fn visual_highres_cpu() {
     let mut layer = make_layer();
     layer.params.brush_width = 25.0;
-    layer.params.ridge_height = 0.3;
     layer.params.color_variation = 0.15;
 
     let settings = OutputSettings::default();

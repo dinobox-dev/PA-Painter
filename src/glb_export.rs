@@ -8,7 +8,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use glam::{Vec2, Vec3};
+use glam::Vec2;
 
 use crate::asset_io::{linear_to_srgb, LoadedMesh};
 use crate::object_normal::compute_vertex_normals;
@@ -526,6 +526,7 @@ fn write_glb(path: &Path, json_chunk: &[u8], bin_chunk: &[u8]) -> Result<(), std
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::Vec3;
 
     fn make_unit_triangle() -> LoadedMesh {
         LoadedMesh {
@@ -679,7 +680,6 @@ mod tests {
 
         let base_params = StrokeParams {
             brush_width: 50.0,
-            ridge_height: 0.25,
             color_variation: 0.08,
             normal_break_threshold: Some(0.5),
             ..StrokeParams::default()
@@ -715,13 +715,13 @@ mod tests {
                 &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, mesh_nd, &[],
             );
 
-            let normalized_height = normalize_height_map(&maps.height, &[layer.clone()]);
+            let normalized_height = normalize_height_map(&maps.height);
             let normals = match normal_mode {
                 NormalMode::DepictedForm => generate_normal_map_depicted_form(
-                    &normalized_height, &nd, &maps.object_normal, res, settings.normal_strength,
+                    &maps.gradient_x, &maps.gradient_y, &nd, &maps.object_normal, res, settings.normal_strength,
                 ),
                 NormalMode::SurfacePaint => generate_normal_map(
-                    &normalized_height, res, settings.normal_strength,
+                    &maps.gradient_x, &maps.gradient_y, res, settings.normal_strength,
                 ),
             };
 
@@ -796,7 +796,6 @@ mod tests {
             order: 0,
             params: StrokeParams {
                 brush_width: 50.0,
-                ridge_height: 0.25,
                 color_variation: 0.08,
                 normal_break_threshold: Some(0.5),
                 ..StrokeParams::default()
@@ -817,9 +816,9 @@ mod tests {
             &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, Some(&nd), &[],
         );
 
-        let normalized_height = normalize_height_map(&maps.height, &[layer]);
+        let normalized_height = normalize_height_map(&maps.height);
         let normals = generate_normal_map_depicted_form(
-            &normalized_height, &nd, &maps.object_normal, res, settings.normal_strength,
+            &maps.gradient_x, &maps.gradient_y, &nd, &maps.object_normal, res, settings.normal_strength,
         );
 
         let out_dir = crate::test_module_output_dir("glb_export");
@@ -866,7 +865,6 @@ mod tests {
             order: 0,
             params: StrokeParams {
                 brush_width: 50.0,
-                ridge_height: 0.25,
                 color_variation: 0.08,
                 normal_break_threshold: Some(0.5),
                 ..StrokeParams::default()
@@ -895,9 +893,9 @@ mod tests {
             Some(&cached_paths), Some(&nd), &[],
         );
 
-        let normalized_height = normalize_height_map(&maps.height, &[layer]);
+        let normalized_height = normalize_height_map(&maps.height);
         let normals = generate_normal_map_depicted_form(
-            &normalized_height, &nd, &maps.object_normal, res, settings.normal_strength,
+            &maps.gradient_x, &maps.gradient_y, &nd, &maps.object_normal, res, settings.normal_strength,
         );
 
         let out_dir = crate::test_module_output_dir("glb_export");
