@@ -25,7 +25,6 @@ pub mod brush_profile; // Phase 02
 pub mod stroke_height; // Phase 02
 pub mod direction_field; // Phase 03
 pub mod path_placement; // Phase 05
-pub mod local_frame; // Phase 06
 pub mod stroke_color; // Phase 07
 pub mod object_normal; // Phase 04 (object-space normals)
 pub mod compositing; // Phase 08

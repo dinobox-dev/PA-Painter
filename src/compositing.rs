@@ -2,8 +2,6 @@ use glam::Vec2;
 use rayon::prelude::*;
 
 use crate::brush_profile::generate_brush_profile;
-#[cfg(test)]
-use crate::local_frame::LocalFrameTransform;
 use crate::math::{lerp, lerp_color, perpendicular, smoothstep};
 use crate::object_normal::{sample_object_normal, MeshNormalData};
 use crate::path_placement::generate_paths;
@@ -498,6 +496,24 @@ mod tests {
 
     // ── Helpers ──
 
+    struct LocalFrameTransform {
+        uv_map: Vec<Vec2>,
+        width: usize,
+        height: usize,
+    }
+
+    impl LocalFrameTransform {
+        fn local_to_uv(&self, lx: usize, ly: usize) -> Option<Vec2> {
+            if lx >= self.width || ly >= self.height { return None; }
+            let uv = self.uv_map[ly * self.width + lx];
+            if uv.x.is_nan() { None } else { Some(uv) }
+        }
+
+        fn uv_to_pixel(uv: Vec2, resolution: u32) -> (i32, i32) {
+            ((uv.x * resolution as f32) as i32, (uv.y * resolution as f32) as i32)
+        }
+    }
+
     /// Scatter-write composite for unit tests that test blending math.
     /// Production code uses the gather-based `composite_stroke` above.
     fn composite_stroke_scatter(
@@ -549,7 +565,6 @@ mod tests {
             uv_map: vec![uv; width * height],
             width,
             height,
-            margin: 0,
         }
     }
 
