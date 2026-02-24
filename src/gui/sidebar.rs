@@ -1,7 +1,7 @@
 use eframe::egui;
 
 use practical_arcana_painter::types::{
-    BackgroundMode, NormalMode, PaintSlot, PatternValues, PressurePreset, ResolutionPreset,
+    BackgroundMode, NormalMode, PaintSlot, PatternValues, ResolutionPreset,
     StrokeValues,
 };
 
@@ -105,7 +105,7 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
 
             // Normal strength
             ui.add(
-                egui::Slider::new(&mut state.project.settings.normal_strength, 0.1..=5.0)
+                egui::Slider::new(&mut state.project.settings.normal_strength, 0.0..=1.0)
                     .text("Normal Strength"),
             );
         });
@@ -210,16 +210,6 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
     }).inner;
     if btn.clicked() && !running {
         state.pending_generate = true;
-    }
-}
-
-pub fn pressure_name(p: PressurePreset) -> &'static str {
-    match p {
-        PressurePreset::Uniform => "Uniform",
-        PressurePreset::FadeOut => "FadeOut",
-        PressurePreset::FadeIn => "FadeIn",
-        PressurePreset::Bell => "Bell",
-        PressurePreset::Taper => "Taper",
     }
 }
 

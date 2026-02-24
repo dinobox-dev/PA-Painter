@@ -1,10 +1,10 @@
 use eframe::egui;
 
 use practical_arcana_painter::pressure::{evaluate_pressure, preset_to_custom};
-use practical_arcana_painter::types::{CurveKnot, PressureCurve, PressurePreset};
+use practical_arcana_painter::types::{CurveKnot, PressureCurve};
 
 use super::preview;
-use super::sidebar::{build_group_names, pressure_name};
+use super::sidebar::build_group_names;
 use super::state::AppState;
 
 /// Draw the right-panel slot editor for the currently selected slot.
@@ -52,41 +52,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     .step_by(0.01)
                     .text("Body Wiggle"),
             );
-
-            // Pressure curve
-            let curve_label = match &slot.stroke.pressure_curve {
-                PressureCurve::Preset(p) => pressure_name(*p).to_string(),
-                PressureCurve::Custom(_) => "Custom".to_string(),
-            };
-            egui::ComboBox::from_label("Pressure")
-                .selected_text(&curve_label)
-                .show_ui(ui, |ui: &mut egui::Ui| {
-                    for &preset in &[
-                        PressurePreset::Uniform,
-                        PressurePreset::FadeOut,
-                        PressurePreset::FadeIn,
-                        PressurePreset::Bell,
-                        PressurePreset::Taper,
-                    ] {
-                        let is_selected = slot.stroke.pressure_curve
-                            == PressureCurve::Preset(preset);
-                        if ui
-                            .selectable_label(is_selected, pressure_name(preset))
-                            .clicked()
-                        {
-                            slot.stroke.pressure_curve =
-                                PressureCurve::Preset(preset);
-                        }
-                    }
-                    // "Custom" option: convert current preset to editable spline
-                    let is_custom = slot.stroke.pressure_curve.is_custom();
-                    if ui.selectable_label(is_custom, "Custom").clicked() && !is_custom {
-                        slot.stroke.pressure_curve = match &slot.stroke.pressure_curve {
-                            PressureCurve::Preset(p) => preset_to_custom(*p),
-                            other => other.clone(),
-                        };
-                    }
-                });
 
             // Pressure curve editor widget
             show_pressure_curve_editor(ui, &mut slot.stroke.pressure_curve);
@@ -258,9 +223,13 @@ impl CurveCanvas {
     }
 }
 
-/// Draw the pressure curve preview and, for Custom curves, interactive
-/// Bézier control point editing with handles.
+/// Draw the pressure curve preview with interactive Bézier control point editing.
+/// Automatically converts legacy Preset curves to editable Custom splines.
 fn show_pressure_curve_editor(ui: &mut egui::Ui, curve: &mut PressureCurve) {
+    // Auto-convert legacy Preset curves to editable Custom splines
+    if let PressureCurve::Preset(p) = *curve {
+        *curve = preset_to_custom(p);
+    }
     let canvas_w = ui.available_width().min(256.0);
     let (response, painter) =
         ui.allocate_painter(egui::Vec2::new(canvas_w, CANVAS_H), egui::Sense::click_and_drag());

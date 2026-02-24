@@ -341,7 +341,7 @@ impl Default for StrokeValues {
             brush_width: d.brush_width,
             load: d.load,
             body_wiggle: d.body_wiggle,
-            pressure_curve: d.pressure_curve,
+            pressure_curve: crate::pressure::preset_to_custom(PressurePreset::FadeOut),
         }
     }
 }
@@ -578,6 +578,8 @@ impl PresetLibrary {
 
     /// Built-in default presets.
     pub fn built_in() -> PresetLibrary {
+        use crate::pressure::preset_to_custom;
+
         PresetLibrary {
             strokes: vec![
                 StrokePreset {
@@ -586,7 +588,7 @@ impl PresetLibrary {
                         brush_width: 40.0,
                         load: 0.8,
                         body_wiggle: 0.15,
-                        pressure_curve: PressureCurve::Preset(PressurePreset::FadeOut),
+                        pressure_curve: preset_to_custom(PressurePreset::FadeOut),
                     },
                 },
                 StrokePreset {
@@ -595,7 +597,7 @@ impl PresetLibrary {
                         brush_width: 15.0,
                         load: 0.9,
                         body_wiggle: 0.1,
-                        pressure_curve: PressureCurve::Preset(PressurePreset::Taper),
+                        pressure_curve: preset_to_custom(PressurePreset::Taper),
                     },
                 },
                 StrokePreset {
@@ -604,7 +606,7 @@ impl PresetLibrary {
                         brush_width: 50.0,
                         load: 0.3,
                         body_wiggle: 0.2,
-                        pressure_curve: PressureCurve::Preset(PressurePreset::FadeOut),
+                        pressure_curve: preset_to_custom(PressurePreset::FadeOut),
                     },
                 },
                 StrokePreset {
@@ -613,7 +615,7 @@ impl PresetLibrary {
                         brush_width: 30.0,
                         load: 1.0,
                         body_wiggle: 0.1,
-                        pressure_curve: PressureCurve::Preset(PressurePreset::Bell),
+                        pressure_curve: preset_to_custom(PressurePreset::Bell),
                     },
                 },
                 StrokePreset {
@@ -622,7 +624,42 @@ impl PresetLibrary {
                         brush_width: 35.0,
                         load: 0.5,
                         body_wiggle: 0.1,
-                        pressure_curve: PressureCurve::Preset(PressurePreset::Uniform),
+                        pressure_curve: preset_to_custom(PressurePreset::Uniform),
+                    },
+                },
+                StrokePreset {
+                    name: "heavy_load".to_string(),
+                    values: StrokeValues {
+                        brush_width: 42.0,
+                        load: 1.7,
+                        body_wiggle: 0.15,
+                        pressure_curve: PressureCurve::Custom(vec![
+                            CurveKnot {
+                                pos: [0.0, 0.0],
+                                handle_in: [0.0, 0.0],
+                                handle_out: [0.006319868, 0.9460547],
+                            },
+                            CurveKnot {
+                                pos: [0.25, 0.9375],
+                                handle_in: [0.16666666, 0.9791667],
+                                handle_out: [0.33333334, 0.8958333],
+                            },
+                            CurveKnot {
+                                pos: [0.46651104, 0.83425784],
+                                handle_in: [0.33325395, 0.9663867],
+                                handle_out: [0.5498443, 0.7509245],
+                            },
+                            CurveKnot {
+                                pos: [0.75, 0.4375],
+                                handle_in: [0.6666667, 0.5625],
+                                handle_out: [0.8333333, 0.3125],
+                            },
+                            CurveKnot {
+                                pos: [1.0, 0.0],
+                                handle_in: [0.9166667, 0.14583334],
+                                handle_out: [1.0, 0.0],
+                            },
+                        ]),
                     },
                 },
             ],
@@ -871,7 +908,7 @@ impl Default for OutputSettings {
     fn default() -> Self {
         Self {
             resolution_preset: ResolutionPreset::Standard,
-            normal_strength: 1.0,
+            normal_strength: 0.3,
             normal_mode: NormalMode::default(),
             background_mode: BackgroundMode::default(),
         }
