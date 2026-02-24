@@ -138,6 +138,8 @@ impl DirectionField {
     ///
     /// Returns a normalized direction vector. Handles 180° symmetry by aligning
     /// all four texel samples to the same hemisphere before interpolation.
+    /// At guide boundaries (high directional variance), falls back to nearest
+    /// neighbor to avoid incorrect hemisphere collapse.
     pub fn sample(&self, uv: Vec2) -> Vec2 {
         let res = self.resolution as f32;
         let tx = uv.x * res - 0.5;
@@ -153,27 +155,74 @@ impl DirectionField {
 
         let w = self.resolution as usize;
         let d00 = self.data[y0 * w + x0];
-        let mut d10 = self.data[y0 * w + x1];
-        let mut d01 = self.data[y1 * w + x0];
-        let mut d11 = self.data[y1 * w + x1];
+        let d10 = self.data[y0 * w + x1];
+        let d01 = self.data[y1 * w + x0];
+        let d11 = self.data[y1 * w + x1];
 
-        // Hemisphere alignment: align all to d00 to prevent cancellation
-        if d10.dot(d00) < 0.0 {
-            d10 = -d10;
-        }
-        if d01.dot(d00) < 0.0 {
-            d01 = -d01;
-        }
-        if d11.dot(d00) < 0.0 {
-            d11 = -d11;
+        // Boundary detection: check directional coherence across all texel pairs.
+        // At guide boundaries, texels point in very different directions; the
+        // minimum absolute dot product among all pairs drops below the threshold.
+        let min_abs_dot = [
+            d00.dot(d10).abs(),
+            d00.dot(d01).abs(),
+            d00.dot(d11).abs(),
+            d10.dot(d01).abs(),
+            d10.dot(d11).abs(),
+            d01.dot(d11).abs(),
+        ]
+        .into_iter()
+        .fold(f32::INFINITY, f32::min);
+
+        if min_abs_dot < 0.5 {
+            // High variance — guide boundary. Use nearest texel to preserve
+            // each guide region's direction without cross-boundary blending.
+            let nearest = if fx < 0.5 {
+                if fy < 0.5 { d00 } else { d01 }
+            } else {
+                if fy < 0.5 { d10 } else { d11 }
+            };
+            return if nearest.length_squared() < 1e-12 {
+                d00
+            } else {
+                nearest.normalize()
+            };
         }
 
-        let top = d00.lerp(d10, fx);
-        let bottom = d01.lerp(d11, fx);
+        // Weighted reference selection: pick the texel with the largest
+        // bilinear weight as the hemisphere alignment reference, instead of
+        // always using d00. This ensures the reference is the most relevant
+        // texel for the query point.
+        let w00 = (1.0 - fx) * (1.0 - fy);
+        let w10 = fx * (1.0 - fy);
+        let w01 = (1.0 - fx) * fy;
+        let w11 = fx * fy;
+
+        let ref_dir = if w00 >= w10 && w00 >= w01 && w00 >= w11 {
+            d00
+        } else if w10 >= w01 && w10 >= w11 {
+            d10
+        } else if w01 >= w11 {
+            d01
+        } else {
+            d11
+        };
+
+        // Hemisphere alignment: align all texels to the reference hemisphere
+        let mut a00 = d00;
+        let mut a10 = d10;
+        let mut a01 = d01;
+        let mut a11 = d11;
+        if a00.dot(ref_dir) < 0.0 { a00 = -a00; }
+        if a10.dot(ref_dir) < 0.0 { a10 = -a10; }
+        if a01.dot(ref_dir) < 0.0 { a01 = -a01; }
+        if a11.dot(ref_dir) < 0.0 { a11 = -a11; }
+
+        let top = a00.lerp(a10, fx);
+        let bottom = a01.lerp(a11, fx);
         let result = top.lerp(bottom, fy);
 
         if result.length_squared() < 1e-12 {
-            d00
+            ref_dir
         } else {
             result.normalize()
         }
