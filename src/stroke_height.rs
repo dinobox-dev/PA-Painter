@@ -76,7 +76,7 @@ pub fn generate_stroke_height(
     let brush_width_px = params.brush_width.round() as usize;
     let load = params.load;
     let body_wiggle = params.body_wiggle;
-    let pressure_preset = params.pressure_preset;
+    let pressure_curve = &params.pressure_curve;
 
     let local_width = stroke_length_px;
     let local_height = brush_width_px;
@@ -96,7 +96,7 @@ pub fn generate_stroke_height(
 
     for x in 0..stroke_length_px {
         let t = x as f32 / stroke_length_px as f32;
-        let p = evaluate_pressure(pressure_preset, t);
+        let p = evaluate_pressure(pressure_curve, t);
 
         // Effective width from pressure
         let active_width = brush_width_px as f32 * (MIN_WIDTH_RATIO + (1.0 - MIN_WIDTH_RATIO) * p);
@@ -160,12 +160,12 @@ pub fn generate_stroke_height(
 mod tests {
     use super::*;
     use crate::brush_profile::generate_brush_profile;
-    use crate::types::PressurePreset;
+    use crate::types::{PressureCurve, PressurePreset};
 
     fn params(bw: f32, load: f32, wiggle: f32, preset: PressurePreset) -> StrokeParams {
         StrokeParams {
             brush_width: bw, load, body_wiggle: wiggle,
-            pressure_preset: preset, seed: 42,
+            pressure_curve: PressureCurve::Preset(preset), seed: 42,
             ..StrokeParams::default()
         }
     }

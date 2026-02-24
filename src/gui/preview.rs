@@ -60,7 +60,7 @@ pub fn show_stroke_preview(
             brush_width: stroke.brush_width,
             load: stroke.load,
             body_wiggle: stroke.body_wiggle,
-            pressure_preset: stroke.pressure_preset,
+            pressure_curve: stroke.pressure_curve.clone(),
             seed,
             ..StrokeParams::default()
         };

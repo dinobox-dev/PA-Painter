@@ -135,6 +135,97 @@ pub enum PressurePreset {
     Taper,
 }
 
+/// A control point on a custom pressure curve with Bézier handles.
+///
+/// Each knot has an on-curve position and two handle positions (incoming
+/// and outgoing) that control the tangent at this point.  Handles are
+/// stored as absolute `[x, y]` coordinates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CurveKnot {
+    pub pos: [f32; 2],
+    pub handle_in: [f32; 2],
+    pub handle_out: [f32; 2],
+}
+
+impl CurveKnot {
+    /// Create a knot with automatically computed smooth handles.
+    ///
+    /// `prev` / `next` are positions of neighboring knots.  Handle
+    /// direction follows the tangent from prev→next through this point,
+    /// with x-length = 1/3 of the span to the neighbor.
+    pub fn smooth(pos: [f32; 2], prev: Option<[f32; 2]>, next: Option<[f32; 2]>) -> Self {
+        match (prev, next) {
+            (Some(p), Some(n)) => {
+                let dx = n[0] - p[0];
+                let slope = if dx.abs() > 1e-6 { (n[1] - p[1]) / dx } else { 0.0 };
+                let in_dx = (pos[0] - p[0]) / 3.0;
+                let out_dx = (n[0] - pos[0]) / 3.0;
+                CurveKnot {
+                    pos,
+                    handle_in: [pos[0] - in_dx, pos[1] - in_dx * slope],
+                    handle_out: [pos[0] + out_dx, pos[1] + out_dx * slope],
+                }
+            }
+            (None, Some(n)) => {
+                let out_dx = (n[0] - pos[0]) / 3.0;
+                let slope = if (n[0] - pos[0]).abs() > 1e-6 {
+                    (n[1] - pos[1]) / (n[0] - pos[0])
+                } else {
+                    0.0
+                };
+                CurveKnot {
+                    pos,
+                    handle_in: pos,
+                    handle_out: [pos[0] + out_dx, pos[1] + out_dx * slope],
+                }
+            }
+            (Some(p), None) => {
+                let in_dx = (pos[0] - p[0]) / 3.0;
+                let slope = if (pos[0] - p[0]).abs() > 1e-6 {
+                    (pos[1] - p[1]) / (pos[0] - p[0])
+                } else {
+                    0.0
+                };
+                CurveKnot {
+                    pos,
+                    handle_in: [pos[0] - in_dx, pos[1] - in_dx * slope],
+                    handle_out: pos,
+                }
+            }
+            (None, None) => CurveKnot {
+                pos,
+                handle_in: pos,
+                handle_out: pos,
+            },
+        }
+    }
+}
+
+/// Pressure curve — either a named preset or a custom Bézier spline.
+///
+/// For `Custom`, the curve is a piecewise cubic Bézier through a sorted
+/// list of [`CurveKnot`]s.  Each knot has an on-curve position and two
+/// handles controlling the tangent.  The first knot must have x=0 and
+/// the last x=1.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PressureCurve {
+    Preset(PressurePreset),
+    Custom(Vec<CurveKnot>),
+}
+
+impl Default for PressureCurve {
+    fn default() -> Self {
+        PressureCurve::Preset(PressurePreset::FadeOut)
+    }
+}
+
+impl PressureCurve {
+    /// Returns `true` if this is a `Custom` curve.
+    pub fn is_custom(&self) -> bool {
+        matches!(self, PressureCurve::Custom(_))
+    }
+}
+
 /// Per-layer stroke parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StrokeParams {
@@ -142,7 +233,7 @@ pub struct StrokeParams {
     pub load: f32,
     pub body_wiggle: f32,
     pub stroke_spacing: f32,
-    pub pressure_preset: PressurePreset,
+    pub pressure_curve: PressureCurve,
     pub color_variation: f32,
     pub max_stroke_length: f32,
     pub angle_variation: f32,
@@ -177,7 +268,7 @@ impl Default for StrokeParams {
             load: 0.8,
             body_wiggle: 0.15,
             stroke_spacing: 1.0,
-            pressure_preset: PressurePreset::FadeOut,
+            pressure_curve: PressureCurve::default(),
             color_variation: 0.1,
             max_stroke_length: 240.0,
             angle_variation: 5.0,
@@ -240,7 +331,7 @@ pub struct StrokeValues {
     pub brush_width: f32,
     pub load: f32,
     pub body_wiggle: f32,
-    pub pressure_preset: PressurePreset,
+    pub pressure_curve: PressureCurve,
 }
 
 impl Default for StrokeValues {
@@ -250,7 +341,7 @@ impl Default for StrokeValues {
             brush_width: d.brush_width,
             load: d.load,
             body_wiggle: d.body_wiggle,
-            pressure_preset: d.pressure_preset,
+            pressure_curve: d.pressure_curve,
         }
     }
 }
@@ -260,7 +351,24 @@ impl Hash for StrokeValues {
         self.brush_width.to_bits().hash(state);
         self.load.to_bits().hash(state);
         self.body_wiggle.to_bits().hash(state);
-        self.pressure_preset.hash(state);
+        match &self.pressure_curve {
+            PressureCurve::Preset(p) => {
+                0u8.hash(state);
+                p.hash(state);
+            }
+            PressureCurve::Custom(knots) => {
+                1u8.hash(state);
+                knots.len().hash(state);
+                for k in knots {
+                    k.pos[0].to_bits().hash(state);
+                    k.pos[1].to_bits().hash(state);
+                    k.handle_in[0].to_bits().hash(state);
+                    k.handle_in[1].to_bits().hash(state);
+                    k.handle_out[0].to_bits().hash(state);
+                    k.handle_out[1].to_bits().hash(state);
+                }
+            }
+        }
     }
 }
 
@@ -375,7 +483,7 @@ impl PaintSlot {
                 brush_width: p.brush_width,
                 load: p.load,
                 body_wiggle: p.body_wiggle,
-                pressure_preset: p.pressure_preset,
+                pressure_curve: p.pressure_curve.clone(),
             },
             pattern: PatternValues {
                 guides: layer.guides.clone(),
@@ -411,7 +519,7 @@ impl StrokeParams {
             brush_width: stroke.brush_width,
             load: stroke.load,
             body_wiggle: stroke.body_wiggle,
-            pressure_preset: stroke.pressure_preset,
+            pressure_curve: stroke.pressure_curve.clone(),
             stroke_spacing: pattern.stroke_spacing,
             max_stroke_length: pattern.max_stroke_length,
             angle_variation: pattern.angle_variation,
@@ -478,7 +586,7 @@ impl PresetLibrary {
                         brush_width: 40.0,
                         load: 0.8,
                         body_wiggle: 0.15,
-                        pressure_preset: PressurePreset::FadeOut,
+                        pressure_curve: PressureCurve::Preset(PressurePreset::FadeOut),
                     },
                 },
                 StrokePreset {
@@ -487,7 +595,7 @@ impl PresetLibrary {
                         brush_width: 15.0,
                         load: 0.9,
                         body_wiggle: 0.1,
-                        pressure_preset: PressurePreset::Taper,
+                        pressure_curve: PressureCurve::Preset(PressurePreset::Taper),
                     },
                 },
                 StrokePreset {
@@ -496,7 +604,7 @@ impl PresetLibrary {
                         brush_width: 50.0,
                         load: 0.3,
                         body_wiggle: 0.2,
-                        pressure_preset: PressurePreset::FadeOut,
+                        pressure_curve: PressureCurve::Preset(PressurePreset::FadeOut),
                     },
                 },
                 StrokePreset {
@@ -505,7 +613,7 @@ impl PresetLibrary {
                         brush_width: 30.0,
                         load: 1.0,
                         body_wiggle: 0.1,
-                        pressure_preset: PressurePreset::Bell,
+                        pressure_curve: PressureCurve::Preset(PressurePreset::Bell),
                     },
                 },
                 StrokePreset {
@@ -514,7 +622,7 @@ impl PresetLibrary {
                         brush_width: 35.0,
                         load: 0.5,
                         body_wiggle: 0.1,
-                        pressure_preset: PressurePreset::Uniform,
+                        pressure_curve: PressureCurve::Preset(PressurePreset::Uniform),
                     },
                 },
             ],

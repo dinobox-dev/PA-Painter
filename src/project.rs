@@ -401,7 +401,7 @@ mod tests {
     use super::*;
     use crate::types::{
         GuideVertex, OutputSettings, PaintLayer, PaintSlot, PatternValues,
-        PressurePreset, ResolutionPreset, StrokeParams, StrokeValues,
+        PressureCurve, PressurePreset, ResolutionPreset, StrokeParams, StrokeValues,
     };
     use glam::Vec2;
 
@@ -444,7 +444,7 @@ mod tests {
                 brush_width: 20.0 + order as f32,
                 load: 0.7,
                 body_wiggle: 0.1,
-                pressure_preset: PressurePreset::FadeOut,
+                pressure_curve: PressureCurve::Preset(PressurePreset::FadeOut),
             },
             pattern: PatternValues {
                 guides,
@@ -539,7 +539,7 @@ mod tests {
             assert_eq!(a.stroke.brush_width, b.stroke.brush_width);
             assert_eq!(a.stroke.load, b.stroke.load);
             assert_eq!(a.stroke.body_wiggle, b.stroke.body_wiggle);
-            assert_eq!(a.stroke.pressure_preset, b.stroke.pressure_preset);
+            assert_eq!(a.stroke.pressure_curve, b.stroke.pressure_curve);
             assert_eq!(a.pattern.stroke_spacing, b.pattern.stroke_spacing);
             assert_eq!(a.pattern.color_variation, b.pattern.color_variation);
             assert_eq!(a.pattern.max_stroke_length, b.pattern.max_stroke_length);
@@ -945,7 +945,7 @@ mod tests {
                     load: 0.8,
                     body_wiggle: 0.15,
                     stroke_spacing: 1.0,
-                    pressure_preset: PressurePreset::FadeOut,
+                    pressure_curve: PressureCurve::Preset(PressurePreset::FadeOut),
                     color_variation: 0.1,
                     max_stroke_length: 240.0,
                     angle_variation: 5.0,
@@ -1024,7 +1024,7 @@ mod tests {
                     "params": {
                         "brush_width": 30.0, "load": 0.8,
                         "body_wiggle": 0.15, "stroke_spacing": 1.0,
-                        "pressure_preset": "FadeOut", "color_variation": 0.1,
+                        "pressure_curve": {"Preset": "FadeOut"}, "color_variation": 0.1,
                         "max_stroke_length": 240.0, "angle_variation": 5.0,
                         "max_turn_angle": 15.0, "seed": 42
                     },
