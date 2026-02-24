@@ -224,6 +224,28 @@ pub fn show(
         }
     }
 
+    // ── Stale badge ──
+    if let Some(reason) = state.stale_reason() {
+        let font = egui::FontId::proportional(11.0);
+        let badge_pos = Pos2::new(rect.right() - 8.0, rect.top() + 8.0);
+        let galley = painter.layout_no_wrap(reason.to_string(), font.clone(), Color32::WHITE);
+        let badge_rect = egui::Rect::from_min_size(
+            Pos2::new(
+                badge_pos.x - galley.size().x - 12.0,
+                badge_pos.y,
+            ),
+            Vec2::new(galley.size().x + 12.0, galley.size().y + 6.0),
+        );
+        painter.rect_filled(badge_rect, 4.0, Color32::from_rgba_unmultiplied(180, 140, 30, 200));
+        painter.text(
+            badge_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            reason,
+            font,
+            Color32::WHITE,
+        );
+    }
+
     // ── View mode tabs ──
     draw_view_tabs_on_painter(ui, state, &painter, rect);
 }

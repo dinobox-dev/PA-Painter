@@ -2,6 +2,7 @@ use eframe::egui;
 use glam::Vec2;
 
 use practical_arcana_painter::project::Project;
+use practical_arcana_painter::types::PaintSlot;
 
 use super::generation::{GenResult, GenerationManager};
 use super::mesh_preview::MeshPreviewState;
@@ -98,6 +99,9 @@ pub struct AppState {
 
     // ── Status ──
     pub status_message: String,
+
+    /// Snapshot of slots at last generation — used to detect outdated results.
+    pub generation_snapshot: Option<Vec<PaintSlot>>,
 }
 
 impl AppState {
@@ -127,6 +131,24 @@ impl AppState {
             pending_load_mesh: false,
             pending_load_texture: false,
             status_message: "Ready".to_string(),
+            generation_snapshot: None,
         }
+    }
+
+    /// Whether current results don't reflect current settings.
+    /// Returns a label describing the state, or None if up-to-date.
+    pub fn stale_reason(&self) -> Option<&'static str> {
+        if self.generation_snapshot.is_none() {
+            if !self.project.slots.is_empty() {
+                return Some("Not generated");
+            }
+            return None;
+        }
+        if let Some(ref snapshot) = self.generation_snapshot {
+            if *snapshot != self.project.slots {
+                return Some("Modified");
+            }
+        }
+        None
     }
 }

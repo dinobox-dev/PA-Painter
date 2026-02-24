@@ -174,6 +174,43 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             });
         });
+
+    // ── Generate ──
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(4.0);
+    let running = state.generation.is_running();
+    let stale = state.stale_reason();
+    let (label, text_color, fill) = if running {
+        (
+            "Generating...".to_string(),
+            egui::Color32::from_gray(160),
+            egui::Color32::from_gray(50),
+        )
+    } else if let Some(reason) = stale {
+        (
+            format!("Generate ({reason})"),
+            egui::Color32::from_rgb(255, 220, 80),
+            egui::Color32::from_rgb(80, 65, 20),
+        )
+    } else {
+        (
+            "Generate".to_string(),
+            egui::Color32::WHITE,
+            egui::Color32::from_gray(60),
+        )
+    };
+    let btn = ui.scope(|ui: &mut egui::Ui| {
+        ui.visuals_mut().widgets.hovered.expansion = 0.0;
+        ui.visuals_mut().widgets.active.expansion = 0.0;
+        let button = egui::Button::new(egui::RichText::new(&label).color(text_color))
+            .min_size(egui::Vec2::new(ui.available_width(), 36.0))
+            .fill(fill);
+        ui.add(button)
+    }).inner;
+    if btn.clicked() && !running {
+        state.pending_generate = true;
+    }
 }
 
 pub fn pressure_name(p: PressurePreset) -> &'static str {

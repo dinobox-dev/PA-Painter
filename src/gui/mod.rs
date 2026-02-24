@@ -85,6 +85,7 @@ impl PainterApp {
             normal_data,
             masks,
         });
+        self.state.generation_snapshot = Some(self.state.project.slots.clone());
         self.state.status_message = format!("Generating at {}px...", resolution);
     }
 
@@ -226,21 +227,6 @@ impl eframe::App for PainterApp {
                     ui.checkbox(&mut self.state.viewport.show_guides, "Guides");
                 });
 
-                ui.with_layout(
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui: &mut egui::Ui| {
-                        let running = self.state.generation.is_running();
-                        let label = if running {
-                            "Generating..."
-                        } else {
-                            "▶ Generate"
-                        };
-                        let btn = ui.add_enabled(!running, egui::Button::new(label));
-                        if btn.clicked() {
-                            self.state.pending_generate = true;
-                        }
-                    },
-                );
             });
         });
 
