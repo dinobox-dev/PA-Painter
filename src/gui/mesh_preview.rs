@@ -88,6 +88,8 @@ impl MeshPreviewState {
         self.center = (min + max) * 0.5;
         let extent = (max - min).length();
         self.distance = extent * 1.2;
+        self.yaw = 0.5;
+        self.pitch = 0.3;
     }
 }
 
@@ -547,6 +549,11 @@ pub fn show(
         let delta = response.drag_delta();
         state.mesh_preview.yaw -= delta.x * 0.01;
         state.mesh_preview.pitch += delta.y * 0.01;
+        state.mesh_preview.pitch = state.mesh_preview.pitch.clamp(
+            -std::f32::consts::FRAC_PI_2 + 0.01,
+            std::f32::consts::FRAC_PI_2 - 0.01,
+        );
+        state.mesh_preview.yaw = state.mesh_preview.yaw.rem_euclid(std::f32::consts::TAU);
     }
 
     if response.hovered() {
