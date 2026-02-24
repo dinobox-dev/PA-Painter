@@ -1,6 +1,6 @@
 use crate::math::{interpolate_array, lerp};
 use crate::pressure::evaluate_pressure;
-use crate::types::StrokeParams;
+use crate::types::{PressureCurve, StrokeParams};
 use noise::{NoiseFn, Perlin};
 
 // ── Constants ──
@@ -29,10 +29,15 @@ pub struct StrokeGradientResult {
     pub height: usize,
 }
 
-/// Compute Sobel gradients from a local stroke density map.
+/// Compute Sobel gradients from a local stroke density map, attenuated by pressure.
 ///
+/// High pressure flattens paint, so gradients (and thus normals) are reduced.
+/// Attenuation per column: `1 - p²`, where p = pressure at that stroke position.
 /// Edge pixels are left at 0, matching the natural density falloff.
-pub fn compute_stroke_gradients(height: &StrokeHeightResult) -> StrokeGradientResult {
+pub fn compute_stroke_gradients(
+    height: &StrokeHeightResult,
+    pressure_curve: &PressureCurve,
+) -> StrokeGradientResult {
     let w = height.width;
     let h = height.height;
     let mut gx = vec![0.0f32; w * h];
@@ -57,6 +62,20 @@ pub fn compute_stroke_gradients(height: &StrokeHeightResult) -> StrokeGradientRe
 
             gy[y * w + x] = -s(x - 1, y - 1) - 2.0 * s(x, y - 1) - s(x + 1, y - 1)
                 + s(x - 1, y + 1) + 2.0 * s(x, y + 1) + s(x + 1, y + 1);
+        }
+    }
+
+    // Pressure-based attenuation: √p · (1 - p²)
+    // Low pressure → barely touching → weak (√p tapers to 0).
+    // Medium pressure → peak bristle texture (~0.53 at p≈0.45).
+    // High pressure → paint pressed flat → weak (1-p² drops to 0).
+    for x in 0..w {
+        let t = x as f32 / w as f32;
+        let p = evaluate_pressure(pressure_curve, t);
+        let atten = p.sqrt() * (1.0 - p * p);
+        for y in 0..h {
+            gx[y * w + x] *= atten;
+            gy[y * w + x] *= atten;
         }
     }
 
@@ -370,9 +389,9 @@ mod tests {
         let p = params(30.0, 1.0, 0.0, PressurePreset::Uniform);
         let profile = vec![1.0f32; 30]; // uniform bristle density
         let height = generate_stroke_height(&profile, 100, &p, 42);
-        let grad = compute_stroke_gradients(&height);
+        let grad = compute_stroke_gradients(&height, &p.pressure_curve);
 
-        // Interior of a uniform density field should have near-zero gradients
+        // Uniform pressure (p=1.0) → atten=0, so all gradients should be zero
         for y in 2..(height.height - 2) {
             for x in 10..90 {
                 let i = y * grad.width + x;
@@ -397,7 +416,9 @@ mod tests {
             }
         }
         let height = StrokeHeightResult { data, width: w, height: h };
-        let grad = compute_stroke_gradients(&height);
+        // FadeIn: p=√t, so at x=25 (t=0.5) p≈0.707, atten≈0.5 → gradients halved but still positive
+        let curve = PressureCurve::Preset(PressurePreset::FadeIn);
+        let grad = compute_stroke_gradients(&height, &curve);
 
         // Interior pixels should have positive gx, near-zero gy
         let mid = 5 * w + 25;
@@ -417,7 +438,8 @@ mod tests {
             }
         }
         let height = StrokeHeightResult { data, width: w, height: h };
-        let grad = compute_stroke_gradients(&height);
+        let curve = PressureCurve::Preset(PressurePreset::FadeIn);
+        let grad = compute_stroke_gradients(&height, &curve);
 
         let mid = 10 * w + 25;
         assert!(grad.gy[mid] > 0.0, "gy should be positive for downward slope");

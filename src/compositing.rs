@@ -471,7 +471,7 @@ pub fn composite_layer(
                 &layer.params,
                 layer.params.seed + i as u32,
             );
-            let gradient = compute_stroke_gradients(&height);
+            let gradient = compute_stroke_gradients(&height, &layer.params.pressure_curve);
             (height, gradient)
         })
         .collect();
