@@ -1,4 +1,4 @@
-use crate::math::{interpolate_array, lerp};
+use crate::math::{interpolate_array, lerp, smoothstep};
 use crate::pressure::evaluate_pressure;
 use crate::types::{PressureCurve, StrokeParams};
 use noise::{NoiseFn, Perlin};
@@ -150,14 +150,23 @@ pub fn generate_stroke_height(
             continue;
         }
 
-        // For each pixel in active range
-        // Narrow (compress) full brush profile into active width,
-        // so all bristle patterns squeeze together at lower pressure
-        // rather than cropping the outer bristles.
+        // For each pixel in active range, blend two sampling strategies:
+        //   Compression (high p): full profile squeezed into active width.
+        //   Cutoff (low p): only the center portion of the profile is used.
+        // Cutoff only below p ≈ 0.3; above that, pure compression.
+        let blend = smoothstep(0.0, 0.3, p);
+        let cutoff_start = (brush_width_px as f32 - active_width) * 0.5;
+        let step = active_width / active_count as f32;
         for j in 0..active_count {
-            let source_idx = j as f32 * (brush_width_px as f32 / active_count as f32);
+            let compress_idx = j as f32 * (brush_width_px as f32 / active_count as f32);
+            let cutoff_idx = cutoff_start + j as f32 * step;
+            let source_idx = lerp(cutoff_idx, compress_idx, blend);
             let rd = interpolate_array(brush_profile, source_idx);
-            let effective_density = p.powf(5.0 * (1.0 - rd) + 1.0);
+            // When paint is abundant, bristle gaps fill in (uniform density).
+            // As paint depletes, individual bristle tracks emerge.
+            let fill = remaining.min(1.0);
+            let pattern_spread = (1.0 - fill) * 5.0;
+            let effective_density = p.powf(pattern_spread * (1.0 - rd) + 1.0);
 
             let local_y = active_start + j;
             let local_x = x;
