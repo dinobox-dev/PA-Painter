@@ -20,7 +20,7 @@ impl Default for StrokePreviewCache {
 
 /// Cached pattern path data and the parameters that produced it.
 pub struct PatternPreviewCache {
-    entry: Option<(PatternValues, u32, Vec<Vec<[f32; 2]>>)>,
+    entry: Option<(PatternValues, StrokeValues, u32, Vec<Vec<[f32; 2]>>)>,
 }
 
 impl Default for PatternPreviewCache {
@@ -127,7 +127,7 @@ pub fn show_pattern_preview(
     cache: &mut PatternPreviewCache,
 ) {
     let stale = match &cache.entry {
-        Some((p, sd, _)) => *p != slot.pattern || *sd != slot.seed,
+        Some((p, s, sd, _)) => *p != slot.pattern || *s != slot.stroke || *sd != slot.seed,
         None => true,
     };
 
@@ -138,7 +138,7 @@ pub fn show_pattern_preview(
             .iter()
             .map(|p| p.points.iter().map(|v| [v.x, v.y]).collect())
             .collect();
-        cache.entry = Some((slot.pattern.clone(), slot.seed, extracted));
+        cache.entry = Some((slot.pattern.clone(), slot.stroke.clone(), slot.seed, extracted));
     }
 
     let side = ui.available_width().min(256.0);
@@ -148,7 +148,7 @@ pub fn show_pattern_preview(
     // Dark background
     painter.rect_filled(rect, 4.0, egui::Color32::from_gray(32));
 
-    if let Some((_, _, ref paths)) = cache.entry {
+    if let Some((_, _, _, ref paths)) = cache.entry {
         let line = egui::Stroke::new(
             1.5,
             egui::Color32::from_rgba_unmultiplied(200, 180, 140, 200),
