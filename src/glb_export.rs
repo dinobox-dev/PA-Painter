@@ -63,8 +63,9 @@ fn export_preview_glb_inner(
     let color_png = encode_color_png(color_map, resolution)?;
     let normal_png = encode_normal_png(normal_map, resolution)?;
 
-    // 2. Subdivide mesh and displace by height
-    let subdiv = subdivide_and_displace(mesh, height_map, resolution, 8, displacement_scale);
+    // 2. Subdivide mesh (only if displacement is active) and displace by height
+    let subdiv_level = if displacement_scale > 0.0 { 8 } else { 1 };
+    let subdiv = subdivide_and_displace(mesh, height_map, resolution, subdiv_level, displacement_scale);
 
     // 3. Build BIN buffer (vertex data + index data + images)
     let bin = build_bin_buffer(&subdiv, &color_png, &normal_png);
