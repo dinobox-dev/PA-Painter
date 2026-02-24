@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use practical_arcana_painter::asset_io::{extract_uv_edges, load_mesh, load_texture};
+use practical_arcana_painter::glb_export;
 use practical_arcana_painter::output::{
     export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
+    normalize_height_map,
 };
 use practical_arcana_painter::project::{load_project, save_project, Project};
 use practical_arcana_painter::types::BackgroundMode;
@@ -243,6 +245,60 @@ pub fn export_maps(state: &mut AppState) {
     }
 
     state.status_message = format!("Exported 4 maps to {}", dir.display());
+}
+
+/// Export a 3D preview GLB with paint textures baked onto the mesh.
+pub fn export_glb(state: &mut AppState) {
+    let Some(ref gen) = state.generated else {
+        state.status_message = "Nothing to export — generate first".to_string();
+        return;
+    };
+    let Some(ref mesh) = state.loaded_mesh else {
+        state.status_message = "No mesh loaded".to_string();
+        return;
+    };
+
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("glTF Binary", &["glb"])
+        .set_file_name("preview.glb")
+        .save_file()
+    else {
+        return;
+    };
+
+    let normalized_height = normalize_height_map(&gen.height);
+    let transparent = state.project.settings.background_mode == BackgroundMode::Transparent;
+
+    let result = if transparent {
+        glb_export::export_preview_glb_transparent(
+            mesh,
+            &gen.color,
+            &normalized_height,
+            &gen.normal_map,
+            gen.resolution,
+            0.0,
+            &path,
+        )
+    } else {
+        glb_export::export_preview_glb(
+            mesh,
+            &gen.color,
+            &normalized_height,
+            &gen.normal_map,
+            gen.resolution,
+            0.0,
+            &path,
+        )
+    };
+
+    match result {
+        Ok(()) => {
+            state.status_message = format!("Exported GLB to {}", path.display());
+        }
+        Err(e) => {
+            state.status_message = format!("GLB export failed: {e:?}");
+        }
+    }
 }
 
 fn resolve_asset_path(project_path: &Path, asset_path: &str) -> PathBuf {

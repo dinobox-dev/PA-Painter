@@ -172,6 +172,10 @@ impl eframe::App for PainterApp {
             self.state.pending_export = false;
             dialogs::export_maps(&mut self.state);
         }
+        if self.state.pending_export_glb {
+            self.state.pending_export_glb = false;
+            dialogs::export_glb(&mut self.state);
+        }
         if self.state.pending_generate {
             self.state.pending_generate = false;
             self.start_generation();
@@ -217,9 +221,13 @@ impl eframe::App for PainterApp {
                         self.state.pending_save = true;
                     }
                     ui.separator();
-                    if ui.button("Export...").clicked() {
+                    if ui.button("Export Maps...").clicked() {
                         ui.close_menu();
                         self.state.pending_export = true;
+                    }
+                    if ui.button("Export GLB...").clicked() {
+                        ui.close_menu();
+                        self.state.pending_export_glb = true;
                     }
                 });
                 ui.menu_button("View", |ui: &mut egui::Ui| {
