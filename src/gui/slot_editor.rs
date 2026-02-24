@@ -42,7 +42,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     .text("Brush Width"),
             );
             ui.add(
-                egui::Slider::new(&mut slot.stroke.load, 0.0..=1.0)
+                egui::Slider::new(&mut slot.stroke.load, 0.0..=2.0)
                     .step_by(0.01)
                     .text("Load"),
             );

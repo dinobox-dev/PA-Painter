@@ -117,8 +117,15 @@ pub fn generate_stroke_height(
             .min(brush_width_px);
         let active_count = active_end.saturating_sub(active_start);
 
-        // Paint depletion
-        let remaining = load * lerp(1.0, DEPLETION_FLOOR, t.powf(DEPLETION_EXPONENT));
+        // Paint depletion — load > 1.0 gradually fades out the depletion curve,
+        // fully flat at load = 2.0.
+        let remaining = if load > 1.0 {
+            let base = lerp(1.0, DEPLETION_FLOOR, t.powf(DEPLETION_EXPONENT));
+            let blend = ((load - 1.0) / 1.0).min(1.0);
+            lerp(base, 1.0, blend)
+        } else {
+            load * lerp(1.0, DEPLETION_FLOOR, t.powf(DEPLETION_EXPONENT))
+        };
 
         if active_count == 0 {
             continue;
