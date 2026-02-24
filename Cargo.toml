@@ -30,8 +30,9 @@ zip = "2.1"
 thiserror = "2"
 noise = "0.9"
 rayon = "1.10"
-eframe = "0.30"
+eframe = { version = "0.30", features = ["wgpu"] }
 rfd = "0.15"
+bytemuck = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 smallvec = "1"

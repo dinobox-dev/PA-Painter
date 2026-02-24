@@ -4,6 +4,7 @@ use glam::Vec2;
 use practical_arcana_painter::project::Project;
 
 use super::generation::{GenResult, GenerationManager};
+use super::mesh_preview::MeshPreviewState;
 use super::preview::PreviewCache;
 
 /// What part of a guide is being dragged.
@@ -20,6 +21,7 @@ pub enum ViewMode {
     Height,
     Normal,
     StrokeId,
+    Mesh3D,
 }
 
 /// Viewport pan/zoom state.
@@ -68,6 +70,7 @@ pub struct AppState {
     // ── Viewport ──
     pub viewport: ViewportState,
     pub view_mode: ViewMode,
+    pub mesh_preview: MeshPreviewState,
 
     // ── Selection ──
     pub selected_slot: Option<usize>,
@@ -108,6 +111,7 @@ impl AppState {
             uv_edges: None,
             viewport: ViewportState::default(),
             view_mode: ViewMode::Color,
+            mesh_preview: MeshPreviewState::default(),
             selected_slot: None,
             selected_guide: None,
             guide_drag: None,

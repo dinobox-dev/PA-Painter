@@ -1,5 +1,7 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
+use eframe::egui_wgpu;
 
+use super::mesh_preview;
 use super::state::{AppState, ViewMode};
 
 /// Convert UV coordinate to screen position.
@@ -43,7 +45,33 @@ pub fn make_checkerboard(ctx: &egui::Context) -> egui::TextureHandle {
 }
 
 /// Draw the viewport with texture display, pan, and zoom.
-pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
+pub fn show(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    render_state: Option<&egui_wgpu::RenderState>,
+) {
+    // 3D mode: delegate entirely to mesh_preview
+    if state.view_mode == ViewMode::Mesh3D {
+        if let Some(rs) = render_state {
+            if state.mesh_preview.gpu_ready {
+                mesh_preview::show(ui, state, rs);
+            } else {
+                ui.centered_and_justified(|ui: &mut egui::Ui| {
+                    ui.label("No mesh loaded for 3D preview.");
+                });
+            }
+        } else {
+            ui.centered_and_justified(|ui: &mut egui::Ui| {
+                ui.label("wgpu not available.");
+            });
+        }
+
+        // Still draw the view mode tabs at the bottom
+        draw_view_tabs(ui, state);
+        return;
+    }
+
+    // 2D texture mode
     let (response, painter) =
         ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let rect = response.rect;
@@ -61,6 +89,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ViewMode::Height => state.textures.height.as_ref(),
         ViewMode::Normal => state.textures.normal.as_ref(),
         ViewMode::StrokeId => state.textures.stroke_id.as_ref(),
+        ViewMode::Mesh3D => unreachable!(),
     };
 
     // Draw texture (or tinted rect)
@@ -195,14 +224,25 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         }
     }
 
-    // ── View mode tabs at bottom of viewport ──
+    // ── View mode tabs ──
+    draw_view_tabs_on_painter(ui, state, &painter, rect);
+}
+
+/// Draw view mode tabs using an existing painter (for 2D modes).
+fn draw_view_tabs_on_painter(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    painter: &egui::Painter,
+    rect: Rect,
+) {
     let modes = [
         (ViewMode::Color, "Color"),
         (ViewMode::Height, "Height"),
         (ViewMode::Normal, "Normal"),
         (ViewMode::StrokeId, "StrokeID"),
+        (ViewMode::Mesh3D, "3D"),
     ];
-    let tab_w = 72.0;
+    let tab_w = 64.0;
     let tab_h = 24.0;
     let tab_y = rect.bottom() - tab_h - 6.0;
     let tab_x_start = rect.left() + 8.0;
@@ -243,4 +283,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
     }
+}
+
+/// Draw view mode tabs for 3D mode (creates its own painter).
+fn draw_view_tabs(ui: &mut egui::Ui, state: &mut AppState) {
+    let rect = ui.max_rect();
+    let painter = ui.painter_at(rect);
+    draw_view_tabs_on_painter(ui, state, &painter, rect);
 }

@@ -1,6 +1,7 @@
 pub mod dialogs;
 pub mod generation;
 pub mod guide_editor;
+pub mod mesh_preview;
 pub mod preview;
 pub mod sidebar;
 pub mod slot_editor;
@@ -9,6 +10,7 @@ pub mod textures;
 pub mod viewport;
 
 use eframe::egui;
+use eframe::egui_wgpu;
 use state::AppState;
 
 use practical_arcana_painter::object_normal::compute_mesh_normal_data;
@@ -18,13 +20,15 @@ use practical_arcana_painter::types::{pixels_to_colors, Color, NormalMode};
 pub struct PainterApp {
     state: AppState,
     checkerboard: Option<egui::TextureHandle>,
+    render_state: Option<egui_wgpu::RenderState>,
 }
 
 impl PainterApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             state: AppState::new(),
             checkerboard: None,
+            render_state: cc.wgpu_render_state.clone(),
         }
     }
 
@@ -107,8 +111,39 @@ impl PainterApp {
             r,
             "gen_stroke_id",
         ));
+
+        // Upload color texture to 3D preview
+        if let Some(ref rs) = self.render_state {
+            if self.state.mesh_preview.gpu_ready {
+                mesh_preview::upload_color_texture(rs, &result.color, r as usize);
+            }
+        }
+
         self.state.status_message = format!("Generated in {:.1}s", result.elapsed.as_secs_f32());
         self.state.generated = Some(result);
+    }
+
+    /// Initialize or update 3D preview GPU resources after mesh load.
+    fn init_mesh_preview(&mut self) {
+        let Some(ref rs) = self.render_state else {
+            return;
+        };
+        let Some(ref mesh) = self.state.loaded_mesh else {
+            return;
+        };
+
+        if !self.state.mesh_preview.gpu_ready {
+            mesh_preview::init_gpu_resources(rs, mesh);
+            self.state.mesh_preview.gpu_ready = true;
+        } else {
+            mesh_preview::upload_mesh(rs, mesh);
+        }
+        self.state.mesh_preview.fit_to_mesh(mesh);
+
+        // If we already have generated color data, upload it
+        if let Some(ref gen) = self.state.generated {
+            mesh_preview::upload_color_texture(rs, &gen.color, gen.resolution as usize);
+        }
     }
 }
 
@@ -126,6 +161,7 @@ impl eframe::App for PainterApp {
         if self.state.pending_open {
             self.state.pending_open = false;
             dialogs::open_project(&mut self.state, ctx);
+            self.init_mesh_preview();
         }
         if self.state.pending_save {
             self.state.pending_save = false;
@@ -142,10 +178,12 @@ impl eframe::App for PainterApp {
         if self.state.pending_new {
             self.state.pending_new = false;
             dialogs::new_project(&mut self.state, ctx);
+            self.init_mesh_preview();
         }
         if self.state.pending_load_mesh {
             self.state.pending_load_mesh = false;
             dialogs::load_mesh_dialog(&mut self.state, ctx);
+            self.init_mesh_preview();
         }
         if self.state.pending_load_texture {
             self.state.pending_load_texture = false;
@@ -258,12 +296,13 @@ impl eframe::App for PainterApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         // ── Central viewport (or welcome screen) ──
+        let render_state = self.render_state.clone();
         egui::CentralPanel::default().show(ctx, |ui: &mut egui::Ui| {
             let has_project =
                 self.state.loaded_mesh.is_some() || self.state.project_path.is_some();
 
             if has_project {
-                viewport::show(ui, &mut self.state);
+                viewport::show(ui, &mut self.state, render_state.as_ref());
             } else {
                 // Welcome screen
                 ui.vertical_centered(|ui: &mut egui::Ui| {
