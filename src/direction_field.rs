@@ -1,6 +1,6 @@
 use glam::Vec2;
 
-use crate::types::GuideVertex;
+use crate::types::{Guide, GuideType};
 
 /// Canonicalize a direction vector to the upper half-plane.
 /// For headless (180°-symmetric) directions, d and -d are equivalent.
@@ -20,27 +20,74 @@ fn guide_weight(d: f32, influence: f32) -> f32 {
     s * s * (3.0 - 2.0 * s)
 }
 
+/// Returns true if this guide type uses headless (180°-symmetric) directions.
+/// Directional guides have no inherent "forward" — (1,0) and (-1,0) are equivalent.
+/// Source/Sink/Vortex are headed — their direction depends on the query position.
+fn is_headless(guide_type: GuideType) -> bool {
+    matches!(guide_type, GuideType::Directional)
+}
+
+/// Compute the direction contribution of a single guide at a query UV point.
+/// For Directional guides, returns the stored direction.
+/// For Source/Sink/Vortex, computes direction based on relative position.
+fn guide_contribution(guide: &Guide, query_uv: Vec2) -> Vec2 {
+    match guide.guide_type {
+        GuideType::Directional => guide.direction.normalize_or_zero(),
+        GuideType::Source => {
+            let radial = query_uv - guide.position;
+            if radial.length_squared() < 1e-8 {
+                Vec2::X
+            } else {
+                radial.normalize()
+            }
+        }
+        GuideType::Sink => {
+            let radial = guide.position - query_uv;
+            if radial.length_squared() < 1e-8 {
+                Vec2::X
+            } else {
+                radial.normalize()
+            }
+        }
+        GuideType::Vortex => {
+            let radial = query_uv - guide.position;
+            if radial.length_squared() < 1e-8 {
+                Vec2::X
+            } else {
+                // 90° rotation of radial; direction.x < 0 → clockwise
+                let tangent = Vec2::new(-radial.y, radial.x).normalize();
+                if guide.direction.x < 0.0 { -tangent } else { tangent }
+            }
+        }
+    }
+}
+
 /// Compute direction at a UV coordinate given a set of guide vertices.
 ///
 /// Returns a normalized Vec2 representing the stroke direction.
 /// If no guides have influence at this point, returns the nearest guide's direction.
 /// If guides is empty, returns Vec2::X (default horizontal).
 ///
-/// Uses smoothstep-based weighting with reference-based sign alignment
-/// to handle the 180° symmetry of headless direction vectors. All directions
-/// are canonicalized to the upper half-plane before blending.
-pub fn direction_at(uv: Vec2, guides: &[GuideVertex]) -> Vec2 {
+/// Uses smoothstep-based weighting. For Directional (headless) guides,
+/// applies canonicalization and sign alignment for 180° symmetry.
+/// For Source/Sink/Vortex (headed) guides, uses raw direction contributions.
+pub fn direction_at(uv: Vec2, guides: &[Guide]) -> Vec2 {
     if guides.is_empty() {
         return Vec2::X;
     }
 
     if guides.len() == 1 {
-        let dir = guides[0].direction.normalize_or_zero();
+        let dir = guide_contribution(&guides[0], uv);
         return if dir.length_squared() > 0.0 { dir } else { Vec2::X };
     }
 
-    // Collect (weight, canonicalized direction) for guides within influence
-    let mut weighted: Vec<(f32, Vec2)> = Vec::new();
+    // Collect (weight, direction, headless?) for guides within influence
+    struct WeightedDir {
+        weight: f32,
+        dir: Vec2,
+        headless: bool,
+    }
+    let mut weighted: Vec<WeightedDir> = Vec::new();
 
     for g in guides {
         let d = uv.distance(g.position);
@@ -49,12 +96,15 @@ pub fn direction_at(uv: Vec2, guides: &[GuideVertex]) -> Vec2 {
             continue;
         }
 
-        let w = guide_weight(d, g.influence);
-        let dir = g.direction.normalize_or_zero();
+        let w = guide_weight(d, g.influence) * g.strength;
+        let dir = guide_contribution(g, uv);
         if dir.length_squared() < 1e-12 {
             continue;
         }
-        weighted.push((w, canonicalize(dir)));
+
+        let headless = is_headless(g.guide_type);
+        let dir = if headless { canonicalize(dir) } else { dir };
+        weighted.push(WeightedDir { weight: w, dir, headless });
     }
 
     // If no guide has influence, use nearest-neighbor fallback
@@ -67,22 +117,26 @@ pub fn direction_at(uv: Vec2, guides: &[GuideVertex]) -> Vec2 {
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .unwrap();
-        let dir = nearest.direction.normalize_or_zero();
+        let dir = guide_contribution(nearest, uv);
         return if dir.length_squared() > 0.0 { dir } else { Vec2::X };
     }
 
     // Use the highest-weight direction as reference for sign alignment
     let ref_dir = weighted
         .iter()
-        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|a, b| a.weight.partial_cmp(&b.weight).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap()
-        .1;
+        .dir;
 
-    // IDW-weighted mean with sign flipping for 180° symmetry
+    // Weighted mean with sign alignment for headless guides
     let mut sum = Vec2::ZERO;
-    for &(w, dir) in &weighted {
-        let aligned = if dir.dot(ref_dir) < 0.0 { -dir } else { dir };
-        sum += w * aligned;
+    for wd in &weighted {
+        let aligned = if wd.headless && wd.dir.dot(ref_dir) < 0.0 {
+            -wd.dir
+        } else {
+            wd.dir
+        };
+        sum += wd.weight * aligned;
     }
 
     if sum.length_squared() < 1e-12 {
@@ -96,7 +150,7 @@ pub fn direction_at(uv: Vec2, guides: &[GuideVertex]) -> Vec2 {
 ///
 /// Returns a Vec<Vec2> of length resolution * resolution, row-major.
 /// Each element is a normalized direction vector.
-pub fn generate_direction_field(guides: &[GuideVertex], resolution: u32) -> Vec<Vec2> {
+pub fn generate_direction_field(guides: &[Guide], resolution: u32) -> Vec<Vec2> {
     let res = resolution as usize;
     let mut field = Vec::with_capacity(res * res);
     let inv_res = 1.0 / resolution as f32;
@@ -125,7 +179,7 @@ impl DirectionField {
     /// Build a direction field from guide vertices.
     ///
     /// Resolution is scaled to 1/4 of output resolution, clamped to [64, 2048].
-    pub fn new(guides: &[GuideVertex], resolution: u32) -> Self {
+    pub fn new(guides: &[Guide], resolution: u32) -> Self {
         let res = (resolution / 4).clamp(64, 2048);
         let data = generate_direction_field(guides, res);
         Self {
@@ -256,10 +310,11 @@ mod tests {
 
     #[test]
     fn single_guide_horizontal() {
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::new(1.0, 0.0),
             influence: 0.4,
+            ..Guide::default()
         }];
         let dir = direction_at(Vec2::new(0.3, 0.5), &guides);
         assert!(approx_vec2(dir, Vec2::X));
@@ -268,10 +323,11 @@ mod tests {
 
     #[test]
     fn single_guide_vertical() {
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::new(0.0, 1.0),
             influence: 0.4,
+            ..Guide::default()
         }];
         let dir = direction_at(Vec2::new(0.5, 0.5), &guides);
         assert!(approx_vec2(dir, Vec2::Y));
@@ -280,10 +336,11 @@ mod tests {
 
     #[test]
     fn single_guide_diagonal() {
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::new(1.0, 1.0),
             influence: 0.5,
+            ..Guide::default()
         }];
         let dir = direction_at(Vec2::new(0.5, 0.5), &guides);
         let expected = Vec2::new(FRAC_1_SQRT_2, FRAC_1_SQRT_2);
@@ -294,15 +351,17 @@ mod tests {
     #[test]
     fn two_guides_same_direction() {
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.2, 0.5),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.8, 0.5),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.5,
+                ..Guide::default()
             },
         ];
         let dir = direction_at(Vec2::new(0.5, 0.5), &guides);
@@ -312,15 +371,17 @@ mod tests {
     #[test]
     fn two_guides_90_degrees_at_midpoint() {
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.2, 0.5),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.8, 0.5),
                 direction: Vec2::new(0.0, 1.0),
                 influence: 0.5,
+                ..Guide::default()
             },
         ];
         // At the midpoint, both guides are equidistant, so result should be ~45°
@@ -334,15 +395,17 @@ mod tests {
     fn symmetry_180_degrees_no_cancellation() {
         // (1,0) and (-1,0) are the same headless direction
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.2, 0.5),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.8, 0.5),
                 direction: Vec2::new(-1.0, 0.0),
                 influence: 0.5,
+                ..Guide::default()
             },
         ];
         let dir = direction_at(Vec2::new(0.5, 0.5), &guides);
@@ -354,15 +417,17 @@ mod tests {
     #[test]
     fn outside_all_influence_uses_nearest() {
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.1, 0.1),
                 direction: Vec2::new(0.0, 1.0),
                 influence: 0.05,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.9, 0.9),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.05,
+                ..Guide::default()
             },
         ];
         // Query near the first guide but outside influence
@@ -374,15 +439,17 @@ mod tests {
     #[test]
     fn influence_radius_respected() {
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.0, 0.0),
                 direction: Vec2::new(0.0, 1.0),
                 influence: 0.1,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(1.0, 1.0),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.1,
+                ..Guide::default()
             },
         ];
         // Far from both — should fallback to nearest
@@ -394,15 +461,17 @@ mod tests {
     #[test]
     fn distance_falloff_closer_guide_dominates() {
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.3, 0.5),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.9, 0.5),
                 direction: Vec2::new(0.0, 1.0),
                 influence: 0.5,
+                ..Guide::default()
             },
         ];
         // Query close to guide[0]
@@ -414,15 +483,17 @@ mod tests {
     #[test]
     fn all_vectors_normalized() {
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.2, 0.5),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.4,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.8, 0.5),
                 direction: Vec2::new(0.0, 1.0),
                 influence: 0.4,
+                ..Guide::default()
             },
         ];
         for i in 0..10 {
@@ -438,10 +509,11 @@ mod tests {
 
     #[test]
     fn generate_field_correct_length() {
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.0,
+            ..Guide::default()
         }];
         let field = generate_direction_field(&guides, 16);
         assert_eq!(field.len(), 16 * 16);
@@ -450,15 +522,17 @@ mod tests {
     #[test]
     fn generate_field_all_normalized() {
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.25, 0.5),
                 direction: Vec2::X,
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.75, 0.5),
                 direction: Vec2::Y,
                 influence: 0.5,
+                ..Guide::default()
             },
         ];
         let field = generate_direction_field(&guides, 32);
@@ -474,15 +548,17 @@ mod tests {
     #[test]
     fn deterministic_same_inputs_same_output() {
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.3, 0.3),
                 direction: Vec2::new(1.0, 0.5).normalize(),
                 influence: 0.4,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.7, 0.7),
                 direction: Vec2::new(-0.5, 1.0).normalize(),
                 influence: 0.4,
+                ..Guide::default()
             },
         ];
         let field1 = generate_direction_field(&guides, 32);
@@ -495,10 +571,11 @@ mod tests {
 
     #[test]
     fn uniform_field_with_single_guide_full_coverage() {
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::new(1.0, 0.0),
             influence: 1.5,
+            ..Guide::default()
         }];
         let field = generate_direction_field(&guides, 16);
         for v in &field {
@@ -510,27 +587,31 @@ mod tests {
     fn canonicalization_negative_direction_equivalent() {
         // (0,-1) and (0,1) are the same headless direction
         let guides_pos = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.2, 0.5),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.8, 0.5),
                 direction: Vec2::new(0.0, 1.0),
                 influence: 0.5,
+                ..Guide::default()
             },
         ];
         let guides_neg = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.2, 0.5),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.8, 0.5),
                 direction: Vec2::new(0.0, -1.0), // flipped
                 influence: 0.5,
+                ..Guide::default()
             },
         ];
         // Should produce identical results at every point
@@ -550,20 +631,23 @@ mod tests {
     fn three_guides_smooth_fan() {
         // Three guides in a fan: 0°, 45°, 90°
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.1, 0.5),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.5, 0.5),
                 direction: Vec2::new(FRAC_1_SQRT_2, FRAC_1_SQRT_2),
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.9, 0.5),
                 direction: Vec2::new(0.0, 1.0),
                 influence: 0.5,
+                ..Guide::default()
             },
         ];
         // At the center guide, result should be ~45° (dominated by the closest guide)
@@ -582,23 +666,26 @@ mod tests {
     fn three_guides_wide_spread() {
         // Three guides at 10°, 80°, 150° — wide spread but all in upper half
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.1, 0.5),
                 direction: Vec2::new(10.0_f32.to_radians().cos(), 10.0_f32.to_radians().sin()),
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.5, 0.5),
                 direction: Vec2::new(80.0_f32.to_radians().cos(), 80.0_f32.to_radians().sin()),
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.9, 0.5),
                 direction: Vec2::new(
                     150.0_f32.to_radians().cos(),
                     150.0_f32.to_radians().sin(),
                 ),
                 influence: 0.5,
+                ..Guide::default()
             },
         ];
         // At the center, the 80° guide dominates (d=0 vs d=0.4)
@@ -616,15 +703,17 @@ mod tests {
     fn partial_influence_overlap_only_one_in_range() {
         // Two guides, but only one is within influence at the query point
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.2, 0.5),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.2, // covers up to x=0.4
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.8, 0.5),
                 direction: Vec2::new(0.0, 1.0),
                 influence: 0.2, // covers from x=0.6
+                ..Guide::default()
             },
         ];
         // Query at x=0.3: only guide[0] is in range

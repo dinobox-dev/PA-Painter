@@ -184,14 +184,14 @@ fn create_placeholder_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgp
     });
     let data = [128u8, 128, 128, 255, 128, 128, 128, 255, 128, 128, 128, 255, 128, 128, 128, 255];
     queue.write_texture(
-        wgpu::ImageCopyTexture {
+        wgpu::TexelCopyTextureInfo {
             texture: &texture,
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
         &data,
-        wgpu::ImageDataLayout {
+        wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(8),
             rows_per_image: Some(2),
@@ -491,14 +491,14 @@ pub fn upload_color_texture(
         view_formats: &[],
     });
     queue.write_texture(
-        wgpu::ImageCopyTexture {
+        wgpu::TexelCopyTextureInfo {
             texture: &texture,
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
         &pixels,
-        wgpu::ImageDataLayout {
+        wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(resolution as u32 * 4),
             rows_per_image: Some(resolution as u32),
@@ -620,6 +620,7 @@ pub fn show(
                 label: Some("mesh_render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &res.render_texture_view,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -660,15 +661,15 @@ pub fn show(
         });
 
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &res.render_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &readback_buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(bytes_per_row),
                     rows_per_image: Some(h),
@@ -689,7 +690,7 @@ pub fn show(
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = sender.send(result);
         });
-        device.poll(wgpu::Maintain::Wait);
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
         if receiver.recv().ok().and_then(|r| r.ok()).is_some() {
             let data = buffer_slice.get_mapped_range();
             let mut pixels = Vec::with_capacity((w * h) as usize);
@@ -705,10 +706,7 @@ pub fn show(
             }
             drop(data);
 
-            let image = egui::ColorImage {
-                size: [w as usize, h as usize],
-                pixels,
-            };
+            let image = egui::ColorImage::new([w as usize, h as usize], pixels);
             state.mesh_preview.rendered_texture = Some(ui.ctx().load_texture(
                 "mesh_3d_preview",
                 image,
@@ -764,6 +762,7 @@ fn draw_lighting_panel(
             btn_rect,
             rounding,
             egui::Stroke::new(1.0, Color32::from_gray(140)),
+            egui::StrokeKind::Outside,
         );
     }
     painter.text(
@@ -793,9 +792,9 @@ fn draw_lighting_panel(
             .fixed_pos(Pos2::new(panel_x, panel_y))
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui: &mut egui::Ui| {
-                egui::Frame::none()
+                egui::Frame::NONE
                     .fill(tab_bg_active)
-                    .rounding(rounding)
+                    .corner_radius(rounding)
                     .inner_margin(8.0)
                     .stroke(egui::Stroke::new(1.0, Color32::from_gray(80)))
                     .show(ui, |ui: &mut egui::Ui| {

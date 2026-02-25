@@ -3,7 +3,9 @@ use std::time::{Duration, Instant};
 
 use practical_arcana_painter::compositing::{composite_all_with_paths, generate_all_paths};
 use practical_arcana_painter::object_normal::MeshNormalData;
-use practical_arcana_painter::output::{generate_normal_map, generate_normal_map_depicted_form};
+use practical_arcana_painter::output::{
+    blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
+};
 use practical_arcana_painter::types::{
     BaseColorSource, Color, NormalMode, OutputSettings, PaintLayer,
 };
@@ -20,6 +22,10 @@ pub struct GenInput {
     pub settings: OutputSettings,
     pub normal_data: Option<MeshNormalData>,
     pub masks: Vec<Option<UvMask>>,
+    /// Base normal map pixels (linear RGBA [0,1]), if loaded.
+    pub base_normal_pixels: Option<Vec<[f32; 4]>>,
+    pub base_normal_w: u32,
+    pub base_normal_h: u32,
 }
 
 /// Output from a completed generation.
@@ -120,6 +126,18 @@ fn run_pipeline(input: GenInput) -> GenResult {
             input.settings.normal_strength,
         ),
     };
+
+    // Apply base normal blending (UDN) if a base normal texture is provided
+    let mut normal_map = normal_map;
+    if let Some(ref base_pixels) = input.base_normal_pixels {
+        blend_normals_udn(
+            &mut normal_map,
+            base_pixels,
+            input.base_normal_w,
+            input.base_normal_h,
+            input.resolution,
+        );
+    }
 
     GenResult {
         color: global.color,

@@ -7,11 +7,12 @@ pub mod sidebar;
 pub mod slot_editor;
 pub mod state;
 pub mod textures;
+pub mod undo;
 pub mod viewport;
 
 use eframe::egui;
 use eframe::egui_wgpu;
-use state::AppState;
+use state::{AppState, GuideTool, MapMode, ViewportTab};
 
 use practical_arcana_painter::object_normal::compute_mesh_normal_data;
 use practical_arcana_painter::types::{pixels_to_colors, Color, NormalMode};
@@ -25,6 +26,11 @@ pub struct PainterApp {
 
 impl PainterApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Register Phosphor icon font
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Fill);
+        cc.egui_ctx.set_fonts(fonts);
+
         Self {
             state: AppState::new(),
             checkerboard: None,
@@ -54,7 +60,7 @@ impl PainterApp {
             .as_ref()
             .map(|t| (t.width, t.height))
             .unwrap_or((0, 0));
-        let sc = self.state.project.color_ref.solid_color;
+        let sc = self.state.project.base_color.solid_color();
         let solid_color = Color::from(sc);
 
         // Normal data (computed on main thread — brief freeze at high res)
@@ -71,8 +77,16 @@ impl PainterApp {
         let masks = if let Some(ref mesh) = self.state.loaded_mesh {
             self.state.project.build_masks(mesh, resolution)
         } else {
-            (0..self.state.project.slots.len()).map(|_| None).collect()
+            (0..self.state.project.layers.len()).map(|_| None).collect()
         };
+
+        // Base normal pixels (for UDN blending)
+        let (base_normal_pixels, base_normal_w, base_normal_h) = self
+            .state
+            .loaded_normal
+            .as_ref()
+            .map(|tex| (Some(tex.pixels.clone()), tex.width, tex.height))
+            .unwrap_or((None, 0, 0));
 
         self.state.generation.start(generation::GenInput {
             layers,
@@ -84,8 +98,11 @@ impl PainterApp {
             settings,
             normal_data,
             masks,
+            base_normal_pixels,
+            base_normal_w,
+            base_normal_h,
         });
-        self.state.generation_snapshot = Some(self.state.project.slots.clone());
+        self.state.generation_snapshot = Some(self.state.project.layers.clone());
         self.state.status_message = format!("Generating at {}px...", resolution);
     }
 
@@ -158,6 +175,92 @@ impl eframe::App for PainterApp {
             self.state.textures.base_texture = self.checkerboard.clone();
         }
 
+        // ── Undo/Redo keyboard shortcuts ──
+        // Check redo first (more specific modifier combo) to prevent Cmd+Z from consuming it.
+        let redo_mods = egui::Modifiers { command: true, shift: true, ..Default::default() };
+        let undo_mods = egui::Modifiers { command: true, ..Default::default() };
+        if ctx.input_mut(|i| i.consume_key(redo_mods, egui::Key::Z)) {
+            let current = self.state.take_snapshot();
+            if let Some(snap) = self.state.undo.redo(current) {
+                self.state.apply_snapshot(snap);
+            }
+        } else if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::Z)) {
+            let current = self.state.take_snapshot();
+            if let Some(snap) = self.state.undo.undo(current) {
+                self.state.apply_snapshot(snap);
+            }
+        }
+
+        // ── Cmd+S: Save ──
+        if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::S)) {
+            self.state.pending_save = true;
+        }
+
+        // ── Cmd+G: Generate ──
+        if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::G)) {
+            if !self.state.generation.is_running() {
+                self.state.pending_generate = true;
+            }
+        }
+
+        // ── Backtick key: cycle viewport tabs ──
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Backtick)) {
+            self.state.viewport_tab = self.state.viewport_tab.next();
+        }
+
+        // ── Escape: deselect guide + return to Select tool ──
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.state.selected_guide = None;
+            self.state.guide_tool = GuideTool::Select;
+        }
+
+        // ── Number keys 1-4: context-dependent (no text focus) ──
+        {
+            let has_text_focus = ctx.memory(|m| m.focused().is_some());
+            if !has_text_focus {
+                match self.state.viewport_tab {
+                    ViewportTab::Guide => {
+                        let tool_keys = [
+                            (egui::Key::Num1, GuideTool::Select),
+                            (egui::Key::Num2, GuideTool::AddDirectional),
+                            (egui::Key::Num3, GuideTool::AddRadial),
+                            (egui::Key::Num4, GuideTool::AddVortex),
+                        ];
+                        for (key, tool) in &tool_keys {
+                            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, *key)) {
+                                if self.state.guide_tool != *tool {
+                                    if *tool != GuideTool::Select {
+                                        self.state.selected_guide = None;
+                                    }
+                                    self.state.guide_tool = *tool;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    ViewportTab::UvView => {
+                        let map_keys = [
+                            (egui::Key::Num1, MapMode::Color),
+                            (egui::Key::Num2, MapMode::Height),
+                            (egui::Key::Num3, MapMode::Normal),
+                            (egui::Key::Num4, MapMode::StrokeId),
+                        ];
+                        for (key, mode) in &map_keys {
+                            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, *key)) {
+                                self.state.map_mode = *mode;
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // ── Undo: capture pre-frame snapshot AFTER undo/redo ──
+        // This way the restore itself is invisible to the change tracker.
+        let pre_frame = self.state.take_snapshot();
+
         // Handle deferred actions (flags set by child widgets on AppState)
         if self.state.pending_open {
             self.state.pending_open = false;
@@ -185,14 +288,25 @@ impl eframe::App for PainterApp {
             dialogs::new_project(&mut self.state, ctx);
             self.init_mesh_preview();
         }
-        if self.state.pending_load_mesh {
-            self.state.pending_load_mesh = false;
-            dialogs::load_mesh_dialog(&mut self.state, ctx);
+        if self.state.pending_reload_mesh {
+            self.state.pending_reload_mesh = false;
+            dialogs::reload_mesh(&mut self.state);
             self.init_mesh_preview();
         }
         if self.state.pending_load_texture {
             self.state.pending_load_texture = false;
             dialogs::load_texture_dialog(&mut self.state, ctx);
+        }
+        if self.state.pending_load_normal {
+            self.state.pending_load_normal = false;
+            dialogs::load_normal_dialog(&mut self.state);
+        }
+
+        // Update per-layer path overlay caches (only recomputes stale layers)
+        if self.state.viewport.show_path_overlay {
+            let res = self.state.project.settings.resolution_preset.resolution();
+            let seed = self.state.project.settings.seed;
+            self.state.path_overlay.update(&self.state.project.layers, seed, res);
         }
 
         // Poll generation results
@@ -206,33 +320,51 @@ impl eframe::App for PainterApp {
 
         // ── Top menu bar ──
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui: &mut egui::Ui| {
-            egui::menu::bar(ui, |ui: &mut egui::Ui| {
+            egui::MenuBar::new().ui(ui, |ui: &mut egui::Ui| {
                 ui.menu_button("File", |ui: &mut egui::Ui| {
                     if ui.button("New Project...").clicked() {
-                        ui.close_menu();
+                        ui.close();
                         self.state.pending_new = true;
                     }
                     if ui.button("Open Project...").clicked() {
-                        ui.close_menu();
+                        ui.close();
                         self.state.pending_open = true;
                     }
-                    if ui.button("Save").clicked() {
-                        ui.close_menu();
+                    if ui.button("Save  ⌘S").clicked() {
+                        ui.close();
                         self.state.pending_save = true;
                     }
                     ui.separator();
                     if ui.button("Export Maps...").clicked() {
-                        ui.close_menu();
+                        ui.close();
                         self.state.pending_export = true;
                     }
                     if ui.button("Export GLB...").clicked() {
-                        ui.close_menu();
+                        ui.close();
                         self.state.pending_export_glb = true;
+                    }
+                });
+                ui.menu_button("Edit", |ui: &mut egui::Ui| {
+                    let can_undo = self.state.undo.can_undo();
+                    let can_redo = self.state.undo.can_redo();
+                    if ui.add_enabled(can_undo, egui::Button::new("Undo  ⌘Z")).clicked() {
+                        ui.close();
+                        let current = self.state.take_snapshot();
+                        if let Some(snap) = self.state.undo.undo(current) {
+                            self.state.apply_snapshot(snap);
+                        }
+                    }
+                    if ui.add_enabled(can_redo, egui::Button::new("Redo  ⌘⇧Z")).clicked() {
+                        ui.close();
+                        let current = self.state.take_snapshot();
+                        if let Some(snap) = self.state.undo.redo(current) {
+                            self.state.apply_snapshot(snap);
+                        }
                     }
                 });
                 ui.menu_button("View", |ui: &mut egui::Ui| {
                     ui.checkbox(&mut self.state.viewport.show_wireframe, "UV Wireframe");
-                    ui.checkbox(&mut self.state.viewport.show_guides, "Guides");
+                    ui.checkbox(&mut self.state.viewport.show_path_overlay, "Path Overlay");
                 });
 
             });
@@ -248,7 +380,7 @@ impl eframe::App for PainterApp {
                     let res = self.state.project.settings.resolution_preset.resolution();
                     ui.label(format!("{}px", res));
                     ui.separator();
-                    ui.label(format!("{} slots", self.state.project.slots.len()));
+                    ui.label(format!("{} layers", self.state.project.layers.len()));
                 });
             });
 
@@ -258,13 +390,19 @@ impl eframe::App for PainterApp {
             .min_width(220.0)
             .max_width(400.0)
             .show(ctx, |ui: &mut egui::Ui| {
+                // Bottom-pinned: Seed + Generate
+                egui::TopBottomPanel::bottom("left_bottom")
+                    .show_inside(ui, |ui: &mut egui::Ui| {
+                        sidebar::show_bottom(ui, &mut self.state);
+                    });
+                // Scrollable content above
                 egui::ScrollArea::vertical().show(ui, |ui: &mut egui::Ui| {
                     sidebar::show_left(ui, &mut self.state);
                 });
             });
 
-        // ── Right sidebar (slot editor, only when a slot is selected) ──
-        if self.state.selected_slot.is_some() {
+        // ── Right sidebar (layer editor, only when a layer is selected) ──
+        if self.state.selected_layer.is_some() {
             egui::SidePanel::right("right_panel")
                 .default_width(280.0)
                 .min_width(240.0)
@@ -327,5 +465,43 @@ impl eframe::App for PainterApp {
                 });
             }
         });
+
+        // ── Reload Summary Window ──
+        let mut dismiss_summary = false;
+        if let Some(ref summary) = self.state.reload_summary {
+            egui::Window::new("Mesh Reload Summary")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui: &mut egui::Ui| {
+                    if !summary.kept.is_empty() {
+                        ui.label(format!("Kept: {}", summary.kept.join(", ")));
+                    }
+                    if !summary.added.is_empty() {
+                        ui.label(format!(
+                            "Added (new layers created): {}",
+                            summary.added.join(", ")
+                        ));
+                    }
+                    if !summary.orphaned.is_empty() {
+                        ui.label(format!(
+                            "Orphaned (remapped to __all__): {}",
+                            summary.orphaned.join(", ")
+                        ));
+                    }
+                    ui.add_space(8.0);
+                    if ui.button("OK").clicked() {
+                        dismiss_summary = true;
+                    }
+                });
+        }
+        if dismiss_summary {
+            self.state.reload_summary = None;
+        }
+
+        // ── Undo: track post-frame changes ──
+        let post_frame = self.state.take_snapshot();
+        let pointer_down = ctx.input(|i| i.pointer.any_down());
+        self.state.undo.track_frame(&pre_frame, &post_frame, pointer_down);
     }
 }

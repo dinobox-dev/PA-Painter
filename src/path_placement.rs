@@ -376,7 +376,7 @@ fn clip_path_to_uv(path: Vec<Vec2>) -> Option<Vec<Vec2>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{GuideVertex, PaintLayer, StrokeParams};
+    use crate::types::{Guide, PaintLayer, StrokeParams};
     use glam::Vec3;
 
     fn make_layer() -> PaintLayer {
@@ -384,10 +384,11 @@ mod tests {
             name: String::from("test"),
             order: 0,
             params: StrokeParams::default(),
-            guides: vec![GuideVertex {
+            guides: vec![Guide {
                 position: Vec2::new(0.5, 0.5),
                 direction: Vec2::X,
                 influence: 1.5,
+                ..Guide::default()
             }],
         }
     }
@@ -487,10 +488,11 @@ mod tests {
 
     #[test]
     fn streamline_straight_vertical() {
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::Y,
             influence: 1.5,
+            ..Guide::default()
         }];
         let mut params = StrokeParams::default();
         params.angle_variation = 0.0;
@@ -512,10 +514,11 @@ mod tests {
 
     #[test]
     fn streamline_uv_boundary_termination() {
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.5,
+            ..Guide::default()
         }];
         let params = StrokeParams {
             angle_variation: 0.0,
@@ -539,10 +542,11 @@ mod tests {
 
     #[test]
     fn streamline_min_length_filter() {
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.5,
+            ..Guide::default()
         }];
         // Very wide brush → high min_length, very short max → path too short
         let params = StrokeParams {
@@ -768,15 +772,17 @@ mod tests {
     #[test]
     fn streamline_curved_two_guides() {
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.2, 0.5),
                 direction: Vec2::X,
                 influence: 0.5,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.8, 0.5),
                 direction: Vec2::Y,
                 influence: 0.5,
+                ..Guide::default()
             },
         ];
         let params = StrokeParams {
@@ -804,15 +810,17 @@ mod tests {
     #[test]
     fn turn_angle_termination() {
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.3, 0.5),
                 direction: Vec2::X,
                 influence: 0.15,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.7, 0.5),
                 direction: Vec2::Y,
                 influence: 0.15,
+                ..Guide::default()
             },
         ];
         let params = StrokeParams {
@@ -926,25 +934,29 @@ mod tests {
                 ..StrokeParams::default()
             },
             guides: vec![
-                GuideVertex {
+                Guide {
                     position: Vec2::new(0.5, 0.2),
                     direction: Vec2::new(1.0, 0.0),
                     influence: 0.5,
+                    ..Guide::default()
                 },
-                GuideVertex {
+                Guide {
                     position: Vec2::new(0.8, 0.5),
                     direction: Vec2::new(0.0, 1.0),
                     influence: 0.5,
+                    ..Guide::default()
                 },
-                GuideVertex {
+                Guide {
                     position: Vec2::new(0.5, 0.8),
                     direction: Vec2::new(-1.0, 0.0),
                     influence: 0.5,
+                    ..Guide::default()
                 },
-                GuideVertex {
+                Guide {
                     position: Vec2::new(0.2, 0.5),
                     direction: Vec2::new(0.0, -1.0),
                     influence: 0.5,
+                    ..Guide::default()
                 },
             ],
         };
@@ -1042,10 +1054,11 @@ mod tests {
                 ..StrokeParams::default()
             },
             guides: vec![
-                GuideVertex {
+                Guide {
                     position: Vec2::new(0.5, 0.5),
                     direction: Vec2::X,
                     influence: 1.0,
+                    ..Guide::default()
                 },
             ],
         };
@@ -1230,10 +1243,11 @@ mod tests {
     #[test]
     fn threshold_none_same_as_no_texture() {
         // With threshold=None, providing a color texture should not change paths.
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.5,
+            ..Guide::default()
         }];
         let params = StrokeParams {
             angle_variation: 0.0,
@@ -1285,10 +1299,11 @@ mod tests {
         // Horizontal stroke crossing a sharp red/blue boundary at u=0.5.
         // Use a 64-pixel-wide texture so the bilinear transition zone is narrow
         // enough (~1/64 UV) that per-step color diff exceeds the threshold.
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.5,
+            ..Guide::default()
         }];
         let params = StrokeParams {
             angle_variation: 0.0,
@@ -1362,10 +1377,11 @@ mod tests {
     #[test]
     fn uniform_texture_no_break() {
         // Uniform texture: color boundary should never trigger.
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.5,
+            ..Guide::default()
         }];
         let params_break = StrokeParams {
             angle_variation: 0.0,
@@ -1425,10 +1441,11 @@ mod tests {
 
     #[test]
     fn color_boundary_deterministic() {
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.5,
+            ..Guide::default()
         }];
         let params = StrokeParams {
             angle_variation: 0.0,
@@ -1516,10 +1533,11 @@ mod tests {
     fn normal_boundary_breaks_path() {
         // Horizontal stroke crossing a 90° normal boundary at u=0.5.
         // threshold=0.5 (~60°) should break at the boundary (dot=0).
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.5,
+            ..Guide::default()
         }];
         let params = StrokeParams {
             angle_variation: 0.0,
@@ -1577,10 +1595,11 @@ mod tests {
 
     #[test]
     fn normal_boundary_deterministic() {
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.5,
+            ..Guide::default()
         }];
         let params = StrokeParams {
             angle_variation: 0.0,
@@ -1617,10 +1636,11 @@ mod tests {
     #[test]
     fn threshold_none_ignores_normal() {
         // With threshold=None, normal data should not affect paths.
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.5,
+            ..Guide::default()
         }];
         let params = StrokeParams {
             angle_variation: 0.0,
@@ -1759,15 +1779,17 @@ mod tests {
                 ..StrokeParams::default()
             },
             guides: vec![
-                GuideVertex {
+                Guide {
                     position: Vec2::new(0.25, 0.25),
                     direction: Vec2::new(1.0, 0.3).normalize(),
                     influence: 0.5,
+                    ..Guide::default()
                 },
-                GuideVertex {
+                Guide {
                     position: Vec2::new(0.75, 0.75),
                     direction: Vec2::new(-0.3, 1.0).normalize(),
                     influence: 0.5,
+                    ..Guide::default()
                 },
             ],
         };
@@ -1841,15 +1863,17 @@ mod tests {
 
         let resolution = 512u32;
         let guides = vec![
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.3, 0.4),
                 direction: Vec2::new(1.0, 0.15).normalize(),
                 influence: 0.8,
+                ..Guide::default()
             },
-            GuideVertex {
+            Guide {
                 position: Vec2::new(0.7, 0.6),
                 direction: Vec2::new(1.0, -0.1).normalize(),
                 influence: 0.8,
+                ..Guide::default()
             },
         ];
 

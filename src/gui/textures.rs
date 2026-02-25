@@ -25,10 +25,7 @@ pub fn loaded_texture_to_handle(
 
     ctx.load_texture(
         name,
-        egui::ColorImage {
-            size: [tex.width as usize, tex.height as usize],
-            pixels,
-        },
+        egui::ColorImage::new([tex.width as usize, tex.height as usize], pixels),
         egui::TextureOptions::LINEAR,
     )
 }
@@ -55,10 +52,7 @@ pub fn color_buffer_to_handle(
 
     ctx.load_texture(
         name,
-        egui::ColorImage {
-            size: [width as usize, height as usize],
-            pixels,
-        },
+        egui::ColorImage::new([width as usize, height as usize], pixels),
         egui::TextureOptions::LINEAR,
     )
 }
@@ -80,10 +74,7 @@ pub fn height_buffer_to_handle(
 
     ctx.load_texture(
         name,
-        egui::ColorImage {
-            size: [resolution as usize, resolution as usize],
-            pixels,
-        },
+        egui::ColorImage::new([resolution as usize, resolution as usize], pixels),
         egui::TextureOptions::LINEAR,
     )
 }
@@ -108,10 +99,7 @@ pub fn normal_map_to_handle(
 
     ctx.load_texture(
         name,
-        egui::ColorImage {
-            size: [resolution as usize, resolution as usize],
-            pixels,
-        },
+        egui::ColorImage::new([resolution as usize, resolution as usize], pixels),
         egui::TextureOptions::LINEAR,
     )
 }
@@ -143,10 +131,7 @@ pub fn stroke_id_to_handle(
 
     ctx.load_texture(
         name,
-        egui::ColorImage {
-            size: [resolution as usize, resolution as usize],
-            pixels,
-        },
+        egui::ColorImage::new([resolution as usize, resolution as usize], pixels),
         egui::TextureOptions::LINEAR,
     )
 }

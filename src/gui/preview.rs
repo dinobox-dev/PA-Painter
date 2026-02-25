@@ -3,13 +3,13 @@ use eframe::egui;
 use practical_arcana_painter::brush_profile;
 use practical_arcana_painter::path_placement;
 use practical_arcana_painter::stroke_height;
-use practical_arcana_painter::types::{PaintSlot, PatternValues, StrokeParams, StrokeValues};
+use practical_arcana_painter::types::{Guide, Layer, PaintValues, StrokeParams};
 
 // ── Caches ──────────────────────────────────────────────────────
 
 /// Cached stroke density texture and the parameters that produced it.
 pub struct StrokePreviewCache {
-    entry: Option<(StrokeValues, u32, egui::TextureHandle)>,
+    entry: Option<(PaintValues, u32, egui::TextureHandle)>,
 }
 
 impl Default for StrokePreviewCache {
@@ -18,14 +18,10 @@ impl Default for StrokePreviewCache {
     }
 }
 
-/// Cached pattern path data and the parameters that produced it.
-pub struct PatternPreviewCache {
-    entry: Option<(PatternValues, StrokeValues, u32, Vec<Vec<[f32; 2]>>)>,
-}
-
-impl Default for PatternPreviewCache {
-    fn default() -> Self {
-        Self { entry: None }
+impl StrokePreviewCache {
+    /// Access the cached texture handle (if any).
+    pub fn texture(&self) -> Option<&egui::TextureHandle> {
+        self.entry.as_ref().map(|(_, _, tex)| tex)
     }
 }
 
@@ -33,40 +29,38 @@ impl Default for PatternPreviewCache {
 #[derive(Default)]
 pub struct PreviewCache {
     pub stroke: StrokePreviewCache,
-    pub pattern: PatternPreviewCache,
 }
 
 // ── Stroke Preview ──────────────────────────────────────────────
 
-/// Show a stroke density preview inside the sidebar.
+/// Update the stroke density cache without drawing anything.
 ///
-/// Renders a single stroke's density map as a warm-tinted texture,
-/// showing the effect of brush width, load, wiggle, and pressure curve.
-pub fn show_stroke_preview(
-    ui: &mut egui::Ui,
-    stroke: &StrokeValues,
+/// Use this when you need the cached texture for custom rendering
+/// (e.g., as a background layer in a composite widget).
+pub fn update_stroke_cache(
+    ctx: &egui::Context,
+    paint: &PaintValues,
     seed: u32,
     cache: &mut StrokePreviewCache,
 ) {
     let stale = match &cache.entry {
-        Some((s, sd, _)) => *s != *stroke || *sd != seed,
+        Some((p, sd, _)) => *p != *paint || *sd != seed,
         None => true,
     };
 
     if stale {
-        let brush_w = (stroke.brush_width.round() as usize).max(4);
+        let brush_w = (paint.brush_width.round() as usize).max(4);
         let profile = brush_profile::generate_brush_profile(brush_w, seed);
         let params = StrokeParams {
-            brush_width: stroke.brush_width,
-            load: stroke.load,
-            body_wiggle: stroke.body_wiggle,
-            pressure_curve: stroke.pressure_curve.clone(),
+            brush_width: paint.brush_width,
+            load: paint.load,
+            body_wiggle: paint.body_wiggle,
+            pressure_curve: paint.pressure_curve.clone(),
             seed,
             ..StrokeParams::default()
         };
         let result = stroke_height::generate_stroke_height(&profile, 200, &params, seed);
 
-        // Density → warm-tinted pixels (cream on black)
         let pixels: Vec<egui::Color32> = result
             .data
             .iter()
@@ -81,99 +75,179 @@ pub fn show_stroke_preview(
             })
             .collect();
 
-        let texture = ui.ctx().load_texture(
+        let texture = ctx.load_texture(
             "stroke_preview",
-            egui::ColorImage {
-                size: [result.width, result.height],
-                pixels,
-            },
+            egui::ColorImage::new([result.width, result.height], pixels),
             egui::TextureOptions::LINEAR,
         );
 
-        cache.entry = Some((stroke.clone(), seed, texture));
+        cache.entry = Some((paint.clone(), seed, texture));
     }
+}
 
-    if let Some((_, _, ref tex)) = cache.entry {
-        let available_w = ui.available_width();
-        let tex_w = tex.size()[0] as f32;
-        let tex_h = tex.size()[1] as f32;
-        if tex_w > 0.0 && tex_h > 0.0 {
-            let display_h = (available_w * tex_h / tex_w).clamp(24.0, 80.0);
-            let (resp, painter) = ui.allocate_painter(
-                egui::Vec2::new(available_w, display_h),
-                egui::Sense::hover(),
-            );
-            let rect = resp.rect;
-            painter.rect_filled(rect, 4.0, egui::Color32::from_gray(32));
-            painter.image(
-                tex.id(),
-                rect.shrink(2.0),
-                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
+
+
+// ── Per-Layer Path Overlay Cache ────────────────────────────────
+
+/// Key for invalidation: paint values + seed + guides + resolution.
+#[derive(Clone, PartialEq)]
+struct LayerPathKey {
+    paint: PaintValues,
+    seed: u32,
+    guides: Vec<Guide>,
+    resolution: u32,
+}
+
+/// Cached path data for a single layer.
+pub struct LayerPathCache {
+    key: Option<LayerPathKey>,
+    pub paths: Vec<Vec<[f32; 2]>>,
+}
+
+impl Default for LayerPathCache {
+    fn default() -> Self {
+        Self {
+            key: None,
+            paths: Vec::new(),
         }
     }
 }
 
-// ── Pattern Preview ─────────────────────────────────────────────
+impl LayerPathCache {
+    /// Check if cache is stale for the given layer state, seed, and resolution.
+    pub fn is_stale(&self, layer: &Layer, seed: u32, resolution: u32) -> bool {
+        match &self.key {
+            Some(k) => {
+                k.paint != layer.paint
+                    || k.seed != seed
+                    || k.guides != layer.guides
+                    || k.resolution != resolution
+            }
+            None => true,
+        }
+    }
 
-/// Show a pattern layout preview inside the sidebar.
-///
-/// Draws stroke centerlines generated at 128px resolution,
-/// showing the effect of spacing, length, angle variation, and guides.
-pub fn show_pattern_preview(
-    ui: &mut egui::Ui,
-    slot: &PaintSlot,
-    cache: &mut PatternPreviewCache,
-) {
-    let stale = match &cache.entry {
-        Some((p, s, sd, _)) => *p != slot.pattern || *s != slot.stroke || *sd != slot.seed,
-        None => true,
-    };
-
-    if stale {
-        let layer = slot.to_paint_layer();
-        let paths = path_placement::generate_paths(&layer, 0, 128, None, None, None);
-        let extracted: Vec<Vec<[f32; 2]>> = paths
+    /// Recompute paths for this layer at the given resolution.
+    pub fn recompute(&mut self, layer: &Layer, seed: u32, resolution: u32) {
+        let paint_layer = layer.to_paint_layer_with_seed(seed);
+        let paths = path_placement::generate_paths(&paint_layer, 0, resolution, None, None, None);
+        self.paths = paths
             .iter()
             .map(|p| p.points.iter().map(|v| [v.x, v.y]).collect())
             .collect();
-        cache.entry = Some((slot.pattern.clone(), slot.stroke.clone(), slot.seed, extracted));
+        self.key = Some(LayerPathKey {
+            paint: layer.paint.clone(),
+            seed,
+            guides: layer.guides.clone(),
+            resolution,
+        });
+    }
+}
+
+/// Per-layer path preview caches for viewport overlay.
+/// Maintains one cache entry per layer index, growing/shrinking with the layer stack.
+pub struct PathOverlayCache {
+    caches: Vec<LayerPathCache>,
+}
+
+impl Default for PathOverlayCache {
+    fn default() -> Self {
+        Self {
+            caches: Vec::new(),
+        }
+    }
+}
+
+impl PathOverlayCache {
+    /// Sync cache vec length to match layer count.
+    fn sync_layer_count(&mut self, count: usize) {
+        if self.caches.len() > count {
+            self.caches.truncate(count);
+        }
+        while self.caches.len() < count {
+            self.caches.push(LayerPathCache::default());
+        }
     }
 
-    let side = ui.available_width().min(256.0);
-    let (resp, painter) = ui.allocate_painter(egui::Vec2::splat(side), egui::Sense::hover());
-    let rect = resp.rect;
-
-    // Dark background
-    painter.rect_filled(rect, 4.0, egui::Color32::from_gray(32));
-
-    if let Some((_, _, _, ref paths)) = cache.entry {
-        let line = egui::Stroke::new(
-            1.5,
-            egui::Color32::from_rgba_unmultiplied(200, 180, 140, 200),
-        );
-        for path in paths {
-            let pts: Vec<egui::Pos2> = path
-                .iter()
-                .map(|p| {
-                    egui::Pos2::new(
-                        rect.left() + p[0] * rect.width(),
-                        rect.top() + p[1] * rect.height(),
-                    )
-                })
-                .collect();
-            for w in pts.windows(2) {
-                painter.line_segment([w[0], w[1]], line);
+    /// Update caches for all visible layers at the given resolution.
+    /// Only recomputes stale entries. Each layer derives `base_seed + i`.
+    pub fn update(&mut self, layers: &[Layer], base_seed: u32, resolution: u32) {
+        self.sync_layer_count(layers.len());
+        for (i, layer) in layers.iter().enumerate() {
+            let seed = base_seed.wrapping_add(i as u32);
+            if layer.visible && self.caches[i].is_stale(layer, seed, resolution) {
+                self.caches[i].recompute(layer, seed, resolution);
             }
         }
+    }
 
-        painter.text(
-            egui::Pos2::new(rect.right() - 4.0, rect.bottom() - 4.0),
-            egui::Align2::RIGHT_BOTTOM,
-            format!("{} strokes", paths.len()),
-            egui::FontId::proportional(10.0),
-            egui::Color32::from_gray(120),
+    /// Get cached paths for all visible layers.
+    pub fn visible_paths<'a>(&'a self, layers: &[Layer]) -> Vec<(usize, &'a Vec<Vec<[f32; 2]>>)> {
+        layers
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.visible)
+            .filter_map(|(i, _)| self.caches.get(i).map(|c| (i, &c.paths)))
+            .collect()
+    }
+}
+
+// ── Preset Thumbnail Cache ─────────────────────────────────────
+
+/// Cache of small stroke preview textures keyed by PaintValues.
+pub struct PresetThumbnailCache {
+    entries: Vec<(PaintValues, egui::TextureHandle)>,
+}
+
+impl Default for PresetThumbnailCache {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+}
+
+impl PresetThumbnailCache {
+    /// Get or generate a thumbnail for the given PaintValues.
+    pub fn get_or_create(
+        &mut self,
+        ctx: &egui::Context,
+        values: &PaintValues,
+        seed: u32,
+    ) -> egui::TextureId {
+        // Check if already cached
+        if let Some(pos) = self.entries.iter().position(|(v, _)| v == values) {
+            return self.entries[pos].1.id();
+        }
+
+        // Generate a small (100px wide) stroke density texture
+        let brush_w = (values.brush_width.round() as usize).max(4);
+        let profile = brush_profile::generate_brush_profile(brush_w, seed);
+        let params = StrokeParams::from_paint_values(values, seed);
+        let result = stroke_height::generate_stroke_height(&profile, 100, &params, seed);
+
+        let pixels: Vec<egui::Color32> = result
+            .data
+            .iter()
+            .map(|&d| {
+                let v = d.clamp(0.0, 1.0);
+                egui::Color32::from_rgba_unmultiplied(
+                    (v * 230.0) as u8,
+                    (v * 215.0) as u8,
+                    (v * 180.0) as u8,
+                    255,
+                )
+            })
+            .collect();
+
+        let handle = ctx.load_texture(
+            &format!("preset_thumb_{}", self.entries.len()),
+            egui::ColorImage::new([result.width, result.height], pixels),
+            egui::TextureOptions::LINEAR,
         );
+
+        let id = handle.id();
+        self.entries.push((values.clone(), handle));
+        id
     }
 }

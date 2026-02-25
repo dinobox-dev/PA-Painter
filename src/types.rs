@@ -226,7 +226,7 @@ impl PressureCurve {
     }
 }
 
-/// Per-layer stroke parameters.
+/// Per-layer stroke parameters (pipeline type — used by rendering engine).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StrokeParams {
     pub brush_width: f32,
@@ -282,32 +282,80 @@ impl Default for StrokeParams {
     }
 }
 
-/// Direction guide vertex placed by the user.
+impl StrokeParams {
+    /// Reconstruct StrokeParams from unified PaintValues.
+    pub fn from_paint_values(paint: &PaintValues, seed: u32) -> StrokeParams {
+        StrokeParams {
+            brush_width: paint.brush_width,
+            load: paint.load,
+            body_wiggle: paint.body_wiggle,
+            pressure_curve: paint.pressure_curve.clone(),
+            stroke_spacing: paint.stroke_spacing,
+            max_stroke_length: paint.max_stroke_length,
+            angle_variation: paint.angle_variation,
+            max_turn_angle: paint.max_turn_angle,
+            color_break_threshold: paint.color_break_threshold,
+            normal_break_threshold: paint.normal_break_threshold,
+            overlap_ratio: paint.overlap_ratio,
+            overlap_dist_factor: paint.overlap_dist_factor,
+            color_variation: paint.color_variation,
+            seed,
+        }
+    }
+}
+
+// ── Guide ──
+
+/// Direction guide type controlling how the guide influences stroke direction.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GuideType {
+    /// Linear flow in a specified direction (original behavior).
+    #[default]
+    Directional,
+    /// Radial outward flow from center.
+    Source,
+    /// Radial inward flow toward center.
+    Sink,
+    /// Rotational flow around center.
+    Vortex,
+}
+
+fn default_strength() -> f32 {
+    1.0
+}
+
+/// Direction guide placed by the user.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GuideVertex {
+pub struct Guide {
+    #[serde(default)]
+    pub guide_type: GuideType,
     pub position: Vec2,
     pub direction: Vec2,
     pub influence: f32,
+    #[serde(default = "default_strength")]
+    pub strength: f32,
 }
 
-impl Default for GuideVertex {
+impl Default for Guide {
     fn default() -> Self {
         Self {
+            guide_type: GuideType::Directional,
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 0.2,
+            strength: 1.0,
         }
     }
 }
 
 /// A paint layer defining stroke parameters and direction guides.
-/// Covers the full UV space [0,1]² — no polygon mask.
+/// Pipeline type — covers the full UV space [0,1]², consumed by rendering engine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PaintLayer {
     pub name: String,
     pub order: i32,
     pub params: StrokeParams,
-    pub guides: Vec<GuideVertex>,
+    pub guides: Vec<Guide>,
 }
 
 // ── Mesh Groups ──
@@ -323,18 +371,35 @@ pub struct MeshGroup {
     pub index_count: u32,
 }
 
-// ── Preset System ──
+// ── PaintValues (unified brush + layout settings) ──
 
-/// Brush physics values extracted from StrokeParams.
+/// Unified paint settings combining brush physics and layout strategy.
+/// This is the preset unit — guides are NOT included (UV-space dependent).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StrokeValues {
+pub struct PaintValues {
+    // Brush physics
     pub brush_width: f32,
     pub load: f32,
     pub body_wiggle: f32,
     pub pressure_curve: PressureCurve,
+
+    // Layout strategy
+    pub stroke_spacing: f32,
+    pub max_stroke_length: f32,
+    pub angle_variation: f32,
+    pub max_turn_angle: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_break_threshold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_break_threshold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlap_ratio: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlap_dist_factor: Option<f32>,
+    pub color_variation: f32,
 }
 
-impl Default for StrokeValues {
+impl Default for PaintValues {
     fn default() -> Self {
         let d = StrokeParams::default();
         Self {
@@ -342,11 +407,20 @@ impl Default for StrokeValues {
             load: d.load,
             body_wiggle: d.body_wiggle,
             pressure_curve: crate::pressure::preset_to_custom(PressurePreset::FadeOut),
+            stroke_spacing: d.stroke_spacing,
+            max_stroke_length: d.max_stroke_length,
+            angle_variation: d.angle_variation,
+            max_turn_angle: d.max_turn_angle,
+            color_break_threshold: d.color_break_threshold,
+            normal_break_threshold: d.normal_break_threshold,
+            overlap_ratio: d.overlap_ratio,
+            overlap_dist_factor: d.overlap_dist_factor,
+            color_variation: d.color_variation,
         }
     }
 }
 
-impl Hash for StrokeValues {
+impl Hash for PaintValues {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.brush_width.to_bits().hash(state);
         self.load.to_bits().hash(state);
@@ -369,55 +443,6 @@ impl Hash for StrokeValues {
                 }
             }
         }
-    }
-}
-
-/// Placement strategy values extracted from StrokeParams.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PatternValues {
-    pub guides: Vec<GuideVertex>,
-    pub stroke_spacing: f32,
-    pub max_stroke_length: f32,
-    pub angle_variation: f32,
-    pub max_turn_angle: f32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color_break_threshold: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub normal_break_threshold: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub overlap_ratio: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub overlap_dist_factor: Option<f32>,
-    pub color_variation: f32,
-}
-
-impl Default for PatternValues {
-    fn default() -> Self {
-        let d = StrokeParams::default();
-        Self {
-            guides: vec![GuideVertex::default()],
-            stroke_spacing: d.stroke_spacing,
-            max_stroke_length: d.max_stroke_length,
-            angle_variation: d.angle_variation,
-            max_turn_angle: d.max_turn_angle,
-            color_break_threshold: d.color_break_threshold,
-            normal_break_threshold: d.normal_break_threshold,
-            overlap_ratio: d.overlap_ratio,
-            overlap_dist_factor: d.overlap_dist_factor,
-            color_variation: d.color_variation,
-        }
-    }
-}
-
-impl Hash for PatternValues {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        for g in &self.guides {
-            g.position.x.to_bits().hash(state);
-            g.position.y.to_bits().hash(state);
-            g.direction.x.to_bits().hash(state);
-            g.direction.y.to_bits().hash(state);
-            g.influence.to_bits().hash(state);
-        }
         self.stroke_spacing.to_bits().hash(state);
         self.max_stroke_length.to_bits().hash(state);
         self.angle_variation.to_bits().hash(state);
@@ -430,149 +455,72 @@ impl Hash for PatternValues {
     }
 }
 
-/// A named stroke preset (brush physics template).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StrokePreset {
-    pub name: String,
-    #[serde(flatten)]
-    pub values: StrokeValues,
+// ── Layer (replaces PaintSlot) ──
+
+fn default_visible() -> bool {
+    true
 }
 
-/// A named pattern preset (placement strategy template).
+/// A paint layer binding a mesh group to paint settings and guides.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PatternPreset {
+pub struct Layer {
     pub name: String,
-    #[serde(flatten)]
-    pub values: PatternValues,
-}
-
-/// A paint slot binding a mesh group to stroke/pattern settings.
-/// Replaces PaintLayer as the user-facing representation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PaintSlot {
-    /// Name of the corresponding MeshGroup (or `"__full_uv__"` for whole UV).
-    pub group_name: String,
+    #[serde(default = "default_visible")]
+    pub visible: bool,
     /// Compositing order (lower = painted first).
     pub order: i32,
-    /// Stroke settings (brush physics).
-    pub stroke: StrokeValues,
-    /// Pattern settings (placement strategy).
-    pub pattern: PatternValues,
-    /// Random seed.
-    pub seed: u32,
+    /// Name of the corresponding MeshGroup (or `"__all__"` for whole UV).
+    pub group_name: String,
+    /// Unified paint settings (brush + layout).
+    pub paint: PaintValues,
+    /// Direction guides for this layer.
+    pub guides: Vec<Guide>,
 }
 
-impl PaintSlot {
+impl Layer {
     /// Convert to PaintLayer for downstream pipeline compatibility.
-    pub fn to_paint_layer(&self) -> PaintLayer {
+    /// `seed` is derived externally (e.g., project seed + layer index).
+    pub fn to_paint_layer_with_seed(&self, seed: u32) -> PaintLayer {
         PaintLayer {
             name: self.group_name.clone(),
             order: self.order,
-            params: StrokeParams::from_values(&self.stroke, &self.pattern, self.seed),
-            guides: self.pattern.guides.clone(),
+            params: StrokeParams::from_paint_values(&self.paint, seed),
+            guides: self.guides.clone(),
         }
-    }
-
-    /// Create a PaintSlot from a PaintLayer (used for v2→v3 migration).
-    pub fn from_paint_layer(layer: &PaintLayer) -> Self {
-        let p = &layer.params;
-        PaintSlot {
-            group_name: "__full_uv__".to_string(),
-            order: layer.order,
-            stroke: StrokeValues {
-                brush_width: p.brush_width,
-                load: p.load,
-                body_wiggle: p.body_wiggle,
-                pressure_curve: p.pressure_curve.clone(),
-            },
-            pattern: PatternValues {
-                guides: layer.guides.clone(),
-                stroke_spacing: p.stroke_spacing,
-                max_stroke_length: p.max_stroke_length,
-                angle_variation: p.angle_variation,
-                max_turn_angle: p.max_turn_angle,
-                color_break_threshold: p.color_break_threshold,
-                normal_break_threshold: p.normal_break_threshold,
-                overlap_ratio: p.overlap_ratio,
-                overlap_dist_factor: p.overlap_dist_factor,
-                color_variation: p.color_variation,
-            },
-            seed: p.seed,
-        }
-    }
-
-    /// Apply a stroke preset (value copy).
-    pub fn apply_stroke_preset(&mut self, preset: &StrokePreset) {
-        self.stroke = preset.values.clone();
-    }
-
-    /// Apply a pattern preset (value copy).
-    pub fn apply_pattern_preset(&mut self, preset: &PatternPreset) {
-        self.pattern = preset.values.clone();
     }
 }
 
-impl StrokeParams {
-    /// Reconstruct StrokeParams from split values.
-    pub fn from_values(stroke: &StrokeValues, pattern: &PatternValues, seed: u32) -> StrokeParams {
-        StrokeParams {
-            brush_width: stroke.brush_width,
-            load: stroke.load,
-            body_wiggle: stroke.body_wiggle,
-            pressure_curve: stroke.pressure_curve.clone(),
-            stroke_spacing: pattern.stroke_spacing,
-            max_stroke_length: pattern.max_stroke_length,
-            angle_variation: pattern.angle_variation,
-            max_turn_angle: pattern.max_turn_angle,
-            color_break_threshold: pattern.color_break_threshold,
-            normal_break_threshold: pattern.normal_break_threshold,
-            overlap_ratio: pattern.overlap_ratio,
-            overlap_dist_factor: pattern.overlap_dist_factor,
-            color_variation: pattern.color_variation,
-            seed,
-        }
-    }
+// ── Preset System ──
+
+/// A named paint preset (brush + layout template). Guides not included.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaintPreset {
+    pub name: String,
+    #[serde(flatten)]
+    pub values: PaintValues,
 }
 
 /// Global library of reusable presets.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PresetLibrary {
-    pub strokes: Vec<StrokePreset>,
-    pub patterns: Vec<PatternPreset>,
+    pub presets: Vec<PaintPreset>,
 }
 
 impl PresetLibrary {
-    /// Find a stroke preset whose values match exactly.
-    pub fn matching_stroke_preset(&self, values: &StrokeValues) -> Option<&str> {
-        self.strokes
+    /// Find a preset whose values match exactly.
+    pub fn matching_preset(&self, values: &PaintValues) -> Option<&str> {
+        self.presets
             .iter()
             .find(|p| &p.values == values)
             .map(|p| p.name.as_str())
     }
 
-    /// Find a pattern preset whose values match exactly.
-    pub fn matching_pattern_preset(&self, values: &PatternValues) -> Option<&str> {
-        self.patterns
-            .iter()
-            .find(|p| &p.values == values)
-            .map(|p| p.name.as_str())
-    }
-
-    /// Add a stroke preset if no duplicate exists. Returns Err with the existing name.
-    pub fn try_add_stroke_preset(&mut self, preset: StrokePreset) -> Result<(), String> {
-        if let Some(name) = self.matching_stroke_preset(&preset.values) {
+    /// Add a preset if no duplicate exists. Returns Err with the existing name.
+    pub fn try_add_preset(&mut self, preset: PaintPreset) -> Result<(), String> {
+        if let Some(name) = self.matching_preset(&preset.values) {
             return Err(name.to_string());
         }
-        self.strokes.push(preset);
-        Ok(())
-    }
-
-    /// Add a pattern preset if no duplicate exists. Returns Err with the existing name.
-    pub fn try_add_pattern_preset(&mut self, preset: PatternPreset) -> Result<(), String> {
-        if let Some(name) = self.matching_pattern_preset(&preset.values) {
-            return Err(name.to_string());
-        }
-        self.patterns.push(preset);
+        self.presets.push(preset);
         Ok(())
     }
 
@@ -580,56 +528,103 @@ impl PresetLibrary {
     pub fn built_in() -> PresetLibrary {
         use crate::pressure::preset_to_custom;
 
+        let default_layout = StrokeParams::default();
+
         PresetLibrary {
-            strokes: vec![
-                StrokePreset {
+            presets: vec![
+                PaintPreset {
                     name: "flat_wide".to_string(),
-                    values: StrokeValues {
+                    values: PaintValues {
                         brush_width: 40.0,
                         load: 0.8,
                         body_wiggle: 0.15,
                         pressure_curve: preset_to_custom(PressurePreset::FadeOut),
+                        stroke_spacing: default_layout.stroke_spacing,
+                        max_stroke_length: default_layout.max_stroke_length,
+                        angle_variation: default_layout.angle_variation,
+                        max_turn_angle: default_layout.max_turn_angle,
+                        color_break_threshold: None,
+                        normal_break_threshold: None,
+                        overlap_ratio: None,
+                        overlap_dist_factor: None,
+                        color_variation: default_layout.color_variation,
                     },
                 },
-                StrokePreset {
+                PaintPreset {
                     name: "round_thin".to_string(),
-                    values: StrokeValues {
+                    values: PaintValues {
                         brush_width: 15.0,
                         load: 0.9,
                         body_wiggle: 0.1,
                         pressure_curve: preset_to_custom(PressurePreset::Taper),
+                        stroke_spacing: 1.0,
+                        max_stroke_length: 240.0,
+                        angle_variation: 5.0,
+                        max_turn_angle: 15.0,
+                        color_break_threshold: None,
+                        normal_break_threshold: None,
+                        overlap_ratio: None,
+                        overlap_dist_factor: None,
+                        color_variation: 0.1,
                     },
                 },
-                StrokePreset {
+                PaintPreset {
                     name: "dry_brush".to_string(),
-                    values: StrokeValues {
+                    values: PaintValues {
                         brush_width: 50.0,
                         load: 0.3,
                         body_wiggle: 0.2,
                         pressure_curve: preset_to_custom(PressurePreset::FadeOut),
+                        stroke_spacing: 1.2,
+                        max_stroke_length: 300.0,
+                        angle_variation: 15.0,
+                        max_turn_angle: 30.0,
+                        color_break_threshold: None,
+                        normal_break_threshold: None,
+                        overlap_ratio: None,
+                        overlap_dist_factor: None,
+                        color_variation: 0.15,
                     },
                 },
-                StrokePreset {
+                PaintPreset {
                     name: "impasto".to_string(),
-                    values: StrokeValues {
+                    values: PaintValues {
                         brush_width: 30.0,
                         load: 1.0,
                         body_wiggle: 0.1,
                         pressure_curve: preset_to_custom(PressurePreset::Bell),
+                        stroke_spacing: 0.6,
+                        max_stroke_length: 180.0,
+                        angle_variation: 3.0,
+                        max_turn_angle: 15.0,
+                        color_break_threshold: None,
+                        normal_break_threshold: None,
+                        overlap_ratio: Some(0.8),
+                        overlap_dist_factor: Some(0.2),
+                        color_variation: 0.08,
                     },
                 },
-                StrokePreset {
+                PaintPreset {
                     name: "glaze".to_string(),
-                    values: StrokeValues {
+                    values: PaintValues {
                         brush_width: 35.0,
                         load: 0.5,
                         body_wiggle: 0.1,
                         pressure_curve: preset_to_custom(PressurePreset::Uniform),
+                        stroke_spacing: 1.0,
+                        max_stroke_length: 240.0,
+                        angle_variation: 0.0,
+                        max_turn_angle: 15.0,
+                        color_break_threshold: None,
+                        normal_break_threshold: None,
+                        overlap_ratio: None,
+                        overlap_dist_factor: None,
+                        color_variation: 0.1,
                     },
                 },
-                StrokePreset {
+                PaintPreset {
                     name: "heavy_load".to_string(),
-                    values: StrokeValues {
+                    values: PaintValues {
                         brush_width: 42.0,
                         load: 1.7,
                         body_wiggle: 0.15,
@@ -660,21 +655,9 @@ impl PresetLibrary {
                                 handle_out: [1.0, 0.0],
                             },
                         ]),
-                    },
-                },
-            ],
-            patterns: vec![
-                PatternPreset {
-                    name: "uniform_horizontal".to_string(),
-                    values: PatternValues {
-                        guides: vec![GuideVertex {
-                            position: Vec2::new(0.5, 0.5),
-                            direction: Vec2::X,
-                            influence: 1.0,
-                        }],
                         stroke_spacing: 1.0,
                         max_stroke_length: 240.0,
-                        angle_variation: 0.0,
+                        angle_variation: 5.0,
                         max_turn_angle: 15.0,
                         color_break_threshold: None,
                         normal_break_threshold: None,
@@ -683,21 +666,13 @@ impl PresetLibrary {
                         color_variation: 0.1,
                     },
                 },
-                PatternPreset {
+                PaintPreset {
                     name: "crosshatch".to_string(),
-                    values: PatternValues {
-                        guides: vec![
-                            GuideVertex {
-                                position: Vec2::new(0.3, 0.5),
-                                direction: Vec2::new(1.0, 0.3).normalize(),
-                                influence: 0.6,
-                            },
-                            GuideVertex {
-                                position: Vec2::new(0.7, 0.5),
-                                direction: Vec2::new(-0.3, 1.0).normalize(),
-                                influence: 0.6,
-                            },
-                        ],
+                    values: PaintValues {
+                        brush_width: 30.0,
+                        load: 0.8,
+                        body_wiggle: 0.15,
+                        pressure_curve: preset_to_custom(PressurePreset::FadeOut),
                         stroke_spacing: 0.8,
                         max_stroke_length: 120.0,
                         angle_variation: 5.0,
@@ -709,14 +684,13 @@ impl PresetLibrary {
                         color_variation: 0.1,
                     },
                 },
-                PatternPreset {
+                PaintPreset {
                     name: "loose_organic".to_string(),
-                    values: PatternValues {
-                        guides: vec![GuideVertex {
-                            position: Vec2::new(0.5, 0.5),
-                            direction: Vec2::X,
-                            influence: 0.5,
-                        }],
+                    values: PaintValues {
+                        brush_width: 30.0,
+                        load: 0.8,
+                        body_wiggle: 0.15,
+                        pressure_curve: preset_to_custom(PressurePreset::FadeOut),
                         stroke_spacing: 1.2,
                         max_stroke_length: 300.0,
                         angle_variation: 15.0,
@@ -726,25 +700,6 @@ impl PresetLibrary {
                         overlap_ratio: None,
                         overlap_dist_factor: None,
                         color_variation: 0.15,
-                    },
-                },
-                PatternPreset {
-                    name: "tight_fill".to_string(),
-                    values: PatternValues {
-                        guides: vec![GuideVertex {
-                            position: Vec2::new(0.5, 0.5),
-                            direction: Vec2::X,
-                            influence: 0.8,
-                        }],
-                        stroke_spacing: 0.6,
-                        max_stroke_length: 180.0,
-                        angle_variation: 3.0,
-                        max_turn_angle: 15.0,
-                        color_break_threshold: None,
-                        normal_break_threshold: None,
-                        overlap_ratio: Some(0.8),
-                        overlap_dist_factor: Some(0.2),
-                        color_variation: 0.08,
                     },
                 },
             ],
@@ -894,7 +849,7 @@ impl ResolutionPreset {
 }
 
 /// Global output settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutputSettings {
     pub resolution_preset: ResolutionPreset,
     pub normal_strength: f32,
@@ -902,6 +857,13 @@ pub struct OutputSettings {
     pub normal_mode: NormalMode,
     #[serde(default)]
     pub background_mode: BackgroundMode,
+    /// Global random seed; each layer derives its own via `seed + layer_index`.
+    #[serde(default = "default_seed")]
+    pub seed: u32,
+}
+
+fn default_seed() -> u32 {
+    42
 }
 
 impl Default for OutputSettings {
@@ -911,6 +873,7 @@ impl Default for OutputSettings {
             normal_strength: 0.3,
             normal_mode: NormalMode::default(),
             background_mode: BackgroundMode::default(),
+            seed: 42,
         }
     }
 }

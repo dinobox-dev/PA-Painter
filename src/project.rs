@@ -7,7 +7,7 @@ use zip::{ZipArchive, ZipWriter};
 
 use crate::asset_io::{linear_to_srgb, LoadedMesh};
 use crate::types::{
-    OutputSettings, PaintLayer, PaintSlot, PresetLibrary, StrokePath,
+    Layer, OutputSettings, PaintLayer, PresetLibrary, StrokePath,
 };
 use crate::uv_mask::UvMask;
 
@@ -27,19 +27,44 @@ pub struct MeshRef {
     pub format: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ColorRef {
-    pub path: Option<String>,
-    pub solid_color: [f32; 3],
+/// Base color source for the project — either a solid color or a texture file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BaseColor {
+    Solid([f32; 3]),
+    Texture(String),
+}
+
+impl Default for BaseColor {
+    fn default() -> Self {
+        BaseColor::Solid([0.5, 0.5, 0.5])
+    }
+}
+
+impl BaseColor {
+    /// Returns the texture path if this is a Texture variant.
+    pub fn texture_path(&self) -> Option<&str> {
+        match self {
+            BaseColor::Texture(p) => Some(p.as_str()),
+            BaseColor::Solid(_) => None,
+        }
+    }
+
+    /// Returns the solid color, or a default gray for Texture variant.
+    pub fn solid_color(&self) -> [f32; 3] {
+        match self {
+            BaseColor::Solid(c) => *c,
+            BaseColor::Texture(_) => [0.5, 0.5, 0.5],
+        }
+    }
 }
 
 /// Snapshot of the state that was used to generate the cached paths.
 /// Compared against the current state to detect staleness.
 #[derive(Debug)]
 struct PathCacheKey {
-    slots: Vec<PaintSlot>,
+    layers: Vec<Layer>,
     resolution: u32,
-    color_ref_path: Option<String>,
+    base_color_key: String,
 }
 
 /// Full project state (in-memory representation).
@@ -47,13 +72,14 @@ struct PathCacheKey {
 pub struct Project {
     pub manifest: Manifest,
     pub mesh_ref: MeshRef,
-    pub color_ref: ColorRef,
-    pub slots: Vec<PaintSlot>,
+    pub base_color: BaseColor,
+    pub base_normal: Option<String>,
+    pub layers: Vec<Layer>,
     pub presets: PresetLibrary,
     pub settings: OutputSettings,
     pub cached_height: Option<Vec<f32>>,
     pub cached_color: Option<Vec<[f32; 4]>>,
-    /// Runtime path cache — one entry per slot in order-sorted sequence.
+    /// Runtime path cache — one entry per layer in order-sorted sequence.
     /// Not serialized to disk.
     pub cached_paths: Option<Vec<Vec<StrokePath>>>,
     /// Key used to validate `cached_paths` (private).
@@ -64,7 +90,7 @@ impl Default for Project {
     fn default() -> Self {
         Self {
             manifest: Manifest {
-                version: "3".to_string(),
+                version: "4".to_string(),
                 app_name: "PracticalArcanaPainter".to_string(),
                 created_at: String::new(),
                 modified_at: String::new(),
@@ -73,11 +99,9 @@ impl Default for Project {
                 path: String::new(),
                 format: String::new(),
             },
-            color_ref: ColorRef {
-                path: None,
-                solid_color: [0.5, 0.5, 0.5],
-            },
-            slots: Vec::new(),
+            base_color: BaseColor::default(),
+            base_normal: None,
+            layers: Vec::new(),
             presets: PresetLibrary::built_in(),
             settings: OutputSettings::default(),
             cached_height: None,
@@ -88,24 +112,37 @@ impl Default for Project {
     }
 }
 
+fn base_color_cache_key(bc: &BaseColor) -> String {
+    match bc {
+        BaseColor::Solid(c) => format!("solid:{:.4},{:.4},{:.4}", c[0], c[1], c[2]),
+        BaseColor::Texture(p) => format!("tex:{}", p),
+    }
+}
+
 impl Project {
-    /// Convert all slots to PaintLayers for downstream pipeline compatibility.
+    /// Convert all layers to PaintLayers for downstream pipeline compatibility.
+    /// Each layer gets `seed + layer_index` for unique randomness.
     pub fn paint_layers(&self) -> Vec<PaintLayer> {
-        self.slots.iter().map(|s| s.to_paint_layer()).collect()
+        let base_seed = self.settings.seed;
+        self.layers
+            .iter()
+            .enumerate()
+            .map(|(i, l)| l.to_paint_layer_with_seed(base_seed.wrapping_add(i as u32)))
+            .collect()
     }
 
-    /// Build UV masks for each slot from the loaded mesh.
-    /// Returns `None` for `__full_uv__` groups (paint entire UV space).
+    /// Build UV masks for each layer from the loaded mesh.
+    /// Returns `None` for `__all__` groups (paint entire UV space).
     pub fn build_masks(&self, mesh: &LoadedMesh, resolution: u32) -> Vec<Option<UvMask>> {
-        self.slots
+        self.layers
             .iter()
-            .map(|slot| {
-                if slot.group_name == "__full_uv__" {
+            .map(|layer| {
+                if layer.group_name == "__all__" {
                     None
                 } else {
                     mesh.groups
                         .iter()
-                        .find(|g| g.name == slot.group_name)
+                        .find(|g| g.name == layer.group_name)
                         .map(|group| {
                             let mut mask = UvMask::from_mesh_group(mesh, group, resolution);
                             mask.dilate(2);
@@ -116,8 +153,8 @@ impl Project {
             .collect()
     }
 
-    /// Return cached paths if they are still valid for the current slots,
-    /// resolution, and color texture path. Returns `None` on cache miss.
+    /// Return cached paths if they are still valid for the current layers,
+    /// resolution, and base color. Returns `None` on cache miss.
     pub fn cached_paths_if_valid(
         &self,
         resolution: u32,
@@ -125,8 +162,8 @@ impl Project {
         let key = self.path_cache_key.as_ref()?;
         let paths = self.cached_paths.as_ref()?;
         if key.resolution == resolution
-            && key.slots == self.slots
-            && key.color_ref_path == self.color_ref.path
+            && key.layers == self.layers
+            && key.base_color_key == base_color_cache_key(&self.base_color)
         {
             Some(paths.as_slice())
         } else {
@@ -138,9 +175,9 @@ impl Project {
     /// current project state that produced them.
     pub fn set_cached_paths(&mut self, paths: Vec<Vec<StrokePath>>, resolution: u32) {
         self.path_cache_key = Some(PathCacheKey {
-            slots: self.slots.clone(),
+            layers: self.layers.clone(),
             resolution,
-            color_ref_path: self.color_ref.path.clone(),
+            base_color_key: base_color_cache_key(&self.base_color),
         });
         self.cached_paths = Some(paths);
     }
@@ -213,7 +250,7 @@ fn generate_thumbnail(project: &Project) -> Option<Vec<u8>> {
 
 // ── Save ──
 
-/// Save a project to a .pap file (v3 format).
+/// Save a project to a .pap file (v4 format).
 pub fn save_project(project: &Project, path: &Path) -> Result<(), ProjectError> {
     let file = std::fs::File::create(path)?;
     let mut zip = ZipWriter::new(file);
@@ -230,17 +267,25 @@ pub fn save_project(project: &Project, path: &Path) -> Result<(), ProjectError> 
     zip.start_file("mesh_ref.json", options)?;
     zip.write_all(mesh_json.as_bytes())?;
 
-    // color_ref.json
-    let color_json = serde_json::to_string_pretty(&project.color_ref)?;
-    zip.start_file("color_ref.json", options)?;
-    zip.write_all(color_json.as_bytes())?;
+    // base_sources.json (v4: replaces color_ref.json)
+    #[derive(Serialize)]
+    struct BaseSources<'a> {
+        base_color: &'a BaseColor,
+        base_normal: &'a Option<String>,
+    }
+    let base_json = serde_json::to_string_pretty(&BaseSources {
+        base_color: &project.base_color,
+        base_normal: &project.base_normal,
+    })?;
+    zip.start_file("base_sources.json", options)?;
+    zip.write_all(base_json.as_bytes())?;
 
-    // slots.json (v3)
-    let slots_json = serde_json::to_string_pretty(&project.slots)?;
-    zip.start_file("slots.json", options)?;
-    zip.write_all(slots_json.as_bytes())?;
+    // layer_stack.json (v4: replaces slots.json)
+    let layers_json = serde_json::to_string_pretty(&project.layers)?;
+    zip.start_file("layer_stack.json", options)?;
+    zip.write_all(layers_json.as_bytes())?;
 
-    // presets.json (v3)
+    // presets.json
     let presets_json = serde_json::to_string_pretty(&project.presets)?;
     zip.start_file("presets.json", options)?;
     zip.write_all(presets_json.as_bytes())?;
@@ -276,10 +321,7 @@ pub fn save_project(project: &Project, path: &Path) -> Result<(), ProjectError> 
 
 // ── Load ──
 
-/// Load a project from a .pap file.
-///
-/// Supports v3 (slots.json + presets.json), v2 (layers.json),
-/// and v1 (regions.json) formats with automatic migration.
+/// Load a project from a .pap file (v4 format).
 pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     let file = std::fs::File::open(path)?;
     let mut archive = ZipArchive::new(file)?;
@@ -296,30 +338,21 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     // mesh_ref.json (required)
     let mesh_ref: MeshRef = read_json_entry(&mut archive, "mesh_ref.json")?;
 
-    // color_ref.json (required)
-    let color_ref: ColorRef = read_json_entry(&mut archive, "color_ref.json")?;
+    // base_sources.json (v4)
+    #[derive(Deserialize)]
+    struct BaseSources {
+        base_color: BaseColor,
+        #[serde(default)]
+        base_normal: Option<String>,
+    }
+    let base: BaseSources = read_json_entry(&mut archive, "base_sources.json")?;
 
-    // Try v3 (slots.json) first, then v2 (layers.json), then v1 (regions.json)
-    let (slots, presets) = match read_json_entry::<Vec<PaintSlot>>(&mut archive, "slots.json") {
-        Ok(slots) => {
-            let presets: PresetLibrary =
-                read_json_entry(&mut archive, "presets.json").unwrap_or_default();
-            (slots, presets)
-        }
-        Err(ProjectError::Zip(zip::result::ZipError::FileNotFound)) => {
-            // Fall back to v2 layers.json or v1 regions.json
-            let layers: Vec<PaintLayer> =
-                match read_json_entry(&mut archive, "layers.json") {
-                    Ok(layers) => layers,
-                    Err(ProjectError::Zip(zip::result::ZipError::FileNotFound)) => {
-                        read_json_entry(&mut archive, "regions.json")?
-                    }
-                    Err(e) => return Err(e),
-                };
-            migrate_v2_to_v3(&layers)
-        }
-        Err(e) => return Err(e),
-    };
+    // layer_stack.json (v4)
+    let layers: Vec<Layer> = read_json_entry(&mut archive, "layer_stack.json")?;
+
+    // presets.json
+    let presets: PresetLibrary =
+        read_json_entry(&mut archive, "presets.json").unwrap_or_default();
 
     // settings.json (required)
     let settings: OutputSettings = read_json_entry(&mut archive, "settings.json")?;
@@ -333,8 +366,9 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     Ok(Project {
         manifest,
         mesh_ref,
-        color_ref,
-        slots,
+        base_color: base.base_color,
+        base_normal: base.base_normal,
+        layers,
         presets,
         settings,
         cached_height,
@@ -342,27 +376,6 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
         cached_paths: None,
         path_cache_key: None,
     })
-}
-
-/// Migrate v2 PaintLayers to v3 PaintSlots + PresetLibrary.
-fn migrate_v2_to_v3(layers: &[PaintLayer]) -> (Vec<PaintSlot>, PresetLibrary) {
-    let slots: Vec<PaintSlot> = layers
-        .iter()
-        .map(PaintSlot::from_paint_layer)
-        .collect();
-    let mut presets = PresetLibrary::built_in();
-    for (i, slot) in slots.iter().enumerate() {
-        use crate::types::{StrokePreset, PatternPreset};
-        let _ = presets.try_add_stroke_preset(StrokePreset {
-            name: format!("migrated_{}_stroke", layers[i].name),
-            values: slot.stroke.clone(),
-        });
-        let _ = presets.try_add_pattern_preset(PatternPreset {
-            name: format!("migrated_{}_pattern", layers[i].name),
-            values: slot.pattern.clone(),
-        });
-    }
-    (slots, presets)
 }
 
 // ── Helpers ──
@@ -400,14 +413,14 @@ fn read_bincode_entry_optional<T: serde::de::DeserializeOwned>(
 mod tests {
     use super::*;
     use crate::types::{
-        GuideVertex, OutputSettings, PaintLayer, PaintSlot, PatternValues,
-        PressureCurve, PressurePreset, ResolutionPreset, StrokeParams, StrokeValues,
+        Guide, GuideType, Layer, OutputSettings, PaintValues,
+        PressureCurve, PressurePreset, ResolutionPreset,
     };
     use glam::Vec2;
 
     fn make_manifest() -> Manifest {
         Manifest {
-            version: "3.0.0".to_string(),
+            version: "4".to_string(),
             app_name: "Practical Arcana Painter".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             modified_at: "2026-01-01T00:00:00Z".to_string(),
@@ -421,33 +434,27 @@ mod tests {
         }
     }
 
-    fn make_color_ref() -> ColorRef {
-        ColorRef {
-            path: Some("textures/base_color.png".to_string()),
-            solid_color: [1.0, 1.0, 1.0],
-        }
-    }
-
-    fn make_test_slot(group_name: &str, order: i32, guide_count: usize) -> PaintSlot {
-        let guides: Vec<GuideVertex> = (0..guide_count)
-            .map(|i| GuideVertex {
+    fn make_test_layer(group_name: &str, order: i32, guide_count: usize) -> Layer {
+        let guides: Vec<Guide> = (0..guide_count)
+            .map(|i| Guide {
+                guide_type: GuideType::Directional,
                 position: Vec2::new(0.1 * i as f32, 0.2 * i as f32),
                 direction: Vec2::new(1.0, 0.0),
                 influence: 0.2 + 0.01 * i as f32,
+                strength: 1.0,
             })
             .collect();
 
-        PaintSlot {
-            group_name: group_name.to_string(),
+        Layer {
+            name: group_name.to_string(),
+            visible: true,
             order,
-            stroke: StrokeValues {
+            group_name: group_name.to_string(),
+            paint: PaintValues {
                 brush_width: 20.0 + order as f32,
                 load: 0.7,
                 body_wiggle: 0.1,
                 pressure_curve: PressureCurve::Preset(PressurePreset::FadeOut),
-            },
-            pattern: PatternValues {
-                guides,
                 stroke_spacing: 1.0,
                 max_stroke_length: 200.0,
                 angle_variation: 5.0,
@@ -458,7 +465,7 @@ mod tests {
                 overlap_dist_factor: None,
                 color_variation: 0.05,
             },
-            seed: 100 + order as u32,
+            guides,
         }
     }
 
@@ -466,8 +473,9 @@ mod tests {
         Project {
             manifest: make_manifest(),
             mesh_ref: make_mesh_ref(),
-            color_ref: make_color_ref(),
-            slots: vec![],
+            base_color: BaseColor::Texture("textures/base_color.png".to_string()),
+            base_normal: None,
+            layers: vec![],
             presets: PresetLibrary::built_in(),
             settings: OutputSettings::default(),
             cached_height: None,
@@ -477,15 +485,16 @@ mod tests {
         }
     }
 
-    fn make_project_with_slots() -> Project {
+    fn make_project_with_layers() -> Project {
         Project {
             manifest: make_manifest(),
             mesh_ref: make_mesh_ref(),
-            color_ref: make_color_ref(),
-            slots: vec![
-                make_test_slot("skin", 0, 3),
-                make_test_slot("armor", 1, 5),
-                make_test_slot("cloth", 2, 2),
+            base_color: BaseColor::Texture("textures/base_color.png".to_string()),
+            base_normal: None,
+            layers: vec![
+                make_test_layer("skin", 0, 3),
+                make_test_layer("armor", 1, 5),
+                make_test_layer("cloth", 2, 2),
             ],
             presets: PresetLibrary::built_in(),
             settings: OutputSettings {
@@ -511,42 +520,35 @@ mod tests {
     #[test]
     fn round_trip_empty_project() {
         let project = make_empty_project();
-        let path = temp_pap_path("empty_v3.pap");
+        let path = temp_pap_path("empty_v4.pap");
 
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
-        assert_eq!(loaded.manifest.version, "3.0.0");
+        assert_eq!(loaded.manifest.version, "4");
         assert_eq!(loaded.manifest.app_name, "Practical Arcana Painter");
-        assert_eq!(loaded.slots.len(), 0);
+        assert_eq!(loaded.layers.len(), 0);
         assert!(loaded.cached_height.is_none());
         assert!(loaded.cached_color.is_none());
     }
 
     #[test]
-    fn round_trip_with_slots() {
-        let project = make_project_with_slots();
-        let path = temp_pap_path("with_slots.pap");
+    fn round_trip_with_layers() {
+        let project = make_project_with_layers();
+        let path = temp_pap_path("with_layers_v4.pap");
 
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
-        assert_eq!(loaded.slots.len(), 3);
+        assert_eq!(loaded.layers.len(), 3);
 
-        for (a, b) in project.slots.iter().zip(loaded.slots.iter()) {
+        for (a, b) in project.layers.iter().zip(loaded.layers.iter()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.visible, b.visible);
             assert_eq!(a.group_name, b.group_name);
             assert_eq!(a.order, b.order);
-            assert_eq!(a.stroke.brush_width, b.stroke.brush_width);
-            assert_eq!(a.stroke.load, b.stroke.load);
-            assert_eq!(a.stroke.body_wiggle, b.stroke.body_wiggle);
-            assert_eq!(a.stroke.pressure_curve, b.stroke.pressure_curve);
-            assert_eq!(a.pattern.stroke_spacing, b.pattern.stroke_spacing);
-            assert_eq!(a.pattern.color_variation, b.pattern.color_variation);
-            assert_eq!(a.pattern.max_stroke_length, b.pattern.max_stroke_length);
-            assert_eq!(a.pattern.angle_variation, b.pattern.angle_variation);
-            assert_eq!(a.pattern.max_turn_angle, b.pattern.max_turn_angle);
-            assert_eq!(a.seed, b.seed);
-            assert_eq!(a.pattern.guides.len(), b.pattern.guides.len());
+            assert_eq!(a.paint, b.paint);
+            assert_eq!(a.guides.len(), b.guides.len());
         }
     }
 
@@ -563,11 +565,11 @@ mod tests {
             })
             .collect();
 
-        let mut project = make_project_with_slots();
+        let mut project = make_project_with_layers();
         project.cached_height = Some(height.clone());
         project.cached_color = Some(color.clone());
 
-        let path = temp_pap_path("with_cache_v3.pap");
+        let path = temp_pap_path("with_cache_v4.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
@@ -586,8 +588,8 @@ mod tests {
 
     #[test]
     fn round_trip_without_cache() {
-        let project = make_project_with_slots();
-        let path = temp_pap_path("no_cache_v3.pap");
+        let project = make_project_with_layers();
+        let path = temp_pap_path("no_cache_v4.pap");
 
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
@@ -599,22 +601,23 @@ mod tests {
     #[test]
     fn round_trip_complex_guides() {
         let mut project = make_empty_project();
-        project.slots = vec![make_test_slot("detailed", 0, 10)];
+        project.layers = vec![make_test_layer("detailed", 0, 10)];
 
-        let path = temp_pap_path("complex_guides_v3.pap");
+        let path = temp_pap_path("complex_guides_v4.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
-        assert_eq!(loaded.slots[0].pattern.guides.len(), 10);
-        for (a, b) in project.slots[0]
-            .pattern
+        assert_eq!(loaded.layers[0].guides.len(), 10);
+        for (a, b) in project.layers[0]
             .guides
             .iter()
-            .zip(loaded.slots[0].pattern.guides.iter())
+            .zip(loaded.layers[0].guides.iter())
         {
             assert_eq!(a.position, b.position);
             assert_eq!(a.direction, b.direction);
             assert_eq!(a.influence, b.influence);
+            assert_eq!(a.guide_type, b.guide_type);
+            assert_eq!(a.strength, b.strength);
         }
     }
 
@@ -622,8 +625,8 @@ mod tests {
 
     #[test]
     fn valid_zip_structure() {
-        let project = make_project_with_slots();
-        let path = temp_pap_path("zip_structure_v3.pap");
+        let project = make_project_with_layers();
+        let path = temp_pap_path("zip_structure_v4.pap");
         save_project(&project, &path).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -632,16 +635,16 @@ mod tests {
         let names: Vec<&str> = archive.file_names().collect();
         assert!(names.contains(&"manifest.json"), "missing manifest.json");
         assert!(names.contains(&"mesh_ref.json"), "missing mesh_ref.json");
-        assert!(names.contains(&"color_ref.json"), "missing color_ref.json");
-        assert!(names.contains(&"slots.json"), "missing slots.json");
+        assert!(names.contains(&"base_sources.json"), "missing base_sources.json");
+        assert!(names.contains(&"layer_stack.json"), "missing layer_stack.json");
         assert!(names.contains(&"presets.json"), "missing presets.json");
         assert!(names.contains(&"settings.json"), "missing settings.json");
     }
 
     #[test]
     fn json_readable() {
-        let project = make_project_with_slots();
-        let path = temp_pap_path("json_readable_v3.pap");
+        let project = make_project_with_layers();
+        let path = temp_pap_path("json_readable_v4.pap");
         save_project(&project, &path).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -653,20 +656,8 @@ mod tests {
 
         assert!(buf.contains('\n'), "JSON should be pretty-printed");
         let parsed: serde_json::Value = serde_json::from_str(&buf).unwrap();
-        assert_eq!(parsed["version"], "3.0.0");
+        assert_eq!(parsed["version"], "4");
         assert_eq!(parsed["app_name"], "Practical Arcana Painter");
-    }
-
-    #[test]
-    fn version_field_preserved() {
-        let mut project = make_empty_project();
-        project.manifest.version = "3.1.0".to_string();
-
-        let path = temp_pap_path("version_test_v3.pap");
-        save_project(&project, &path).unwrap();
-        let loaded = load_project(&path).unwrap();
-
-        assert_eq!(loaded.manifest.version, "3.1.0");
     }
 
     #[test]
@@ -678,7 +669,7 @@ mod tests {
             ..OutputSettings::default()
         };
 
-        let path = temp_pap_path("settings_test_v3.pap");
+        let path = temp_pap_path("settings_test_v4.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
@@ -691,19 +682,45 @@ mod tests {
     }
 
     #[test]
-    fn color_ref_no_texture() {
+    fn base_color_solid() {
         let mut project = make_empty_project();
-        project.color_ref = ColorRef {
-            path: None,
-            solid_color: [0.5, 0.3, 0.8],
-        };
+        project.base_color = BaseColor::Solid([0.5, 0.3, 0.8]);
 
-        let path = temp_pap_path("no_texture_v3.pap");
+        let path = temp_pap_path("solid_color_v4.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
-        assert!(loaded.color_ref.path.is_none());
-        assert_eq!(loaded.color_ref.solid_color, [0.5, 0.3, 0.8]);
+        match loaded.base_color {
+            BaseColor::Solid(c) => assert_eq!(c, [0.5, 0.3, 0.8]),
+            _ => panic!("expected Solid base color"),
+        }
+    }
+
+    #[test]
+    fn base_color_texture() {
+        let mut project = make_empty_project();
+        project.base_color = BaseColor::Texture("textures/foo.png".to_string());
+
+        let path = temp_pap_path("texture_color_v4.pap");
+        save_project(&project, &path).unwrap();
+        let loaded = load_project(&path).unwrap();
+
+        match loaded.base_color {
+            BaseColor::Texture(p) => assert_eq!(p, "textures/foo.png"),
+            _ => panic!("expected Texture base color"),
+        }
+    }
+
+    #[test]
+    fn base_normal_round_trip() {
+        let mut project = make_empty_project();
+        project.base_normal = Some("normals/base.png".to_string());
+
+        let path = temp_pap_path("base_normal_v4.pap");
+        save_project(&project, &path).unwrap();
+        let loaded = load_project(&path).unwrap();
+
+        assert_eq!(loaded.base_normal, Some("normals/base.png".to_string()));
     }
 
     // ── Thumbnail Test ──
@@ -717,7 +734,7 @@ mod tests {
         let mut project = make_empty_project();
         project.cached_color = Some(color);
 
-        let path = temp_pap_path("with_thumbnail_v3.pap");
+        let path = temp_pap_path("with_thumbnail_v4.pap");
         save_project(&project, &path).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -732,7 +749,7 @@ mod tests {
     #[test]
     fn no_thumbnail_without_cache() {
         let project = make_empty_project();
-        let path = temp_pap_path("no_thumbnail_v3.pap");
+        let path = temp_pap_path("no_thumbnail_v4.pap");
         save_project(&project, &path).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -758,7 +775,7 @@ mod tests {
 
     #[test]
     fn load_invalid_zip() {
-        let path = temp_pap_path("invalid_v3.pap");
+        let path = temp_pap_path("invalid_v4.pap");
         std::fs::write(&path, b"this is not a zip file").unwrap();
 
         let result = load_project(&path);
@@ -771,7 +788,7 @@ mod tests {
 
     #[test]
     fn load_missing_manifest() {
-        let path = temp_pap_path("no_manifest_v3.pap");
+        let path = temp_pap_path("no_manifest_v4.pap");
         {
             let file = std::fs::File::create(&path).unwrap();
             let mut zip = ZipWriter::new(file);
@@ -791,73 +808,28 @@ mod tests {
         }
     }
 
-    #[test]
-    fn load_corrupt_json() {
-        let path = temp_pap_path("corrupt_json_v3.pap");
-        {
-            let file = std::fs::File::create(&path).unwrap();
-            let mut zip = ZipWriter::new(file);
-            let options = SimpleFileOptions::default();
-
-            let manifest = serde_json::to_string_pretty(&make_manifest()).unwrap();
-            zip.start_file("manifest.json", options).unwrap();
-            zip.write_all(manifest.as_bytes()).unwrap();
-
-            let mesh = serde_json::to_string_pretty(&make_mesh_ref()).unwrap();
-            zip.start_file("mesh_ref.json", options).unwrap();
-            zip.write_all(mesh.as_bytes()).unwrap();
-
-            let color = serde_json::to_string_pretty(&make_color_ref()).unwrap();
-            zip.start_file("color_ref.json", options).unwrap();
-            zip.write_all(color.as_bytes()).unwrap();
-
-            // Invalid JSON in slots.json
-            zip.start_file("slots.json", options).unwrap();
-            zip.write_all(b"{ this is not valid json !!!").unwrap();
-
-            let settings = serde_json::to_string_pretty(&OutputSettings::default()).unwrap();
-            zip.start_file("settings.json", options).unwrap();
-            zip.write_all(settings.as_bytes()).unwrap();
-
-            zip.finish().unwrap();
-        }
-
-        let result = load_project(&path);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            ProjectError::Json(_) => {}
-            e => panic!("expected Json error, got: {e:?}"),
-        }
-    }
-
     // ── Data Integrity Test ──
 
     #[test]
     fn round_trip_integrity() {
-        let project = make_project_with_slots();
-        let path = temp_pap_path("integrity_v3.pap");
+        let project = make_project_with_layers();
+        let path = temp_pap_path("integrity_v4.pap");
 
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
         assert_eq!(project.manifest.version, loaded.manifest.version);
         assert_eq!(project.manifest.app_name, loaded.manifest.app_name);
-        assert_eq!(project.manifest.created_at, loaded.manifest.created_at);
-        assert_eq!(project.manifest.modified_at, loaded.manifest.modified_at);
-
         assert_eq!(project.mesh_ref.path, loaded.mesh_ref.path);
         assert_eq!(project.mesh_ref.format, loaded.mesh_ref.format);
 
-        assert_eq!(project.color_ref.path, loaded.color_ref.path);
-        assert_eq!(project.color_ref.solid_color, loaded.color_ref.solid_color);
-
-        assert_eq!(project.slots.len(), loaded.slots.len());
-        for (a, b) in project.slots.iter().zip(loaded.slots.iter()) {
+        assert_eq!(project.layers.len(), loaded.layers.len());
+        for (a, b) in project.layers.iter().zip(loaded.layers.iter()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.visible, b.visible);
             assert_eq!(a.group_name, b.group_name);
             assert_eq!(a.order, b.order);
-            assert_eq!(a.stroke, b.stroke);
-            assert_eq!(a.pattern, b.pattern);
-            assert_eq!(a.seed, b.seed);
+            assert_eq!(a.paint, b.paint);
         }
 
         assert_eq!(
@@ -870,213 +842,20 @@ mod tests {
         );
     }
 
-    #[test]
-    fn missing_cache_in_saved_zip_loads_as_none() {
-        let res = 4u32;
-        let mut project = make_empty_project();
-        project.cached_height = Some(vec![0.5; (res * res) as usize]);
-        project.cached_color = Some(vec![[0.5, 0.5, 0.5, 1.0]; (res * res) as usize]);
-
-        let path_with_cache = temp_pap_path("has_cache_v3.pap");
-        save_project(&project, &path_with_cache).unwrap();
-
-        let path_no_cache = temp_pap_path("stripped_cache_v3.pap");
-        {
-            let src_file = std::fs::File::open(&path_with_cache).unwrap();
-            let mut src_archive = ZipArchive::new(src_file).unwrap();
-
-            let dst_file = std::fs::File::create(&path_no_cache).unwrap();
-            let mut dst_zip = ZipWriter::new(dst_file);
-            let options = SimpleFileOptions::default();
-
-            for name in &[
-                "manifest.json",
-                "mesh_ref.json",
-                "color_ref.json",
-                "slots.json",
-                "presets.json",
-                "settings.json",
-            ] {
-                let mut entry = src_archive.by_name(name).unwrap();
-                let mut buf = Vec::new();
-                entry.read_to_end(&mut buf).unwrap();
-                dst_zip.start_file(*name, options).unwrap();
-                dst_zip.write_all(&buf).unwrap();
-            }
-            dst_zip.finish().unwrap();
-        }
-
-        let loaded = load_project(&path_no_cache).unwrap();
-        assert!(loaded.cached_height.is_none());
-        assert!(loaded.cached_color.is_none());
-    }
-
-    // ── v2 → v3 Migration Tests ──
-
-    #[test]
-    fn load_v2_layers_json_migrates_to_slots() {
-        let path = temp_pap_path("v2_migration.pap");
-        {
-            let file = std::fs::File::create(&path).unwrap();
-            let mut zip = ZipWriter::new(file);
-            let options = SimpleFileOptions::default();
-
-            let manifest = Manifest {
-                version: "2.0.0".to_string(),
-                app_name: "Practical Arcana Painter".to_string(),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                modified_at: "2026-01-01T00:00:00Z".to_string(),
-            };
-            zip.start_file("manifest.json", options).unwrap();
-            zip.write_all(serde_json::to_string_pretty(&manifest).unwrap().as_bytes()).unwrap();
-
-            zip.start_file("mesh_ref.json", options).unwrap();
-            zip.write_all(serde_json::to_string_pretty(&make_mesh_ref()).unwrap().as_bytes()).unwrap();
-
-            zip.start_file("color_ref.json", options).unwrap();
-            zip.write_all(serde_json::to_string_pretty(&make_color_ref()).unwrap().as_bytes()).unwrap();
-
-            // v2 format: layers.json
-            let layer = PaintLayer {
-                name: "skin".to_string(),
-                order: 0,
-                params: StrokeParams {
-                    brush_width: 30.0,
-                    load: 0.8,
-                    body_wiggle: 0.15,
-                    stroke_spacing: 1.0,
-                    pressure_curve: PressureCurve::Preset(PressurePreset::FadeOut),
-                    color_variation: 0.1,
-                    max_stroke_length: 240.0,
-                    angle_variation: 5.0,
-                    max_turn_angle: 15.0,
-                    color_break_threshold: None,
-                    normal_break_threshold: None,
-                    overlap_ratio: None,
-                    overlap_dist_factor: None,
-                    seed: 42,
-                },
-                guides: vec![GuideVertex {
-                    position: Vec2::new(0.5, 0.5),
-                    direction: Vec2::X,
-                    influence: 1.5,
-                }],
-            };
-
-            zip.start_file("layers.json", options).unwrap();
-            zip.write_all(serde_json::to_string_pretty(&[&layer]).unwrap().as_bytes()).unwrap();
-
-            zip.start_file("settings.json", options).unwrap();
-            zip.write_all(serde_json::to_string_pretty(&OutputSettings::default()).unwrap().as_bytes()).unwrap();
-
-            zip.finish().unwrap();
-        }
-
-        let loaded = load_project(&path).unwrap();
-
-        // Should have been migrated to slots
-        assert_eq!(loaded.slots.len(), 1);
-        assert_eq!(loaded.slots[0].group_name, "__full_uv__");
-        assert_eq!(loaded.slots[0].order, 0);
-        assert_eq!(loaded.slots[0].stroke.brush_width, 30.0);
-        assert_eq!(loaded.slots[0].stroke.load, 0.8);
-        assert_eq!(loaded.slots[0].pattern.guides.len(), 1);
-        assert_eq!(loaded.slots[0].seed, 42);
-
-        // Should have built-in + migrated presets
-        assert!(!loaded.presets.strokes.is_empty());
-        assert!(!loaded.presets.patterns.is_empty());
-    }
-
-    // ── v1 Compatibility Test ──
-
-    #[test]
-    fn load_v1_regions_json() {
-        // Create a .pap with regions.json (v1 format) instead of layers.json
-        let path = temp_pap_path("v1_compat_v3.pap");
-        {
-            let file = std::fs::File::create(&path).unwrap();
-            let mut zip = ZipWriter::new(file);
-            let options = SimpleFileOptions::default();
-
-            let manifest = Manifest {
-                version: "1.0.0".to_string(),
-                ..make_manifest()
-            };
-            zip.start_file("manifest.json", options).unwrap();
-            zip.write_all(serde_json::to_string_pretty(&manifest).unwrap().as_bytes()).unwrap();
-
-            let mesh = serde_json::to_string_pretty(&make_mesh_ref()).unwrap();
-            zip.start_file("mesh_ref.json", options).unwrap();
-            zip.write_all(mesh.as_bytes()).unwrap();
-
-            let color = serde_json::to_string_pretty(&make_color_ref()).unwrap();
-            zip.start_file("color_ref.json", options).unwrap();
-            zip.write_all(color.as_bytes()).unwrap();
-
-            // v1 format: regions.json with id and mask fields
-            let regions_json = r#"[
-                {
-                    "id": 0,
-                    "name": "skin",
-                    "mask": [{"vertices": [[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]]}],
-                    "order": 0,
-                    "params": {
-                        "brush_width": 30.0, "load": 0.8,
-                        "body_wiggle": 0.15, "stroke_spacing": 1.0,
-                        "pressure_curve": {"Preset": "FadeOut"}, "color_variation": 0.1,
-                        "max_stroke_length": 240.0, "angle_variation": 5.0,
-                        "max_turn_angle": 15.0, "seed": 42
-                    },
-                    "guides": [{"position": [0.5, 0.5], "direction": [1.0, 0.0], "influence": 1.5}]
-                }
-            ]"#;
-            zip.start_file("regions.json", options).unwrap();
-            zip.write_all(regions_json.as_bytes()).unwrap();
-
-            let settings = serde_json::to_string_pretty(&OutputSettings::default()).unwrap();
-            zip.start_file("settings.json", options).unwrap();
-            zip.write_all(settings.as_bytes()).unwrap();
-
-            zip.finish().unwrap();
-        }
-
-        let loaded = load_project(&path).unwrap();
-        // v1 regions are migrated through PaintLayer → PaintSlot
-        assert_eq!(loaded.slots.len(), 1);
-        assert_eq!(loaded.slots[0].group_name, "__full_uv__");
-        assert_eq!(loaded.slots[0].order, 0);
-        assert_eq!(loaded.slots[0].stroke.brush_width, 30.0);
-        assert_eq!(loaded.slots[0].pattern.guides.len(), 1);
-    }
-
     // ── Adapter Tests ──
 
     #[test]
     fn paint_layers_adapter() {
-        let project = make_project_with_slots();
+        let project = make_project_with_layers();
         let layers = project.paint_layers();
 
         assert_eq!(layers.len(), 3);
-        for (slot, layer) in project.slots.iter().zip(layers.iter()) {
-            assert_eq!(layer.name, slot.group_name);
-            assert_eq!(layer.order, slot.order);
-            assert_eq!(layer.params.brush_width, slot.stroke.brush_width);
-            assert_eq!(layer.params.seed, slot.seed);
-            assert_eq!(layer.guides.len(), slot.pattern.guides.len());
+        for (layer_def, paint_layer) in project.layers.iter().zip(layers.iter()) {
+            assert_eq!(paint_layer.name, layer_def.group_name);
+            assert_eq!(paint_layer.order, layer_def.order);
+            assert_eq!(paint_layer.params.brush_width, layer_def.paint.brush_width);
+            assert_eq!(paint_layer.guides.len(), layer_def.guides.len());
         }
-    }
-
-    #[test]
-    fn slot_round_trip_through_paint_layer() {
-        let slot = make_test_slot("test_group", 5, 3);
-        let layer = slot.to_paint_layer();
-        let slot2 = PaintSlot::from_paint_layer(&layer);
-
-        assert_eq!(slot.stroke, slot2.stroke);
-        assert_eq!(slot.pattern, slot2.pattern);
-        assert_eq!(slot.seed, slot2.seed);
-        assert_eq!(slot.order, slot2.order);
     }
 
     // ── Presets Round-Trip ──
@@ -1086,16 +865,27 @@ mod tests {
         let mut project = make_empty_project();
         project.presets = PresetLibrary::built_in();
 
-        let path = temp_pap_path("presets_rt.pap");
+        let path = temp_pap_path("presets_rt_v4.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
-        assert_eq!(loaded.presets.strokes.len(), project.presets.strokes.len());
-        assert_eq!(loaded.presets.patterns.len(), project.presets.patterns.len());
+        assert_eq!(loaded.presets.presets.len(), project.presets.presets.len());
 
-        for (a, b) in project.presets.strokes.iter().zip(loaded.presets.strokes.iter()) {
+        for (a, b) in project.presets.presets.iter().zip(loaded.presets.presets.iter()) {
             assert_eq!(a.name, b.name);
             assert_eq!(a.values, b.values);
         }
+    }
+
+    #[test]
+    fn visible_defaults_to_true() {
+        let mut project = make_empty_project();
+        project.layers = vec![make_test_layer("test", 0, 1)];
+
+        let path = temp_pap_path("visible_default_v4.pap");
+        save_project(&project, &path).unwrap();
+        let loaded = load_project(&path).unwrap();
+
+        assert!(loaded.layers[0].visible);
     }
 }

@@ -6,10 +6,11 @@ fn make_layer() -> PaintLayer {
         name: "layer_0".to_string(),
         order: 0,
         params: StrokeParams::default(),
-        guides: vec![GuideVertex {
+        guides: vec![Guide {
             position: glam::Vec2::new(0.5, 0.5),
             direction: glam::Vec2::X,
             influence: 1.5,
+            ..Guide::default()
         }],
     }
 }

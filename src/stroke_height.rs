@@ -98,7 +98,9 @@ pub fn generate_stroke_height(
     let pressure_curve = &params.pressure_curve;
 
     let local_width = stroke_length_px;
-    let local_height = brush_width_px;
+    let wiggle_amplitude = body_wiggle * brush_width_px as f32;
+    let wiggle_margin = wiggle_amplitude.ceil() as usize;
+    let local_height = brush_width_px + 2 * wiggle_margin;
 
     let mut data = vec![0.0f32; local_height * local_width];
 
@@ -111,7 +113,6 @@ pub fn generate_stroke_height(
     }
 
     let perlin_wiggle = Perlin::new(seed.wrapping_add(2));
-    let wiggle_amplitude = body_wiggle * brush_width_px as f32;
 
     for x in 0..stroke_length_px {
         let t = x as f32 / stroke_length_px as f32;
@@ -126,14 +127,15 @@ pub fn generate_stroke_height(
         } else {
             0.0
         };
-        let center = brush_width_px as f32 * 0.5 + wiggle_offset;
+        // Center within padded texture: margin + half brush + wiggle
+        let center = wiggle_margin as f32 + brush_width_px as f32 * 0.5 + wiggle_offset;
 
         let active_start = (center - active_width * 0.5)
             .floor()
-            .clamp(0.0, brush_width_px as f32) as usize;
+            .clamp(0.0, local_height as f32) as usize;
         let active_end = ((center + active_width * 0.5)
             .ceil() as usize)
-            .min(brush_width_px);
+            .min(local_height);
         let active_count = active_end.saturating_sub(active_start);
 
         // Paint depletion — load > 1.0 gradually fades out the depletion curve,

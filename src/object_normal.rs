@@ -723,7 +723,7 @@ mod tests {
     fn visual_depicted_form_normal_map() {
         use crate::compositing::composite_all;
         use crate::output::{export_normal_png, generate_normal_map, generate_normal_map_depicted_form};
-        use crate::types::{BaseColorSource, GuideVertex, NormalMode, OutputSettings, PaintLayer, StrokeParams};
+        use crate::types::{BaseColorSource, Guide, NormalMode, OutputSettings, PaintLayer, StrokeParams};
 
         let fixtures = crate::test_fixtures_dir();
         let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
@@ -738,10 +738,11 @@ mod tests {
                 color_variation: 0.0,
                 ..StrokeParams::default()
             },
-            guides: vec![GuideVertex {
+            guides: vec![Guide {
                 position: Vec2::new(0.5, 0.5),
                 direction: Vec2::X,
                 influence: 1.5,
+                ..Guide::default()
             }],
         };
 
@@ -874,7 +875,7 @@ mod tests {
     fn visual_normal_break_comparison() {
         use crate::compositing::composite_all;
         use crate::output::{generate_normal_map_depicted_form, normalize_height_map, export_normal_png};
-        use crate::types::{BaseColorSource, GuideVertex, NormalMode, OutputSettings, PaintLayer, StrokeParams};
+        use crate::types::{BaseColorSource, Guide, NormalMode, OutputSettings, PaintLayer, StrokeParams};
 
         let fixtures = crate::test_fixtures_dir();
         let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
@@ -892,10 +893,11 @@ mod tests {
                 normal_break_threshold: None,
                 ..StrokeParams::default()
             },
-            guides: vec![GuideVertex {
+            guides: vec![Guide {
                 position: Vec2::new(0.5, 0.5),
                 direction: Vec2::X,
                 influence: 1.5,
+                ..Guide::default()
             }],
         };
 

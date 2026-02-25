@@ -671,7 +671,7 @@ mod tests {
             generate_normal_map, generate_normal_map_depicted_form, normalize_height_map,
         };
         use crate::types::{
-            BaseColorSource, Color as C, GuideVertex, NormalMode, OutputSettings, PaintLayer,
+            BaseColorSource, Color as C, Guide, NormalMode, OutputSettings, PaintLayer,
             StrokeParams,
         };
 
@@ -685,10 +685,11 @@ mod tests {
             normal_break_threshold: Some(0.5),
             ..StrokeParams::default()
         };
-        let guides = vec![GuideVertex {
+        let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::new(1.0, 0.3).normalize(),
             influence: 2.0,
+            ..Guide::default()
         }];
         let solid = C::rgb(0.55, 0.35, 0.25);
         let out_dir = crate::test_module_output_dir("glb_export");
@@ -784,7 +785,7 @@ mod tests {
         use crate::object_normal::compute_mesh_normal_data;
         use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::types::{
-            BackgroundMode, BaseColorSource, Color as C, GuideVertex, NormalMode, OutputSettings,
+            BackgroundMode, BaseColorSource, Color as C, Guide, NormalMode, OutputSettings,
             PaintLayer, StrokeParams,
         };
 
@@ -801,10 +802,11 @@ mod tests {
                 normal_break_threshold: Some(0.5),
                 ..StrokeParams::default()
             },
-            guides: vec![GuideVertex {
+            guides: vec![Guide {
                 position: Vec2::new(0.5, 0.5),
                 direction: Vec2::new(1.0, 0.3).normalize(),
                 influence: 2.0,
+                ..Guide::default()
             }],
         };
 
@@ -853,7 +855,7 @@ mod tests {
         };
         use crate::path_placement::generate_paths;
         use crate::types::{
-            BackgroundMode, BaseColorSource, Color as C, GuideVertex, NormalMode, OutputSettings,
+            BackgroundMode, BaseColorSource, Color as C, Guide, NormalMode, OutputSettings,
             PaintLayer, StrokeParams,
         };
 
@@ -870,10 +872,11 @@ mod tests {
                 normal_break_threshold: Some(0.5),
                 ..StrokeParams::default()
             },
-            guides: vec![GuideVertex {
+            guides: vec![Guide {
                 position: Vec2::new(0.5, 0.5),
                 direction: Vec2::new(1.0, 0.3).normalize(),
                 influence: 2.0,
+                ..Guide::default()
             }],
         };
 

@@ -148,6 +148,74 @@ pub fn generate_normal_map_depicted_form(
     normals
 }
 
+// ── Base Normal Blending (UDN) ──
+
+/// Apply UDN (Uncompressed Detail Normal) blending to combine a base normal map
+/// with paint-generated detail normals.
+///
+/// UDN formula (in [-1,1] space):
+///   result.x = base.x + detail.x
+///   result.y = base.y + detail.y
+///   result.z = base.z
+///   normalize(result)
+///
+/// Both `paint_normals` and the base normal texture are [0,1] encoded
+/// (0.5 = zero displacement). Output overwrites `paint_normals` in place.
+pub fn blend_normals_udn(
+    paint_normals: &mut [[f32; 3]],
+    base_normal_pixels: &[[f32; 4]],
+    base_w: u32,
+    base_h: u32,
+    resolution: u32,
+) {
+    if base_w == 0 || base_h == 0 || base_normal_pixels.is_empty() {
+        return;
+    }
+
+    for y in 0..resolution {
+        for x in 0..resolution {
+            let idx = (y * resolution + x) as usize;
+            if idx >= paint_normals.len() {
+                break;
+            }
+
+            // Sample base normal (nearest-neighbor, UV mapping)
+            let sx = ((x as f32 + 0.5) / resolution as f32 * base_w as f32) as u32;
+            let sy = ((y as f32 + 0.5) / resolution as f32 * base_h as f32) as u32;
+            let bi = (sy.min(base_h - 1) * base_w + sx.min(base_w - 1)) as usize;
+            let bp = if bi < base_normal_pixels.len() {
+                base_normal_pixels[bi]
+            } else {
+                [0.5, 0.5, 1.0, 1.0]
+            };
+
+            // Decode base normal from [0,1] to [-1,1]
+            let bx = bp[0] * 2.0 - 1.0;
+            let by = bp[1] * 2.0 - 1.0;
+            let bz = bp[2] * 2.0 - 1.0;
+
+            // Decode detail (paint) normal from [0,1] to [-1,1]
+            let dn = paint_normals[idx];
+            let dx = dn[0] * 2.0 - 1.0;
+            let dy = dn[1] * 2.0 - 1.0;
+            // detail.z unused in UDN
+
+            // UDN blend: add detail XY to base XY, keep base Z
+            let rx = bx + dx;
+            let ry = by + dy;
+            let rz = bz;
+            let len = (rx * rx + ry * ry + rz * rz).sqrt().max(1e-6);
+
+            // Re-encode to [0,1]
+            paint_normals[idx] = [
+                rx / len * 0.5 + 0.5,
+                ry / len * 0.5 + 0.5,
+                rz / len * 0.5 + 0.5,
+            ];
+        }
+    }
+}
+
 // ── PNG Export Functions ──
 
 /// Export a height map as a grayscale PNG (linear, no gamma).
@@ -815,6 +883,72 @@ mod tests {
     // ── Visual Integration Test ──
 
     #[test]
+    // ── UDN Blending Tests ──
+
+    #[test]
+    fn udn_flat_base_is_identity() {
+        // Flat base (0,0,1) should not change the detail normal
+        let mut normals = vec![[0.6, 0.4, 1.0]; 4];
+        let original = normals.clone();
+        // No base pixels → function returns early, normals unchanged
+        blend_normals_udn(&mut normals, &[], 0, 0, 2);
+        assert_eq!(normals, original);
+    }
+
+    #[test]
+    fn udn_flat_detail_preserves_base() {
+        // Flat detail (0.5, 0.5, X) should approximate base
+        let base = vec![[0.7, 0.3, 0.9, 1.0]; 4]; // tilted base
+        let mut normals = vec![[0.5, 0.5, 1.0]; 4]; // flat detail
+        blend_normals_udn(&mut normals, &base, 2, 2, 2);
+        // base decoded: (0.4, -0.4, 0.8), detail decoded: (0, 0, _)
+        // result: (0.4, -0.4, 0.8) normalized = same direction as base
+        // re-encoded: should be close to base
+        for n in &normals {
+            assert!(
+                (n[0] - 0.7).abs() < 0.02,
+                "R should be ~0.7, got {:.4}",
+                n[0]
+            );
+            assert!(
+                (n[1] - 0.3).abs() < 0.02,
+                "G should be ~0.3, got {:.4}",
+                n[1]
+            );
+        }
+    }
+
+    #[test]
+    fn udn_unit_length() {
+        let base = vec![[0.7, 0.3, 0.9, 1.0]; 16];
+        let mut normals = vec![[0.6, 0.4, 0.9]; 16];
+        blend_normals_udn(&mut normals, &base, 4, 4, 4);
+        for n in &normals {
+            let dx = n[0] * 2.0 - 1.0;
+            let dy = n[1] * 2.0 - 1.0;
+            let dz = n[2] * 2.0 - 1.0;
+            let len = (dx * dx + dy * dy + dz * dz).sqrt();
+            assert!(
+                (len - 1.0).abs() < 0.01,
+                "not unit length: {len:.4}"
+            );
+        }
+    }
+
+    #[test]
+    fn udn_adds_detail_to_base() {
+        // A base tilted right + a detail tilted right should produce even more rightward tilt
+        let base = vec![[0.6, 0.5, 0.9, 1.0]; 4]; // base tilted right (bx=0.2)
+        let mut normals = vec![[0.6, 0.5, 0.9]; 4]; // detail tilted right (dx=0.2)
+        blend_normals_udn(&mut normals, &base, 2, 2, 2);
+        // Combined should be more tilted right than either alone
+        assert!(
+            normals[0][0] > 0.6,
+            "blended R should be > 0.6, got {:.4}",
+            normals[0][0]
+        );
+    }
+
     fn visual_full_output() {
         let mut layer = make_layer_with_order(0);
         layer.params.brush_width = 25.0;

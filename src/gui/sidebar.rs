@@ -1,49 +1,155 @@
 use eframe::egui;
 
 use practical_arcana_painter::types::{
-    BackgroundMode, NormalMode, PaintSlot, PatternValues, ResolutionPreset,
-    StrokeValues,
+    BackgroundMode, Guide, Layer, NormalMode, PaintValues, ResolutionPreset,
 };
 
 use super::state::AppState;
 
-/// Draw the left sidebar: Project info, Output Settings, Paint Slots list.
+/// Draw the left sidebar: Mesh, Base, Layers, Output Settings.
 pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
-    // ── Project info ──
-    egui::CollapsingHeader::new("Project")
+    // ── Mesh ──
+    egui::CollapsingHeader::new("Mesh")
         .default_open(true)
         .show(ui, |ui: &mut egui::Ui| {
-            // Mesh
             if let Some(ref mesh) = state.loaded_mesh {
                 let mesh_path = &state.project.mesh_ref.path;
                 if !mesh_path.is_empty() {
-                    ui.label(format!("Mesh: {}", short_filename(mesh_path)));
+                    ui.label(format!("File: {}", short_filename(mesh_path)));
                 }
-                ui.label(format!("{} mesh groups", mesh.groups.len()));
+                ui.label(format!("{} groups", mesh.groups.len()));
+
+                if ui.small_button("Reload Mesh").clicked() {
+                    state.pending_reload_mesh = true;
+                }
             } else {
                 ui.label("No mesh loaded.");
-            }
-            if ui.small_button("Load Mesh...").clicked() {
-                state.pending_load_mesh = true;
-            }
-
-            ui.add_space(4.0);
-
-            // Texture
-            if let Some(ref tex_path) = state.project.color_ref.path {
-                ui.label(format!("Texture: {}", short_filename(tex_path)));
-            } else {
-                ui.label("No texture loaded.");
-            }
-            if ui.small_button("Load Texture...").clicked() {
-                state.pending_load_texture = true;
             }
         });
 
     ui.separator();
 
+    // ── Base ──
+    egui::CollapsingHeader::new("Base")
+        .default_open(true)
+        .show(ui, |ui: &mut egui::Ui| {
+            // Base Color
+            ui.label("Color:");
+            if let Some(tex_path) = state.project.base_color.texture_path() {
+                ui.label(format!("  {}", short_filename(tex_path)));
+            } else {
+                ui.label("  (solid)");
+            }
+            if ui.small_button("Load Texture...").clicked() {
+                state.pending_load_texture = true;
+            }
+
+            ui.add_space(4.0);
+
+            // Base Normal
+            ui.label("Normal:");
+            if let Some(ref normal_path) = state.project.base_normal {
+                ui.label(format!("  {}", short_filename(normal_path)));
+                ui.horizontal(|ui: &mut egui::Ui| {
+                    if ui.small_button("Replace...").clicked() {
+                        state.pending_load_normal = true;
+                    }
+                    if ui.small_button("Clear").clicked() {
+                        state.project.base_normal = None;
+                        state.loaded_normal = None;
+                        state.dirty = true;
+                    }
+                });
+            } else {
+                ui.label("  (none)");
+                if ui.small_button("Load Normal...").clicked() {
+                    state.pending_load_normal = true;
+                }
+            }
+        });
+
+    ui.separator();
+
+    // ── Layers ──
+    egui::CollapsingHeader::new("Layers")
+        .default_open(true)
+        .show(ui, |ui: &mut egui::Ui| {
+            if state.project.layers.is_empty() {
+                ui.label("No layers.");
+            } else {
+                for i in 0..state.project.layers.len() {
+                    let selected = state.selected_layer == Some(i);
+                    let visible = state.project.layers[i].visible;
+                    let name = state.project.layers[i].name.clone();
+                    let group = state.project.layers[i].group_name.clone();
+
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        // Visibility toggle
+                        let eye = if visible { "👁" } else { "  " };
+                        if ui.selectable_label(false, eye).clicked() {
+                            state.project.layers[i].visible = !visible;
+                        }
+
+                        // Layer name (selectable)
+                        let label = format!("{} ({})", name, group);
+                        if ui.selectable_label(selected, &label).clicked() {
+                            if selected {
+                                state.selected_layer = None;
+                            } else {
+                                state.selected_layer = Some(i);
+                            }
+                            state.selected_guide = None;
+                        }
+                    });
+                }
+            }
+
+            // Layer management buttons
+            ui.horizontal(|ui: &mut egui::Ui| {
+                let has_mesh = state.loaded_mesh.is_some();
+                if ui.add_enabled(has_mesh, egui::Button::new("+ Add")).clicked() {
+                    let order = state.project.layers.len() as i32;
+                    state.project.layers.push(Layer {
+                        name: "__all__".to_string(),
+                        visible: true,
+                        group_name: "__all__".to_string(),
+                        order,
+                        paint: PaintValues::default(),
+                        guides: vec![Guide::default()],
+                    });
+                    state.selected_layer = Some(state.project.layers.len() - 1);
+                    state.selected_guide = None;
+                }
+
+                if let Some(idx) = state.selected_layer {
+                    if ui.button("Delete").clicked() && !state.project.layers.is_empty() {
+                        state.project.layers.remove(idx);
+                        state.selected_guide = None;
+                        if state.project.layers.is_empty() {
+                            state.selected_layer = None;
+                        } else {
+                            state.selected_layer =
+                                Some(idx.min(state.project.layers.len() - 1));
+                        }
+                    }
+
+                    if idx > 0 && ui.small_button("↑").clicked() {
+                        state.project.layers.swap(idx, idx - 1);
+                        state.selected_layer = Some(idx - 1);
+                    }
+                    if idx + 1 < state.project.layers.len() && ui.small_button("↓").clicked()
+                    {
+                        state.project.layers.swap(idx, idx + 1);
+                        state.selected_layer = Some(idx + 1);
+                    }
+                }
+            });
+        });
+
+    ui.separator();
+
     // ── Output Settings ──
-    egui::CollapsingHeader::new("Output Settings")
+    egui::CollapsingHeader::new("Output")
         .default_open(true)
         .show(ui, |ui: &mut egui::Ui| {
             // Resolution preset
@@ -110,75 +216,32 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
             );
         });
 
-    ui.separator();
+}
 
-    // ── Paint Slots ──
-    egui::CollapsingHeader::new("Paint Slots")
-        .default_open(true)
-        .show(ui, |ui: &mut egui::Ui| {
-            if state.project.slots.is_empty() {
-                ui.label("No paint slots.");
-            } else {
-                for i in 0..state.project.slots.len() {
-                    let slot = &state.project.slots[i];
-                    let selected = state.selected_slot == Some(i);
-                    let label = format!("{} (order: {})", slot.group_name, slot.order);
-                    if ui.selectable_label(selected, &label).clicked() {
-                        if selected {
-                            // Deselect on re-click
-                            state.selected_slot = None;
-                        } else {
-                            state.selected_slot = Some(i);
-                        }
-                        state.selected_guide = None;
-                    }
-                }
-            }
+/// Draw the bottom-pinned section: Seed + Generate button.
+pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
+    // ── Seed ──
+    ui.add_space(4.0);
+    ui.horizontal(|ui: &mut egui::Ui| {
+        ui.label("Seed:");
+        let seed_text = seed_to_alpha(state.project.settings.seed);
+        ui.add(
+            egui::TextEdit::singleline(&mut seed_text.clone())
+                .desired_width(ui.available_width() - 72.0)
+                .font(egui::TextStyle::Monospace)
+                .interactive(false),
+        );
+        if ui.button("Shuffle").clicked() {
+            state.project.settings.seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| (d.as_millis() & 0xFFFFFFFF) as u32)
+                .unwrap_or(1234);
+        }
+    });
 
-            // Slot management buttons
-            ui.horizontal(|ui: &mut egui::Ui| {
-                if ui.button("+ Add").clicked() {
-                    let order = state.project.slots.len() as i32;
-                    state.project.slots.push(PaintSlot {
-                        group_name: "__full_uv__".to_string(),
-                        order,
-                        stroke: StrokeValues::default(),
-                        pattern: PatternValues::default(),
-                        seed: 42,
-                    });
-                    state.selected_slot = Some(state.project.slots.len() - 1);
-                    state.selected_guide = None;
-                }
-
-                if let Some(idx) = state.selected_slot {
-                    if ui.button("Delete").clicked() && !state.project.slots.is_empty() {
-                        state.project.slots.remove(idx);
-                        state.selected_guide = None;
-                        if state.project.slots.is_empty() {
-                            state.selected_slot = None;
-                        } else {
-                            state.selected_slot =
-                                Some(idx.min(state.project.slots.len() - 1));
-                        }
-                    }
-
-                    if idx > 0 && ui.small_button("↑").clicked() {
-                        state.project.slots.swap(idx, idx - 1);
-                        state.selected_slot = Some(idx - 1);
-                    }
-                    if idx + 1 < state.project.slots.len() && ui.small_button("↓").clicked()
-                    {
-                        state.project.slots.swap(idx, idx + 1);
-                        state.selected_slot = Some(idx + 1);
-                    }
-                }
-            });
-        });
+    ui.add_space(4.0);
 
     // ── Generate ──
-    ui.add_space(8.0);
-    ui.separator();
-    ui.add_space(4.0);
     let running = state.generation.is_running();
     let stale = state.stale_reason();
     let (label, text_color, fill) = if running {
@@ -208,13 +271,13 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
             .fill(fill);
         ui.add(button)
     }).inner;
-    if btn.clicked() && !running {
+    if btn.on_hover_text("⌘G").clicked() && !running {
         state.pending_generate = true;
     }
 }
 
 pub fn build_group_names(state: &AppState) -> Vec<String> {
-    let mut names = vec!["__full_uv__".to_string()];
+    let mut names = vec!["__all__".to_string()];
     if let Some(ref mesh) = state.loaded_mesh {
         for group in &mesh.groups {
             if !names.contains(&group.name) {
@@ -223,6 +286,16 @@ pub fn build_group_names(state: &AppState) -> Vec<String> {
         }
     }
     names
+}
+
+/// Convert a u32 seed to a fixed 6-letter uppercase string (base-26).
+fn seed_to_alpha(mut seed: u32) -> String {
+    let mut chars = [b'A'; 6];
+    for c in chars.iter_mut().rev() {
+        *c = b'A' + (seed % 26) as u8;
+        seed /= 26;
+    }
+    String::from_utf8_lossy(&chars).into_owned()
 }
 
 fn short_filename(path: &str) -> &str {

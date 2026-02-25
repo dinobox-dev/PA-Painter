@@ -6,8 +6,10 @@ use practical_arcana_painter::output::{
     export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
     normalize_height_map,
 };
-use practical_arcana_painter::project::{load_project, save_project, Project};
-use practical_arcana_painter::types::BackgroundMode;
+use practical_arcana_painter::project::{load_project, save_project, BaseColor, Project};
+use practical_arcana_painter::types::{BackgroundMode, Guide, Layer, PaintValues};
+
+use super::state::ReloadSummary;
 
 use super::state::AppState;
 use super::textures;
@@ -59,21 +61,35 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
             }
 
             // Load texture if referenced
-            if let Some(ref tex_path) = project.color_ref.path {
+            if let Some(tex_path) = project.base_color.texture_path() {
                 let tex_file = resolve_asset_path(&path, tex_path);
                 if let Err(e) = apply_texture(state, ctx, &tex_file) {
                     state.status_message = e;
                 }
             }
 
-            // Select first slot if any
-            if !project.slots.is_empty() {
-                state.selected_slot = Some(0);
+            // Load base normal if referenced
+            if let Some(ref normal_path) = project.base_normal {
+                let normal_file = resolve_asset_path(&path, normal_path);
+                match load_texture(&normal_file) {
+                    Ok(tex) => {
+                        state.loaded_normal = Some(tex);
+                    }
+                    Err(_) => {
+                        // Normal map is optional — silently skip if missing
+                    }
+                }
+            }
+
+            // Select first layer if any
+            if !project.layers.is_empty() {
+                state.selected_layer = Some(0);
             }
 
             state.project = project;
             state.project_path = Some(path);
             state.dirty = false;
+            state.undo.clear();
             true
         }
         Err(e) => {
@@ -85,6 +101,7 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
 
 /// Create a new project by loading a mesh file.
 /// Opens a file dialog for mesh selection, then starts a fresh project.
+/// Auto-creates one layer per mesh group (or a single "__all__" layer if none).
 pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
     let path = rfd::FileDialog::new()
         .add_filter("3D Mesh", &["glb", "gltf", "obj"])
@@ -97,17 +114,22 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
 
     // Reset to a fresh project
     let mut project = Project::default();
-
-    // Store relative mesh path
     project.mesh_ref.path = mesh_path.to_string_lossy().to_string();
 
     // Load the mesh
     match apply_mesh(state, &mesh_path) {
         Ok(()) => {
+            // Auto-create layers from mesh groups
+            project.layers = create_layers_from_mesh(state);
+
             state.project = project;
             state.project_path = None;
             state.dirty = false;
-            state.selected_slot = None;
+            state.selected_layer = if state.project.layers.is_empty() {
+                None
+            } else {
+                Some(0)
+            };
             state.selected_guide = None;
             state.generated = None;
             state.textures.color = None;
@@ -115,8 +137,14 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
             state.textures.normal = None;
             state.textures.stroke_id = None;
             state.loaded_texture = None;
+            state.loaded_normal = None;
+            state.reload_summary = None;
+            state.undo.clear();
+
+            let n = state.project.layers.len();
             state.status_message = format!(
-                "New project — mesh: {}",
+                "New project — {} layers from {}",
+                n,
                 mesh_path
                     .file_name()
                     .map(|f| f.to_string_lossy().to_string())
@@ -129,28 +157,92 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
     }
 }
 
-/// Open a file dialog to load (or replace) the mesh in the current project.
-pub fn load_mesh_dialog(state: &mut AppState, _ctx: &eframe::egui::Context) {
-    let path = rfd::FileDialog::new()
-        .add_filter("3D Mesh", &["glb", "gltf", "obj"])
-        .set_title("Load mesh")
-        .pick_file();
-
-    let Some(mesh_path) = path else {
+/// Reload mesh from the same path and diff groups against existing layers.
+/// Auto-applies: creates layers for new groups, remaps orphaned layers to "__all__".
+pub fn reload_mesh(state: &mut AppState) {
+    let mesh_path_str = state.project.mesh_ref.path.clone();
+    if mesh_path_str.is_empty() {
+        state.status_message = "No mesh path to reload.".to_string();
         return;
-    };
+    }
+
+    let mesh_path = PathBuf::from(&mesh_path_str);
+
+    // Remember old group names from existing layers
+    let old_groups: Vec<String> = state
+        .project
+        .layers
+        .iter()
+        .map(|l| l.group_name.clone())
+        .filter(|g| g != "__all__")
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
 
     match apply_mesh(state, &mesh_path) {
         Ok(()) => {
-            state.project.mesh_ref.path = mesh_path.to_string_lossy().to_string();
+            // Determine new group names from reloaded mesh
+            let new_groups: Vec<String> = state
+                .loaded_mesh
+                .as_ref()
+                .map(|m| m.groups.iter().map(|g| g.name.clone()).collect())
+                .unwrap_or_default();
+
+            let new_set: std::collections::HashSet<&str> =
+                new_groups.iter().map(|s| s.as_str()).collect();
+            let old_set: std::collections::HashSet<&str> =
+                old_groups.iter().map(|s| s.as_str()).collect();
+
+            let kept: Vec<String> = old_groups
+                .iter()
+                .filter(|g| new_set.contains(g.as_str()))
+                .cloned()
+                .collect();
+            let added: Vec<String> = new_groups
+                .iter()
+                .filter(|g| !old_set.contains(g.as_str()))
+                .cloned()
+                .collect();
+            let orphaned: Vec<String> = old_groups
+                .iter()
+                .filter(|g| !new_set.contains(g.as_str()))
+                .cloned()
+                .collect();
+
+            // Auto-apply: create layers for new groups
+            for name in &added {
+                let order = state.project.layers.len() as i32;
+                state.project.layers.push(Layer {
+                    name: name.clone(),
+                    visible: true,
+                    group_name: name.clone(),
+                    order,
+                    paint: PaintValues::default(),
+                    guides: vec![Guide::default()],
+                });
+            }
+
+            // Auto-apply: remap orphaned layers to "__all__"
+            let orphan_set: std::collections::HashSet<&str> =
+                orphaned.iter().map(|s| s.as_str()).collect();
+            for layer in &mut state.project.layers {
+                if orphan_set.contains(layer.group_name.as_str()) {
+                    layer.group_name = "__all__".to_string();
+                }
+            }
+
             state.dirty = true;
-            state.status_message = format!(
-                "Loaded mesh: {}",
-                mesh_path
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_default()
-            );
+
+            // Show summary if anything changed
+            if !added.is_empty() || !orphaned.is_empty() {
+                state.reload_summary = Some(ReloadSummary {
+                    kept,
+                    added,
+                    orphaned,
+                });
+            }
+
+            state.status_message = "Mesh reloaded.".to_string();
         }
         Err(e) => {
             state.status_message = e;
@@ -171,7 +263,7 @@ pub fn load_texture_dialog(state: &mut AppState, ctx: &eframe::egui::Context) {
 
     match apply_texture(state, ctx, &tex_path) {
         Ok(()) => {
-            state.project.color_ref.path = Some(tex_path.to_string_lossy().to_string());
+            state.project.base_color = BaseColor::Texture(tex_path.to_string_lossy().to_string());
             state.dirty = true;
             state.status_message = format!(
                 "Loaded texture: {}",
@@ -183,6 +275,36 @@ pub fn load_texture_dialog(state: &mut AppState, ctx: &eframe::egui::Context) {
         }
         Err(e) => {
             state.status_message = e;
+        }
+    }
+}
+
+/// Open a file dialog to load (or replace) the base normal map.
+pub fn load_normal_dialog(state: &mut AppState) {
+    let path = rfd::FileDialog::new()
+        .add_filter("Image", &["png", "jpg", "jpeg", "bmp", "tga", "exr"])
+        .set_title("Load base normal map")
+        .pick_file();
+
+    let Some(tex_path) = path else {
+        return;
+    };
+
+    match load_texture(&tex_path) {
+        Ok(tex) => {
+            state.loaded_normal = Some(tex);
+            state.project.base_normal = Some(tex_path.to_string_lossy().to_string());
+            state.dirty = true;
+            state.status_message = format!(
+                "Loaded normal: {}",
+                tex_path
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            );
+        }
+        Err(e) => {
+            state.status_message = format!("Normal load failed: {e}");
         }
     }
 }
@@ -298,6 +420,40 @@ pub fn export_glb(state: &mut AppState) {
         Err(e) => {
             state.status_message = format!("GLB export failed: {e:?}");
         }
+    }
+}
+
+/// Create default layers from currently loaded mesh groups.
+/// One layer per group, or a single "__all__" if no groups.
+fn create_layers_from_mesh(state: &AppState) -> Vec<Layer> {
+    let group_names: Vec<String> = state
+        .loaded_mesh
+        .as_ref()
+        .map(|m| m.groups.iter().map(|g| g.name.clone()).collect())
+        .unwrap_or_default();
+
+    if group_names.is_empty() {
+        vec![Layer {
+            name: "__all__".to_string(),
+            visible: true,
+            group_name: "__all__".to_string(),
+            order: 0,
+            paint: PaintValues::default(),
+            guides: vec![Guide::default()],
+        }]
+    } else {
+        group_names
+            .into_iter()
+            .enumerate()
+            .map(|(i, name)| Layer {
+                name: name.clone(),
+                visible: true,
+                group_name: name,
+                order: i as i32,
+                paint: PaintValues::default(),
+                guides: vec![Guide::default()],
+            })
+            .collect()
     }
 }
 

@@ -89,10 +89,10 @@ fn main() {
 
     let resolution = resolution_override.unwrap_or(project.settings.resolution_preset.resolution());
     eprintln!("Resolution: {resolution}px");
-    eprintln!("Slots: {}", project.slots.len());
+    eprintln!("Layers: {}", project.layers.len());
 
     // Load base color texture if referenced
-    let (base_colors, tw, th) = if let Some(ref tex_path) = project.color_ref.path {
+    let (base_colors, tw, th) = if let Some(tex_path) = project.base_color.texture_path() {
         let tex_file = resolve_asset_path(&project_path, tex_path);
         eprintln!("Loading texture: {}", tex_file.display());
         match load_texture(&tex_file) {
@@ -110,7 +110,7 @@ fn main() {
     };
 
     let sc = {
-        let c = project.color_ref.solid_color;
+        let c = project.base_color.solid_color();
         Color::rgb(c[0], c[1], c[2])
     };
 
@@ -149,7 +149,7 @@ fn main() {
     let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = loaded_mesh {
         project.build_masks(mesh, resolution)
     } else {
-        (0..project.slots.len()).map(|_| None).collect()
+        (0..project.layers.len()).map(|_| None).collect()
     };
     let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 
