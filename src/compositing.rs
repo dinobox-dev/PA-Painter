@@ -3,7 +3,7 @@ use rayon::prelude::*;
 
 use crate::brush_profile::generate_brush_profile;
 use crate::math::{lerp, lerp_color, perpendicular, smoothstep};
-use crate::object_normal::{sample_object_normal, MeshNormalData};
+use crate::object_normal::{try_sample_object_normal, MeshNormalData};
 use crate::path_placement::generate_paths;
 use crate::stroke_color::ColorTextureRef;
 use crate::uv_mask::UvMask;
@@ -445,14 +445,32 @@ pub fn composite_layer(
         })
         .collect();
 
-    // Step 1b: Pre-compute stroke normals (midpoint sampling, symmetric with color)
+    // Step 1b: Pre-compute stroke normals (midpoint sampling, symmetric with color).
+    // Try midpoint first; if it has no mesh coverage, search outward from the
+    // midpoint segment toward the start, then toward the end.
     let stroke_normals: Vec<Option<[f32; 3]>> = if let Some(nd) = normal_data {
         paths
             .iter()
             .map(|path| {
                 let mid = path.midpoint();
-                let n = sample_object_normal(nd, mid);
-                Some([n.x, n.y, n.z])
+                if let Some(n) = try_sample_object_normal(nd, mid) {
+                    return Some([n.x, n.y, n.z]);
+                }
+                let len = path.points.len();
+                let mid_idx = len / 2;
+                // Search midpoint → start
+                for i in (0..mid_idx).rev() {
+                    if let Some(n) = try_sample_object_normal(nd, path.points[i]) {
+                        return Some([n.x, n.y, n.z]);
+                    }
+                }
+                // Search midpoint → end
+                for i in mid_idx..len {
+                    if let Some(n) = try_sample_object_normal(nd, path.points[i]) {
+                        return Some([n.x, n.y, n.z]);
+                    }
+                }
+                None
             })
             .collect()
     } else {

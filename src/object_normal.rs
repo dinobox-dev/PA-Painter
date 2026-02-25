@@ -96,6 +96,21 @@ pub fn sample_object_normal(data: &MeshNormalData, uv: Vec2) -> Vec3 {
     }
 }
 
+/// Sample the object-space normal at a UV coordinate, returning `None` when
+/// there is no mesh coverage at that location.
+pub fn try_sample_object_normal(data: &MeshNormalData, uv: Vec2) -> Option<Vec3> {
+    let res = data.resolution;
+    let px = ((uv.x * res as f32).floor() as i32).clamp(0, res as i32 - 1) as u32;
+    let py = ((uv.y * res as f32).floor() as i32).clamp(0, res as i32 - 1) as u32;
+    let idx = (py * res + px) as usize;
+    let n = data.object_normals[idx];
+    if n.length_squared() > 1e-12 {
+        Some(n)
+    } else {
+        None
+    }
+}
+
 /// Sample the TBN basis at a UV coordinate.
 pub fn sample_tbn(data: &MeshNormalData, uv: Vec2) -> (Vec3, Vec3, Vec3) {
     let res = data.resolution;
