@@ -178,14 +178,12 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
         .map(|s| s.to_string())
         .unwrap_or_else(|| "Custom".to_string());
 
-    // Merge all presets into an owned vec (avoids simultaneous borrow of project.presets + layers)
-    let all_presets: Vec<PaintPreset> = built_in
-        .presets
-        .into_iter()
-        .chain(state.project.presets.presets.iter().cloned())
-        .collect();
+    // Separate built-in and user presets (clone user presets to avoid borrow conflict)
+    let builtin_presets = built_in.presets;
+    let user_presets: Vec<PaintPreset> = state.project.presets.presets.clone();
 
     let mut selected_values: Option<PaintValues> = None;
+    let mut delete_user_idx: Option<usize> = None;
     let thumbs = &mut state.preset_thumbnails;
 
     // Measure "Preset" label width to fill remaining space with combo button
@@ -201,13 +199,175 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
         .selected_text(&current_name)
         .width(combo_w)
         .show_ui(ui, |ui: &mut egui::Ui| {
-            for preset in &all_presets {
+            // Fix popup content width to match combo button
+            ui.set_max_width(combo_w);
+
+            let delete_btn_w = 18.0;
+            let thumb_w = 60.0;
+            let spacing = ui.spacing().item_spacing.x;
+
+            // User presets first (if any)
+            if !user_presets.is_empty() {
+                ui.label(egui::RichText::new("Custom").weak().size(11.0));
+                for (i, preset) in user_presets.iter().enumerate() {
+                    let thumb_id = thumbs.get_or_create(ui.ctx(), &preset.values, layer_seed);
+                    let selected = current_name == preset.name;
+                    let row_w = ui.available_width();
+
+                    // Row: [thumb] [name...] [delete]
+                    let row_h = 20.0;
+                    let (rect, resp) = ui.allocate_exact_size(
+                        egui::Vec2::new(row_w, row_h),
+                        egui::Sense::click(),
+                    );
+                    if ui.is_rect_visible(rect) {
+                        let p = ui.painter();
+                        if selected {
+                            p.rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
+                        } else if resp.hovered() {
+                            p.rect_filled(rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                        }
+                        // Thumbnail (vertically centered)
+                        let img_y = rect.center().y - 8.0;
+                        let img_rect = egui::Rect::from_min_size(
+                            egui::Pos2::new(rect.min.x + 2.0, img_y),
+                            egui::Vec2::new(thumb_w, 16.0),
+                        );
+                        p.image(
+                            thumb_id,
+                            img_rect,
+                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                        // Name text (truncated)
+                        let text_left = rect.min.x + thumb_w + spacing + 2.0;
+                        let text_right = rect.max.x - delete_btn_w - spacing;
+                        let text_color = if selected {
+                            ui.visuals().selection.stroke.color
+                        } else {
+                            ui.visuals().text_color()
+                        };
+                        let max_text_w = (text_right - text_left).max(10.0);
+                        let font_id = egui::TextStyle::Body.resolve(ui.style());
+                        let galley = p.layout_no_wrap(
+                            preset.name.clone(), font_id.clone(), text_color,
+                        );
+                        let text_y = rect.center().y - galley.size().y * 0.5;
+                        if galley.size().x > max_text_w {
+                            let ell = p.layout_no_wrap(
+                                "\u{2026}".to_string(), font_id, text_color,
+                            );
+                            let ell_w = ell.size().x;
+                            let clip = egui::Rect::from_min_size(
+                                egui::Pos2::new(text_left, rect.min.y),
+                                egui::Vec2::new(max_text_w - ell_w, rect.height()),
+                            );
+                            p.with_clip_rect(clip).galley(
+                                egui::Pos2::new(text_left, text_y), galley, text_color,
+                            );
+                            p.galley(
+                                egui::Pos2::new(text_left + max_text_w - ell_w, text_y),
+                                ell, text_color,
+                            );
+                        } else {
+                            p.galley(egui::Pos2::new(text_left, text_y), galley, text_color);
+                        }
+                    }
+                    if resp.clicked() {
+                        selected_values = Some(preset.values.clone());
+                    }
+
+                    // Delete button (overlaid on the row, right side)
+                    let del_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(rect.max.x - delete_btn_w - 2.0, rect.min.y + 1.0),
+                        egui::Vec2::splat(delete_btn_w),
+                    );
+                    let del_id = ui.id().with(("del_preset", i));
+                    let del_resp = ui.interact(del_rect, del_id, egui::Sense::click());
+                    if ui.is_rect_visible(del_rect) {
+                        use egui_phosphor::fill::TRASH_SIMPLE;
+                        let del_color = if del_resp.hovered() {
+                            ui.visuals().text_color()
+                        } else {
+                            ui.visuals().weak_text_color()
+                        };
+                        ui.painter().text(
+                            del_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            TRASH_SIMPLE,
+                            egui::FontId::proportional(12.0),
+                            del_color,
+                        );
+                    }
+                    if del_resp.on_hover_text("Delete").clicked() {
+                        delete_user_idx = Some(i);
+                    }
+                }
+                ui.separator();
+            }
+
+            // Built-in presets
+            ui.label(egui::RichText::new("Built-in").weak().size(11.0));
+            for preset in &builtin_presets {
                 let thumb_id = thumbs.get_or_create(ui.ctx(), &preset.values, layer_seed);
-                let resp = ui.horizontal(|ui: &mut egui::Ui| {
-                    ui.image(egui::load::SizedTexture::new(thumb_id, [60.0, 16.0]));
-                    ui.selectable_label(current_name == preset.name, &preset.name)
-                });
-                if resp.inner.clicked() {
+                let selected = current_name == preset.name;
+                let row_w = ui.available_width();
+                let row_h = 20.0;
+                let (rect, resp) = ui.allocate_exact_size(
+                    egui::Vec2::new(row_w, row_h),
+                    egui::Sense::click(),
+                );
+                if ui.is_rect_visible(rect) {
+                    let p = ui.painter();
+                    if selected {
+                        p.rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
+                    } else if resp.hovered() {
+                        p.rect_filled(rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                    }
+                    let img_y = rect.center().y - 8.0;
+                    let img_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(rect.min.x + 2.0, img_y),
+                        egui::Vec2::new(thumb_w, 16.0),
+                    );
+                    p.image(
+                        thumb_id,
+                        img_rect,
+                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                    let text_left = rect.min.x + thumb_w + spacing + 2.0;
+                    let text_color = if selected {
+                        ui.visuals().selection.stroke.color
+                    } else {
+                        ui.visuals().text_color()
+                    };
+                    let max_text_w = (rect.max.x - text_left).max(10.0);
+                    let font_id = egui::TextStyle::Body.resolve(ui.style());
+                    let galley = p.layout_no_wrap(
+                        preset.name.clone(), font_id.clone(), text_color,
+                    );
+                    let text_y = rect.center().y - galley.size().y * 0.5;
+                    if galley.size().x > max_text_w {
+                        let ell = p.layout_no_wrap(
+                            "\u{2026}".to_string(), font_id, text_color,
+                        );
+                        let ell_w = ell.size().x;
+                        let clip = egui::Rect::from_min_size(
+                            egui::Pos2::new(text_left, rect.min.y),
+                            egui::Vec2::new(max_text_w - ell_w, rect.height()),
+                        );
+                        p.with_clip_rect(clip).galley(
+                            egui::Pos2::new(text_left, text_y), galley, text_color,
+                        );
+                        p.galley(
+                            egui::Pos2::new(text_left + max_text_w - ell_w, text_y),
+                            ell, text_color,
+                        );
+                    } else {
+                        p.galley(egui::Pos2::new(text_left, text_y), galley, text_color);
+                    }
+                }
+                if resp.clicked() {
                     selected_values = Some(preset.values.clone());
                 }
             }
@@ -216,53 +376,89 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
     if let Some(values) = selected_values {
         state.project.layers[layer_idx].paint = values;
     }
+    if let Some(idx) = delete_user_idx {
+        state.project.presets.presets.remove(idx);
+        state.dirty = true;
+        state.status_message = "Preset deleted".to_string();
+    }
 
-    // "Save as Preset" inline editor using egui temp data for state
-    let save_editing_id = ui.id().with("preset_save_editing");
+    // "Save as Preset" button + popup
+    let is_custom = current_name == "Custom";
+    let save_open_id = ui.id().with("preset_save_open");
     let save_name_id = ui.id().with("preset_save_name");
-    let mut editing: bool = ui.data_mut(|d| d.get_temp(save_editing_id).unwrap_or(false));
+    let mut save_open: bool = ui.data_mut(|d| d.get_temp(save_open_id).unwrap_or(false));
 
-    if editing {
+    let btn = egui::Button::new("Save as Preset");
+    let btn_resp = ui.add_enabled(is_custom && !save_open, btn);
+    let btn_rect = btn_resp.rect;
+
+    let just_opened = btn_resp.clicked();
+    if just_opened {
+        save_open = true;
+        ui.data_mut(|d| d.insert_temp::<String>(save_name_id, String::new()));
+    }
+
+    if save_open {
         let mut name: String = ui.data_mut(|d| d.get_temp(save_name_id).unwrap_or_default());
-        ui.horizontal(|ui: &mut egui::Ui| {
-            ui.label("Name:");
-            ui.text_edit_singleline(&mut name);
-        });
+        let mut close = false;
 
-        let mut done = false;
-        ui.horizontal(|ui: &mut egui::Ui| {
-            if ui.button("Save").clicked() && !name.trim().is_empty() {
-                let preset = PaintPreset {
-                    name: name.trim().to_string(),
-                    values: state.project.layers[layer_idx].paint.clone(),
-                };
-                match state.project.presets.try_add_preset(preset) {
-                    Ok(()) => {
-                        state.status_message = format!("Saved preset: {}", name.trim());
-                        state.dirty = true;
-                    }
-                    Err(existing) => {
-                        state.status_message =
-                            format!("Duplicate values (existing: {})", existing);
-                    }
-                }
-                done = true;
-            }
-            if ui.button("Cancel").clicked() {
-                done = true;
-            }
-        });
+        let area_resp = egui::Area::new(egui::Id::new("save_preset_popup"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(egui::Pos2::new(btn_rect.left(), btn_rect.bottom() + 4.0))
+            .show(ui.ctx(), |ui: &mut egui::Ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui: &mut egui::Ui| {
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        ui.label("Name:");
+                        let text_resp = ui.add(
+                            egui::TextEdit::singleline(&mut name)
+                                .desired_width(140.0)
+                                .hint_text("Preset name"),
+                        );
+                        if name.is_empty() {
+                            text_resp.request_focus();
+                        }
+                    });
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        if ui.button("Save").clicked() && !name.trim().is_empty() {
+                            let preset = PaintPreset {
+                                name: name.trim().to_string(),
+                                values: state.project.layers[layer_idx].paint.clone(),
+                            };
+                            match state.project.presets.try_add_preset(preset) {
+                                Ok(()) => {
+                                    state.status_message =
+                                        format!("Saved preset: {}", name.trim());
+                                    state.dirty = true;
+                                }
+                                Err(existing) => {
+                                    state.status_message =
+                                        format!("Duplicate values (existing: {})", existing);
+                                }
+                            }
+                            close = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            });
 
-        if done {
-            editing = false;
-            name = String::new();
+        // Close on click outside — skip on the frame the popup just opened
+        // (the button click itself would register as "elsewhere")
+        if !just_opened && area_resp.response.clicked_elsewhere() {
+            close = true;
+        }
+
+        if close {
+            save_open = false;
         }
         ui.data_mut(|d| {
             d.insert_temp(save_name_id, name);
-            d.insert_temp(save_editing_id, editing);
+            d.insert_temp(save_open_id, save_open);
         });
-    } else if ui.button("Save as Preset").clicked() {
-        ui.data_mut(|d| d.insert_temp(save_editing_id, true));
+    } else {
+        ui.data_mut(|d| d.insert_temp(save_open_id, false));
     }
 }
 
