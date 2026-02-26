@@ -37,7 +37,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             });
     }
 
-    ui.add_space(4.0);
+    ui.separator();
 
     // ── Preset Picker ──
     show_preset_picker(ui, state, idx);
@@ -188,9 +188,18 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
     let mut selected_values: Option<PaintValues> = None;
     let thumbs = &mut state.preset_thumbnails;
 
-    egui::ComboBox::from_label("Preset")
+    // Measure "Preset" label width to fill remaining space with combo button
+    let label_text = "Preset";
+    let label_galley = ui.painter().layout_no_wrap(
+        label_text.to_string(),
+        egui::TextStyle::Body.resolve(ui.style()),
+        egui::Color32::WHITE,
+    );
+    let combo_w = (ui.available_width() - label_galley.size().x - ui.spacing().item_spacing.x).max(60.0);
+
+    egui::ComboBox::from_label(label_text)
         .selected_text(&current_name)
-        .width(ui.available_width() - 50.0)
+        .width(combo_w)
         .show_ui(ui, |ui: &mut egui::Ui| {
             for preset in &all_presets {
                 let thumb_id = thumbs.get_or_create(ui.ctx(), &preset.values, layer_seed);
