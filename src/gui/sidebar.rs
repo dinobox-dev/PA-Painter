@@ -8,6 +8,9 @@ use super::state::AppState;
 
 /// Draw the left sidebar: Mesh, Base, Layers, Output Settings.
 pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
+    // Lock content width to panel width so adding/removing layers won't resize the sidebar
+    ui.set_max_width(ui.available_width());
+
     // ── Mesh ──
     egui::CollapsingHeader::new("Mesh")
         .default_open(true)
@@ -71,43 +74,20 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
     ui.separator();
 
     // ── Layers ──
-    egui::CollapsingHeader::new("Layers")
-        .default_open(true)
-        .show(ui, |ui: &mut egui::Ui| {
-            if state.project.layers.is_empty() {
-                ui.label("No layers.");
-            } else {
-                for i in 0..state.project.layers.len() {
-                    let selected = state.selected_layer == Some(i);
-                    let visible = state.project.layers[i].visible;
-                    let name = state.project.layers[i].name.clone();
-                    let group = state.project.layers[i].group_name.clone();
+    {
+        use egui_phosphor::fill::{ARROW_DOWN, ARROW_UP, EYE, EYE_SLASH, PLUS, TRASH_SIMPLE};
 
-                    ui.horizontal(|ui: &mut egui::Ui| {
-                        // Visibility toggle
-                        let eye = if visible { "👁" } else { "  " };
-                        if ui.selectable_label(false, eye).clicked() {
-                            state.project.layers[i].visible = !visible;
-                        }
-
-                        // Layer name (selectable)
-                        let label = format!("{} ({})", name, group);
-                        if ui.selectable_label(selected, &label).clicked() {
-                            if selected {
-                                state.selected_layer = None;
-                            } else {
-                                state.selected_layer = Some(i);
-                            }
-                            state.selected_guide = None;
-                        }
-                    });
-                }
-            }
-
-            // Layer management buttons
-            ui.horizontal(|ui: &mut egui::Ui| {
+        // Header row: "Layers" label + [+] icon button
+        ui.horizontal(|ui: &mut egui::Ui| {
+            ui.strong("Layers");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui: &mut egui::Ui| {
                 let has_mesh = state.loaded_mesh.is_some();
-                if ui.add_enabled(has_mesh, egui::Button::new("+ Add")).clicked() {
+                let size = egui::Vec2::splat(20.0);
+                let (btn_rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                if ui.is_rect_visible(btn_rect) {
+                    draw_layer_icon(ui.painter(), ui, btn_rect, PLUS, has_mesh, resp.hovered());
+                }
+                if resp.on_hover_text("Add Layer").clicked() && has_mesh {
                     let order = state.project.layers.len() as i32;
                     state.project.layers.push(Layer {
                         name: "__all__".to_string(),
@@ -120,31 +100,172 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
                     state.selected_layer = Some(state.project.layers.len() - 1);
                     state.selected_guide = None;
                 }
-
-                if let Some(idx) = state.selected_layer {
-                    if ui.button("Delete").clicked() && !state.project.layers.is_empty() {
-                        state.project.layers.remove(idx);
-                        state.selected_guide = None;
-                        if state.project.layers.is_empty() {
-                            state.selected_layer = None;
-                        } else {
-                            state.selected_layer =
-                                Some(idx.min(state.project.layers.len() - 1));
-                        }
-                    }
-
-                    if idx > 0 && ui.small_button("↑").clicked() {
-                        state.project.layers.swap(idx, idx - 1);
-                        state.selected_layer = Some(idx - 1);
-                    }
-                    if idx + 1 < state.project.layers.len() && ui.small_button("↓").clicked()
-                    {
-                        state.project.layers.swap(idx, idx + 1);
-                        state.selected_layer = Some(idx + 1);
-                    }
-                }
             });
         });
+
+        // Layer rows
+        if state.project.layers.is_empty() {
+            ui.label("No layers.");
+        } else {
+            let mut delete_idx: Option<usize> = None;
+            let mut swap: Option<(usize, usize)> = None;
+            let row_w = ui.available_width();
+            let row_h = LAYER_ICON_SIZE + 2.0;
+            let icon_gap = 2.0;
+            let n_layers = state.project.layers.len();
+
+            for i in 0..n_layers {
+                let selected = state.selected_layer == Some(i);
+                let visible = state.project.layers[i].visible;
+                let name = state.project.layers[i].name.clone();
+                let group = state.project.layers[i].group_name.clone();
+
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::Vec2::new(row_w, row_h),
+                    egui::Sense::hover(),
+                );
+
+                if !ui.is_rect_visible(rect) {
+                    continue;
+                }
+
+                let p = ui.painter();
+
+                // Selected background
+                if selected {
+                    p.rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
+                }
+
+                // ── Eye icon (left, full row height) ──
+                let eye_rect = egui::Rect::from_min_size(
+                    rect.min,
+                    egui::Vec2::new(LAYER_ICON_SIZE, row_h),
+                );
+                let eye_id = ui.id().with(("layer_eye", i));
+                let eye_resp = ui.interact(eye_rect, eye_id, egui::Sense::click());
+                {
+                    let eye_icon = if visible { EYE } else { EYE_SLASH };
+                    if eye_resp.hovered() {
+                        p.rect_filled(eye_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                    }
+                    let color = if visible {
+                        if eye_resp.hovered() { ui.visuals().text_color() } else { ui.visuals().weak_text_color() }
+                    } else {
+                        ui.visuals().weak_text_color().gamma_multiply(0.5)
+                    };
+                    p.text(eye_rect.center(), egui::Align2::CENTER_CENTER, eye_icon, egui::FontId::proportional(13.0), color);
+                }
+                if eye_resp.on_hover_text("Toggle visibility").clicked() {
+                    state.project.layers[i].visible = !visible;
+                }
+
+                // ── Action icons (right, selected only) ──
+                let mut actions_right = rect.max.x;
+
+                if selected {
+                    // Down arrow (rightmost)
+                    let can_down = i + 1 < n_layers;
+                    actions_right -= LAYER_ICON_SIZE;
+                    let down_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(actions_right, rect.min.y),
+                        egui::Vec2::new(LAYER_ICON_SIZE, row_h),
+                    );
+                    let down_id = ui.id().with(("layer_down", i));
+                    let down_resp = ui.interact(down_rect, down_id, egui::Sense::click());
+                    draw_layer_icon(p, ui, down_rect, ARROW_DOWN, can_down, down_resp.hovered());
+                    if down_resp.on_hover_text("Move down").clicked() && can_down {
+                        swap = Some((i, i + 1));
+                    }
+
+                    // Up arrow
+                    actions_right -= icon_gap + LAYER_ICON_SIZE;
+                    let up_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(actions_right, rect.min.y),
+                        egui::Vec2::new(LAYER_ICON_SIZE, row_h),
+                    );
+                    let up_id = ui.id().with(("layer_up", i));
+                    let up_resp = ui.interact(up_rect, up_id, egui::Sense::click());
+                    draw_layer_icon(p, ui, up_rect, ARROW_UP, i > 0, up_resp.hovered());
+                    if up_resp.on_hover_text("Move up").clicked() && i > 0 {
+                        swap = Some((i, i - 1));
+                    }
+
+                    // Delete
+                    actions_right -= icon_gap + LAYER_ICON_SIZE;
+                    let del_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(actions_right, rect.min.y),
+                        egui::Vec2::new(LAYER_ICON_SIZE, row_h),
+                    );
+                    let del_id = ui.id().with(("layer_del", i));
+                    let del_resp = ui.interact(del_rect, del_id, egui::Sense::click());
+                    draw_layer_icon(p, ui, del_rect, TRASH_SIMPLE, true, del_resp.hovered());
+                    if del_resp.on_hover_text("Delete layer").clicked() {
+                        delete_idx = Some(i);
+                    }
+                }
+
+                // ── Name label (middle, clickable) ──
+                let name_left = rect.min.x + LAYER_ICON_SIZE + icon_gap;
+                let name_right = if selected { actions_right - icon_gap } else { rect.max.x };
+                let name_rect = egui::Rect::from_min_max(
+                    egui::Pos2::new(name_left, rect.min.y),
+                    egui::Pos2::new(name_right, rect.max.y),
+                );
+                let name_id = ui.id().with(("layer_name", i));
+                let name_resp = ui.interact(name_rect, name_id, egui::Sense::click());
+                {
+                    if !selected && name_resp.hovered() {
+                        p.rect_filled(name_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                    }
+                    let text_color = if selected {
+                        ui.visuals().selection.stroke.color
+                    } else {
+                        ui.visuals().text_color()
+                    };
+                    let label = format!("{} ({})", name, group);
+                    let font_id = egui::TextStyle::Body.resolve(ui.style());
+                    let max_text_w = (name_right - name_left - 4.0).max(10.0);
+                    let galley = p.layout_no_wrap(label, font_id.clone(), text_color);
+                    let text_y = rect.center().y - galley.size().y * 0.5;
+                    if galley.size().x > max_text_w {
+                        let ell = p.layout_no_wrap("\u{2026}".to_string(), font_id, text_color);
+                        let ell_w = ell.size().x;
+                        let clip = egui::Rect::from_min_size(
+                            egui::Pos2::new(name_left + 2.0, rect.min.y),
+                            egui::Vec2::new(max_text_w - ell_w, rect.height()),
+                        );
+                        p.with_clip_rect(clip).galley(egui::Pos2::new(name_left + 2.0, text_y), galley, text_color);
+                        p.galley(egui::Pos2::new(name_left + 2.0 + max_text_w - ell_w, text_y), ell, text_color);
+                    } else {
+                        p.galley(egui::Pos2::new(name_left + 2.0, text_y), galley, text_color);
+                    }
+                }
+                if name_resp.clicked() {
+                    if selected {
+                        state.selected_layer = None;
+                    } else {
+                        state.selected_layer = Some(i);
+                    }
+                    state.selected_guide = None;
+                }
+            }
+
+            // Apply deferred actions
+            if let Some(idx) = delete_idx {
+                state.project.layers.remove(idx);
+                state.selected_guide = None;
+                if state.project.layers.is_empty() {
+                    state.selected_layer = None;
+                } else {
+                    state.selected_layer = Some(idx.min(state.project.layers.len() - 1));
+                }
+            }
+            if let Some((a, b)) = swap {
+                state.project.layers.swap(a, b);
+                state.selected_layer = Some(b);
+            }
+        }
+    }
 
     ui.separator();
 
@@ -308,4 +429,34 @@ fn seed_to_alpha(mut seed: u32) -> String {
 
 fn short_filename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
+}
+
+const LAYER_ICON_SIZE: f32 = 18.0;
+
+/// Draw a small icon with hover highlight (used within manual layer row painting).
+fn draw_layer_icon(
+    p: &egui::Painter,
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    icon: &str,
+    active: bool,
+    hovered: bool,
+) {
+    if hovered && active {
+        p.rect_filled(rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+    }
+    let color = if !active {
+        ui.visuals().weak_text_color().gamma_multiply(0.4)
+    } else if hovered {
+        ui.visuals().text_color()
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    p.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        icon,
+        egui::FontId::proportional(13.0),
+        color,
+    );
 }
