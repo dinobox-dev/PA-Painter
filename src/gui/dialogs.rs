@@ -7,7 +7,7 @@ use practical_arcana_painter::output::{
     normalize_height_map,
 };
 use practical_arcana_painter::project::{load_project, save_project, BaseColor, Project};
-use practical_arcana_painter::types::{BackgroundMode, Guide, Layer, PaintValues};
+use practical_arcana_painter::types::{BackgroundMode, Layer, PaintValues};
 
 use super::state::ReloadSummary;
 
@@ -218,7 +218,7 @@ pub fn reload_mesh(state: &mut AppState) {
                     group_name: name.clone(),
                     order,
                     paint: PaintValues::default(),
-                    guides: vec![Guide::default()],
+                    guides: vec![],
                 });
             }
 
@@ -439,7 +439,7 @@ fn create_layers_from_mesh(state: &AppState) -> Vec<Layer> {
             group_name: "__all__".to_string(),
             order: 0,
             paint: PaintValues::default(),
-            guides: vec![Guide::default()],
+            guides: vec![],
         }]
     } else {
         group_names
@@ -451,7 +451,7 @@ fn create_layers_from_mesh(state: &AppState) -> Vec<Layer> {
                 group_name: name,
                 order: i as i32,
                 paint: PaintValues::default(),
-                guides: vec![Guide::default()],
+                guides: vec![],
             })
             .collect()
     }

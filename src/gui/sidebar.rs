@@ -1,7 +1,7 @@
 use eframe::egui;
 
 use practical_arcana_painter::types::{
-    BackgroundMode, Guide, Layer, NormalMode, PaintValues, ResolutionPreset,
+    BackgroundMode, Layer, NormalMode, PaintValues, ResolutionPreset,
 };
 
 use super::state::AppState;
@@ -115,7 +115,7 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
                         group_name: "__all__".to_string(),
                         order,
                         paint: PaintValues::default(),
-                        guides: vec![Guide::default()],
+                        guides: vec![],
                     });
                     state.selected_layer = Some(state.project.layers.len() - 1);
                     state.selected_guide = None;
@@ -225,9 +225,12 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui: &mut egui::Ui| {
         ui.label("Seed:");
         let seed_text = seed_to_alpha(state.project.settings.seed);
+        // TextEdit fills remaining space minus Shuffle button width
+        let button_width = 60.0;
+        let text_width = (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(40.0);
         ui.add(
             egui::TextEdit::singleline(&mut seed_text.clone())
-                .desired_width(ui.available_width() - 72.0)
+                .desired_width(text_width)
                 .font(egui::TextStyle::Monospace)
                 .interactive(false),
         );

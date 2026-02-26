@@ -47,7 +47,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     // Derive per-layer seed from project seed + layer index
     let layer_seed = state.project.settings.seed.wrapping_add(idx as u32);
 
-    // Reborrow layer + cache for the rest of the editor
+    // Reborrow layer + cache for Brush + Layout sections
     let layer = &mut state.project.layers[idx];
     let cache = &mut state.preview_cache;
 
@@ -121,29 +121,42 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             } else {
                 layer.paint.normal_break_threshold = None;
             }
-
-
         });
+
+    // End layer/cache borrows so we can access state.selected_guide
+    let _ = cache;
+    let _ = layer;
 
     ui.add_space(4.0);
 
     // ── Guides ──
-    egui::CollapsingHeader::new(format!("Guides ({})", layer.guides.len()))
-        .default_open(true)
-        .show(ui, |ui: &mut egui::Ui| {
-            for (i, guide) in layer.guides.iter().enumerate() {
-                ui.label(format!(
-                    "#{i} {:?} pos({:.2},{:.2}) dir({:.2},{:.2}) r={:.2}",
-                    guide.guide_type,
-                    guide.position.x,
-                    guide.position.y,
-                    guide.direction.x,
-                    guide.direction.y,
-                    guide.influence,
-                ));
+    egui::CollapsingHeader::new(format!(
+        "Guides ({})",
+        state.project.layers[idx].guides.len()
+    ))
+    .default_open(true)
+    .show(ui, |ui: &mut egui::Ui| {
+        if state.project.layers[idx].guides.is_empty() {
+            ui.label(
+                egui::RichText::new("No guides")
+                    .color(egui::Color32::from_gray(120)),
+            );
+        }
+        for i in 0..state.project.layers[idx].guides.len() {
+            let guide = &state.project.layers[idx].guides[i];
+            let display_type = match guide.guide_type {
+                practical_arcana_painter::types::GuideType::Source
+                | practical_arcana_painter::types::GuideType::Sink => "Radial",
+                practical_arcana_painter::types::GuideType::Directional => "Directional",
+                practical_arcana_painter::types::GuideType::Vortex => "Vortex",
+            };
+            let label = format!("#{i} {display_type}");
+            let selected = state.selected_guide == Some(i);
+            if ui.selectable_label(selected, &label).clicked() {
+                state.selected_guide = if selected { None } else { Some(i) };
             }
-        });
-
+        }
+    });
 }
 
 // ── Preset Picker ──────────────────────────────────────────────

@@ -833,9 +833,42 @@ fn draw_guide_popup(ui: &mut egui::Ui, state: &mut AppState, viewport_rect: Rect
         .movable(false)
         .resizable(false)
         .collapsible(false)
+        .title_bar(false)
         .interactable(interactable)
         .fixed_pos(Pos2::new(popup_x, popup_y))
+        .default_width(popup_w)
         .show(ui.ctx(), |ui: &mut egui::Ui| {
+            use egui_phosphor::fill::*;
+
+            // Title row: guide name (left) + delete button (right)
+            let mut deleted = false;
+            let button_size = 24.0;
+            ui.horizontal(|ui: &mut egui::Ui| {
+                ui.label(format!("Guide #{}", guide_idx));
+                let space = (ui.available_width() - button_size).max(0.0);
+                ui.add_space(space);
+                ui.scope(|ui: &mut egui::Ui| {
+                    ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+                    ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                    let btn = egui::Button::new(
+                        egui::RichText::new(TRASH_SIMPLE).size(15.0),
+                    )
+                    .min_size(egui::Vec2::splat(button_size));
+                    if ui.add(btn).on_hover_text("Delete").clicked() {
+                        deleted = true;
+                    }
+                });
+            });
+
+            if deleted {
+                state.project.layers[layer_idx].guides.remove(guide_idx);
+                state.selected_guide = None;
+                state.guide_drag = None;
+                return;
+            }
+
+            ui.separator();
+
             let guide = &mut state.project.layers[layer_idx].guides[guide_idx];
 
             // Guide type — Source/Sink shown as "Radial"
@@ -844,40 +877,45 @@ fn draw_guide_popup(ui: &mut egui::Ui, state: &mut AppState, viewport_rect: Rect
                 GuideType::Directional => "Directional",
                 GuideType::Vortex => "Vortex",
             };
-            egui::ComboBox::from_label("Type")
-                .selected_text(display_type)
-                .show_ui(ui, |ui: &mut egui::Ui| {
-                    ui.selectable_value(
-                        &mut guide.guide_type,
-                        GuideType::Directional,
-                        "Directional",
-                    );
-                    // "Radial" maps to Source; Inward checkbox toggles to Sink
-                    if ui.selectable_value(
-                        &mut guide.guide_type,
-                        GuideType::Source,
-                        "Radial",
-                    ).changed() {
-                        guide.direction.x = 1.0; // reset to outward
+            ui.horizontal(|ui: &mut egui::Ui| {
+                egui::ComboBox::from_id_salt("guide_type")
+                    .selected_text(display_type)
+                    .show_ui(ui, |ui: &mut egui::Ui| {
+                        ui.selectable_value(
+                            &mut guide.guide_type,
+                            GuideType::Directional,
+                            "Directional",
+                        );
+                        if ui.selectable_value(
+                            &mut guide.guide_type,
+                            GuideType::Source,
+                            "Radial",
+                        ).changed() {
+                            guide.direction.x = 1.0;
+                        }
+                        ui.selectable_value(&mut guide.guide_type, GuideType::Vortex, "Vortex");
+                    });
+
+                // Sub-option toggle beside the combo
+                if guide.guide_type == GuideType::Source || guide.guide_type == GuideType::Sink {
+                    let outward = guide.guide_type == GuideType::Source;
+                    if ui.selectable_label(outward, "Out").clicked() {
+                        guide.guide_type = GuideType::Source;
                     }
-                    ui.selectable_value(&mut guide.guide_type, GuideType::Vortex, "Vortex");
-                });
-
-            // Inward (Radial: Source/Sink toggle)
-            if guide.guide_type == GuideType::Source || guide.guide_type == GuideType::Sink {
-                let mut inward = guide.guide_type == GuideType::Sink;
-                if ui.checkbox(&mut inward, "Inward").changed() {
-                    guide.guide_type = if inward { GuideType::Sink } else { GuideType::Source };
+                    if ui.selectable_label(!outward, "In").clicked() {
+                        guide.guide_type = GuideType::Sink;
+                    }
                 }
-            }
-
-            // Clockwise (Vortex only)
-            if guide.guide_type == GuideType::Vortex {
-                let mut cw = guide.direction.x < 0.0;
-                if ui.checkbox(&mut cw, "Clockwise").changed() {
-                    guide.direction.x = if cw { -1.0 } else { 1.0 };
+                if guide.guide_type == GuideType::Vortex {
+                    let cw = guide.direction.x < 0.0;
+                    if ui.selectable_label(!cw, "CCW").clicked() {
+                        guide.direction.x = 1.0;
+                    }
+                    if ui.selectable_label(cw, "CW").clicked() {
+                        guide.direction.x = -1.0;
+                    }
                 }
-            }
+            });
 
             // Influence
             ui.add(
@@ -891,12 +929,5 @@ fn draw_guide_popup(ui: &mut egui::Ui, state: &mut AppState, viewport_rect: Rect
                     .text("Strength"),
             );
 
-            // Delete button
-            ui.add_space(4.0);
-            if ui.button("Delete").clicked() {
-                state.project.layers[layer_idx].guides.remove(guide_idx);
-                state.selected_guide = None;
-                state.guide_drag = None;
-            }
         });
 }
