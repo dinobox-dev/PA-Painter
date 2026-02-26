@@ -11,69 +11,115 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
     // Lock content width to panel width so adding/removing layers won't resize the sidebar
     ui.set_max_width(ui.available_width());
 
-    // ── Mesh ──
-    egui::CollapsingHeader::new("Mesh")
-        .default_open(true)
-        .show(ui, |ui: &mut egui::Ui| {
-            if let Some(ref mesh) = state.loaded_mesh {
-                let mesh_path = &state.project.mesh_ref.path;
-                if !mesh_path.is_empty() {
-                    ui.label(format!("File: {}", short_filename(mesh_path)));
-                }
-                ui.label(format!("{} groups", mesh.groups.len()));
-
-                ui.horizontal(|ui: &mut egui::Ui| {
-                    if ui.small_button("Reload").clicked() {
-                        state.pending_reload_mesh = true;
-                    }
-                    if ui.small_button("Replace...").clicked() {
-                        state.pending_replace_mesh = true;
-                    }
-                });
-            } else {
-                ui.label("No mesh loaded.");
-            }
-        });
-
-    ui.separator();
-
-    // ── Base ──
+    // ── Base (Mesh, Color, Normal — one row each) ──
     egui::CollapsingHeader::new("Base")
         .default_open(true)
         .show(ui, |ui: &mut egui::Ui| {
-            // Base Color
-            ui.label("Color:");
-            if let Some(tex_path) = state.project.base_color.texture_path() {
-                ui.label(format!("  {}", short_filename(tex_path)));
+            use egui_phosphor::fill::{ARROW_CLOCKWISE, FOLDER_OPEN, X};
+
+            let label_w = 48.0;
+            let icon_w = LAYER_ICON_SIZE;
+            let row_h = LAYER_ICON_SIZE + 2.0;
+            let gap = 2.0;
+            // Compute text box width once from the outer scope, worst case = 3 icons (reload+load+clear)
+            let max_icons_w = icon_w * 3.0 + gap * 2.0;
+            let content_w = ui.available_width();
+            let text_w = (content_w - label_w - gap - max_icons_w - gap).max(30.0);
+
+            // ── Mesh row ──
+            let mesh_text = if let Some(ref mesh) = state.loaded_mesh {
+                let name = short_filename(&state.project.mesh_ref.path);
+                format!("{} ({} grp)", name, mesh.groups.len())
             } else {
-                ui.label("  (solid)");
-            }
-            if ui.small_button("Load Texture...").clicked() {
-                state.pending_load_texture = true;
-            }
+                "(none)".to_string()
+            };
+            let has_mesh = state.loaded_mesh.is_some();
+            ui.horizontal(|ui: &mut egui::Ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                { let (r, _) = ui.allocate_exact_size(egui::Vec2::new(label_w, row_h), egui::Sense::hover());
+                    ui.painter().text(egui::Pos2::new(r.min.x, r.center().y), egui::Align2::LEFT_CENTER, "Mesh", egui::TextStyle::Body.resolve(ui.style()), ui.visuals().text_color()); }
+                ui.add(
+                    egui::TextEdit::singleline(&mut mesh_text.clone())
+                        .desired_width(text_w)
+                        .interactive(false),
+                );
+                let (r_reload, resp_reload) = ui.allocate_exact_size(egui::Vec2::new(icon_w, row_h), egui::Sense::click());
+                draw_layer_icon(ui.painter(), ui, r_reload, ARROW_CLOCKWISE, has_mesh, resp_reload.hovered());
+                if resp_reload.on_hover_text("Reload mesh").clicked() && has_mesh {
+                    state.pending_reload_mesh = true;
+                }
+                let (r_replace, resp_replace) = ui.allocate_exact_size(egui::Vec2::new(icon_w, row_h), egui::Sense::click());
+                draw_layer_icon(ui.painter(), ui, r_replace, FOLDER_OPEN, true, resp_replace.hovered());
+                if resp_replace.on_hover_text("Replace mesh...").clicked() {
+                    state.pending_replace_mesh = true;
+                }
+            });
 
-            ui.add_space(4.0);
+            // ── Color row ──
+            let color_text = if let Some(tex_path) = state.project.base_color.texture_path() {
+                short_filename(tex_path).to_string()
+            } else {
+                "(solid)".to_string()
+            };
+            let has_texture = state.project.base_color.texture_path().is_some();
+            ui.horizontal(|ui: &mut egui::Ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                { let (r, _) = ui.allocate_exact_size(egui::Vec2::new(label_w, row_h), egui::Sense::hover());
+                    ui.painter().text(egui::Pos2::new(r.min.x, r.center().y), egui::Align2::LEFT_CENTER, "Color", egui::TextStyle::Body.resolve(ui.style()), ui.visuals().text_color()); }
+                ui.add(
+                    egui::TextEdit::singleline(&mut color_text.clone())
+                        .desired_width(text_w)
+                        .interactive(false),
+                );
+                let (r_reload, resp_reload) = ui.allocate_exact_size(egui::Vec2::new(icon_w, row_h), egui::Sense::click());
+                draw_layer_icon(ui.painter(), ui, r_reload, ARROW_CLOCKWISE, has_texture, resp_reload.hovered());
+                if resp_reload.on_hover_text("Reload texture").clicked() && has_texture {
+                    state.pending_reload_texture = true;
+                }
+                let (r_load, resp_load) = ui.allocate_exact_size(egui::Vec2::new(icon_w, row_h), egui::Sense::click());
+                draw_layer_icon(ui.painter(), ui, r_load, FOLDER_OPEN, true, resp_load.hovered());
+                if resp_load.on_hover_text("Load texture...").clicked() {
+                    state.pending_load_texture = true;
+                }
+            });
 
-            // Base Normal
-            ui.label("Normal:");
-            if let Some(ref normal_path) = state.project.base_normal {
-                ui.label(format!("  {}", short_filename(normal_path)));
-                ui.horizontal(|ui: &mut egui::Ui| {
-                    if ui.small_button("Replace...").clicked() {
-                        state.pending_load_normal = true;
-                    }
-                    if ui.small_button("Clear").clicked() {
+            // ── Normal row ──
+            let has_normal = state.project.base_normal.is_some();
+            let normal_text = if let Some(ref normal_path) = state.project.base_normal {
+                short_filename(normal_path).to_string()
+            } else {
+                "(none)".to_string()
+            };
+            ui.horizontal(|ui: &mut egui::Ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                { let (r, _) = ui.allocate_exact_size(egui::Vec2::new(label_w, row_h), egui::Sense::hover());
+                    ui.painter().text(egui::Pos2::new(r.min.x, r.center().y), egui::Align2::LEFT_CENTER, "Normal", egui::TextStyle::Body.resolve(ui.style()), ui.visuals().text_color()); }
+                ui.add(
+                    egui::TextEdit::singleline(&mut normal_text.clone())
+                        .desired_width(text_w)
+                        .interactive(false),
+                );
+                let (r_reload, resp_reload) = ui.allocate_exact_size(egui::Vec2::new(icon_w, row_h), egui::Sense::click());
+                draw_layer_icon(ui.painter(), ui, r_reload, ARROW_CLOCKWISE, has_normal, resp_reload.hovered());
+                if resp_reload.on_hover_text("Reload normal").clicked() && has_normal {
+                    state.pending_reload_normal = true;
+                }
+                let tip = if has_normal { "Replace normal..." } else { "Load normal..." };
+                let (r_load, resp_load) = ui.allocate_exact_size(egui::Vec2::new(icon_w, row_h), egui::Sense::click());
+                draw_layer_icon(ui.painter(), ui, r_load, FOLDER_OPEN, true, resp_load.hovered());
+                if resp_load.on_hover_text(tip).clicked() {
+                    state.pending_load_normal = true;
+                }
+                if has_normal {
+                    let (r_clear, resp_clear) = ui.allocate_exact_size(egui::Vec2::new(icon_w, row_h), egui::Sense::click());
+                    draw_layer_icon(ui.painter(), ui, r_clear, X, true, resp_clear.hovered());
+                    if resp_clear.on_hover_text("Clear normal").clicked() {
                         state.project.base_normal = None;
                         state.loaded_normal = None;
                         state.dirty = true;
                     }
-                });
-            } else {
-                ui.label("  (none)");
-                if ui.small_button("Load Normal...").clicked() {
-                    state.pending_load_normal = true;
                 }
-            }
+            });
         });
 
     ui.separator();

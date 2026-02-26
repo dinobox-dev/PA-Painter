@@ -310,9 +310,17 @@ impl eframe::App for PainterApp {
             self.state.pending_load_texture = false;
             dialogs::load_texture_dialog(&mut self.state, ctx);
         }
+        if self.state.pending_reload_texture {
+            self.state.pending_reload_texture = false;
+            dialogs::reload_texture(&mut self.state, ctx);
+        }
         if self.state.pending_load_normal {
             self.state.pending_load_normal = false;
             dialogs::load_normal_dialog(&mut self.state);
+        }
+        if self.state.pending_reload_normal {
+            self.state.pending_reload_normal = false;
+            dialogs::reload_normal(&mut self.state);
         }
 
         // Update per-layer path overlay caches (only recomputes stale layers)

@@ -158,7 +158,9 @@ pub struct AppState {
     pub pending_reload_mesh: bool,
     pub pending_replace_mesh: bool,
     pub pending_load_texture: bool,
+    pub pending_reload_texture: bool,
     pub pending_load_normal: bool,
+    pub pending_reload_normal: bool,
 
     /// Mesh reload diff summary shown as a dismissible window.
     pub reload_summary: Option<ReloadSummary>,
@@ -207,7 +209,9 @@ impl AppState {
             pending_reload_mesh: false,
             pending_replace_mesh: false,
             pending_load_texture: false,
+            pending_reload_texture: false,
             pending_load_normal: false,
+            pending_reload_normal: false,
             reload_summary: None,
             status_message: "Ready".to_string(),
             generation_snapshot: None,

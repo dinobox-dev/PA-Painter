@@ -297,6 +297,33 @@ pub fn load_texture_dialog(state: &mut AppState, ctx: &eframe::egui::Context) {
     }
 }
 
+/// Reload the base color texture from its current path.
+pub fn reload_texture(state: &mut AppState, ctx: &eframe::egui::Context) {
+    let Some(tex_path) = state.project.base_color.texture_path().map(|s| s.to_string()) else {
+        state.status_message = "No texture to reload.".to_string();
+        return;
+    };
+    match apply_texture(state, ctx, Path::new(&tex_path)) {
+        Ok(()) => state.status_message = "Texture reloaded.".to_string(),
+        Err(e) => state.status_message = e,
+    }
+}
+
+/// Reload the base normal map from its current path.
+pub fn reload_normal(state: &mut AppState) {
+    let Some(ref normal_path) = state.project.base_normal.clone() else {
+        state.status_message = "No normal map to reload.".to_string();
+        return;
+    };
+    match load_texture(Path::new(normal_path)) {
+        Ok(tex) => {
+            state.loaded_normal = Some(tex);
+            state.status_message = "Normal reloaded.".to_string();
+        }
+        Err(e) => state.status_message = format!("Normal reload failed: {e}"),
+    }
+}
+
 /// Open a file dialog to load (or replace) the base normal map.
 pub fn load_normal_dialog(state: &mut AppState) {
     let path = rfd::FileDialog::new()
