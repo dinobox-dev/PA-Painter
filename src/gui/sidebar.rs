@@ -152,9 +152,12 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
     egui::CollapsingHeader::new("Project Settings")
         .default_open(true)
         .show(ui, |ui: &mut egui::Ui| {
+            let combo_w = 110.0;
+
             // Resolution preset
             let current_res = state.project.settings.resolution_preset;
             egui::ComboBox::from_label("Resolution")
+                .width(combo_w)
                 .selected_text(format!("{}px", current_res.resolution()))
                 .show_ui(ui, |ui: &mut egui::Ui| {
                     for &preset in &[
@@ -173,6 +176,7 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
 
             // Normal mode
             egui::ComboBox::from_label("Normal Mode")
+                .width(combo_w)
                 .selected_text(match state.project.settings.normal_mode {
                     NormalMode::SurfacePaint => "SurfacePaint",
                     NormalMode::DepictedForm => "DepictedForm",
@@ -192,6 +196,7 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
 
             // Background mode
             egui::ComboBox::from_label("Background")
+                .width(combo_w)
                 .selected_text(match state.project.settings.background_mode {
                     BackgroundMode::Opaque => "Opaque",
                     BackgroundMode::Transparent => "Transparent",
