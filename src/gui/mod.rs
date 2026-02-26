@@ -300,6 +300,12 @@ impl eframe::App for PainterApp {
             self.state.cached_mesh_normals = None;
             self.init_mesh_preview();
         }
+        if self.state.pending_replace_mesh {
+            self.state.pending_replace_mesh = false;
+            dialogs::replace_mesh(&mut self.state);
+            self.state.cached_mesh_normals = None;
+            self.init_mesh_preview();
+        }
         if self.state.pending_load_texture {
             self.state.pending_load_texture = false;
             dialogs::load_texture_dialog(&mut self.state, ctx);

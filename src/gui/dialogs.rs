@@ -250,6 +250,24 @@ pub fn reload_mesh(state: &mut AppState) {
     }
 }
 
+/// Open a file dialog to pick a new mesh file, replacing the current one.
+/// Reuses the reload_mesh diff/summary logic.
+pub fn replace_mesh(state: &mut AppState) {
+    let path = rfd::FileDialog::new()
+        .add_filter("3D Mesh", &["glb", "gltf", "obj"])
+        .set_title("Replace mesh")
+        .pick_file();
+
+    let Some(path) = path else {
+        return;
+    };
+
+    // Update mesh path and delegate to reload_mesh logic
+    state.project.mesh_ref.path = path.to_string_lossy().to_string();
+    reload_mesh(state);
+    state.status_message = format!("Mesh replaced: {}", path.display());
+}
+
 /// Open a file dialog to load (or replace) the base color texture.
 pub fn load_texture_dialog(state: &mut AppState, ctx: &eframe::egui::Context) {
     let path = rfd::FileDialog::new()

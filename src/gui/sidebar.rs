@@ -22,9 +22,14 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
                 }
                 ui.label(format!("{} groups", mesh.groups.len()));
 
-                if ui.small_button("Reload Mesh").clicked() {
-                    state.pending_reload_mesh = true;
-                }
+                ui.horizontal(|ui: &mut egui::Ui| {
+                    if ui.small_button("Reload").clicked() {
+                        state.pending_reload_mesh = true;
+                    }
+                    if ui.small_button("Replace...").clicked() {
+                        state.pending_replace_mesh = true;
+                    }
+                });
             } else {
                 ui.label("No mesh loaded.");
             }

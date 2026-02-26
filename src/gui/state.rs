@@ -156,6 +156,7 @@ pub struct AppState {
     pub pending_export_glb: bool,
     pub pending_generate: bool,
     pub pending_reload_mesh: bool,
+    pub pending_replace_mesh: bool,
     pub pending_load_texture: bool,
     pub pending_load_normal: bool,
 
@@ -204,6 +205,7 @@ impl AppState {
             pending_export_glb: false,
             pending_generate: false,
             pending_reload_mesh: false,
+            pending_replace_mesh: false,
             pending_load_texture: false,
             pending_load_normal: false,
             reload_summary: None,
