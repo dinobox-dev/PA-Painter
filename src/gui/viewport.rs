@@ -83,7 +83,7 @@ fn icon_button(
     num: &str,
     tooltip: &str,
 ) -> bool {
-    let size = Vec2::splat(28.0);
+    let size = Vec2::splat(32.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
 
     if ui.is_rect_visible(rect) {
