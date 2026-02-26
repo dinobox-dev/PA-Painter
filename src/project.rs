@@ -102,7 +102,7 @@ impl Default for Project {
             base_color: BaseColor::default(),
             base_normal: None,
             layers: Vec::new(),
-            presets: PresetLibrary::built_in(),
+            presets: PresetLibrary::default(),
             settings: OutputSettings::default(),
             cached_height: None,
             cached_color: None,
