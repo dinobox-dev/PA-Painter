@@ -6,24 +6,34 @@ use practical_arcana_painter::types::{
 
 use super::state::AppState;
 
+const SECTION_INDENT: f32 = 8.0;
+
+/// Draw a section header label with a slightly larger font.
+fn section_header(ui: &mut egui::Ui, label: &str) {
+    let font = egui::FontId::proportional(14.0);
+    ui.add_space(2.0);
+    ui.label(egui::RichText::new(label).font(font).strong());
+    ui.add_space(1.0);
+}
+
 /// Draw the fixed top section: Base + Project Settings.
 pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
     ui.set_max_width(ui.available_width());
 
-    // ── Base (Mesh, Color, Normal — one row each) ──
-    egui::CollapsingHeader::new("Base")
-        .default_open(true)
-        .show(ui, |ui: &mut egui::Ui| {
-            use egui_phosphor::fill::{ARROW_CLOCKWISE, FOLDER_OPEN, X};
+    ui.spacing_mut().indent = SECTION_INDENT;
 
-            let label_w = 48.0;
-            let icon_w = LAYER_ICON_SIZE;
-            let row_h = LAYER_ICON_SIZE + 2.0;
-            let gap = 2.0;
-            // Compute text box width once from the outer scope, worst case = 3 icons (reload+load+clear)
-            let max_icons_w = icon_w * 3.0 + gap * 2.0;
-            let content_w = ui.available_width();
-            let text_w = (content_w - label_w - gap - max_icons_w - gap).max(30.0);
+    // ── Base (Mesh, Color, Normal — one row each) ──
+    section_header(ui, "Base");
+    ui.indent("base_content", |ui: &mut egui::Ui| {
+        use egui_phosphor::fill::{ARROW_CLOCKWISE, FOLDER_OPEN, X};
+
+        let label_w = 48.0;
+        let icon_w = LAYER_ICON_SIZE;
+        let row_h = LAYER_ICON_SIZE + 2.0;
+        let gap = 2.0;
+        let max_icons_w = icon_w * 3.0 + gap * 2.0;
+        let content_w = ui.available_width();
+        let text_w = (content_w - label_w - gap - max_icons_w - gap).max(30.0);
 
             // ── Mesh row ──
             let mesh_text = if let Some(ref mesh) = state.loaded_mesh {
@@ -119,15 +129,14 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
                     }
                 }
             });
-        });
+    });
 
     ui.separator();
 
     // ── Project Settings ──
-    egui::CollapsingHeader::new("Project Settings")
-        .default_open(true)
-        .show(ui, |ui: &mut egui::Ui| {
-            let combo_w = 110.0;
+    section_header(ui, "Settings");
+    ui.indent("settings_content", |ui: &mut egui::Ui| {
+        let combo_w = 110.0;
 
             // Resolution preset
             let current_res = state.project.settings.resolution_preset;
@@ -189,12 +198,14 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
                     );
                 });
 
-            // Normal strength
-            ui.add(
-                egui::Slider::new(&mut state.project.settings.normal_strength, 0.0..=1.0)
-                    .text("Normal Strength"),
-            );
-        });
+        // Normal strength
+        ui.add(
+            egui::Slider::new(&mut state.project.settings.normal_strength, 0.0..=1.0)
+                .text("Normal Strength"),
+        );
+    });
+
+    ui.separator();
 }
 
 /// Draw the layers header: "Layers" label + [+] button (pinned above scroll).
@@ -202,7 +213,8 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
     use egui_phosphor::fill::PLUS;
 
     ui.horizontal(|ui: &mut egui::Ui| {
-        ui.strong("Layers");
+        let font = egui::FontId::proportional(14.0);
+        ui.label(egui::RichText::new("Layers").font(font).strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui: &mut egui::Ui| {
             let has_mesh = state.loaded_mesh.is_some();
             let size = egui::Vec2::splat(20.0);
@@ -230,6 +242,9 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
 /// Draw the scrollable layer rows.
 pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
     ui.set_max_width(ui.available_width());
+    ui.spacing_mut().indent = SECTION_INDENT;
+
+    ui.indent("layers_rows", |ui: &mut egui::Ui| {
 
     use egui_phosphor::fill::{ARROW_DOWN, ARROW_UP, EYE, EYE_SLASH, TRASH_SIMPLE};
 
@@ -395,6 +410,8 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
             state.selected_layer = Some(b);
         }
     }
+
+    }); // indent
 }
 
 /// Draw the bottom-pinned section: Seed + Generate button.
