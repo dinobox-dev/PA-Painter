@@ -1,7 +1,9 @@
 use eframe::egui;
 
 use practical_arcana_painter::brush_profile;
+use practical_arcana_painter::object_normal::MeshNormalData;
 use practical_arcana_painter::path_placement;
+use practical_arcana_painter::stroke_color::ColorTextureRef;
 use practical_arcana_painter::stroke_height;
 use practical_arcana_painter::types::{Guide, Layer, PaintValues, StrokeParams};
 
@@ -128,9 +130,17 @@ impl LayerPathCache {
     }
 
     /// Recompute paths for this layer at the given resolution.
-    pub fn recompute(&mut self, layer: &Layer, seed: u32, resolution: u32) {
+    pub fn recompute(
+        &mut self,
+        layer: &Layer,
+        seed: u32,
+        resolution: u32,
+        color_tex: Option<&ColorTextureRef<'_>>,
+        normal_data: Option<&MeshNormalData>,
+    ) {
         let paint_layer = layer.to_paint_layer_with_seed(seed);
-        let paths = path_placement::generate_paths(&paint_layer, 0, resolution, None, None, None);
+        let paths =
+            path_placement::generate_paths(&paint_layer, 0, resolution, color_tex, normal_data, None);
         self.paths = paths
             .iter()
             .map(|p| p.points.iter().map(|v| [v.x, v.y]).collect())
@@ -171,12 +181,19 @@ impl PathOverlayCache {
 
     /// Update caches for all visible layers at the given resolution.
     /// Only recomputes stale entries. Each layer derives `base_seed + i`.
-    pub fn update(&mut self, layers: &[Layer], base_seed: u32, resolution: u32) {
+    pub fn update(
+        &mut self,
+        layers: &[Layer],
+        base_seed: u32,
+        resolution: u32,
+        color_tex: Option<&ColorTextureRef<'_>>,
+        normal_data: Option<&MeshNormalData>,
+    ) {
         self.sync_layer_count(layers.len());
         for (i, layer) in layers.iter().enumerate() {
             let seed = base_seed.wrapping_add(i as u32);
             if layer.visible && self.caches[i].is_stale(layer, seed, resolution) {
-                self.caches[i].recompute(layer, seed, resolution);
+                self.caches[i].recompute(layer, seed, resolution, color_tex, normal_data);
             }
         }
     }

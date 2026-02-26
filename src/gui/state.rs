@@ -140,6 +140,9 @@ pub struct AppState {
     pub preview_cache: PreviewCache,
     pub path_overlay: preview::PathOverlayCache,
     pub preset_thumbnails: preview::PresetThumbnailCache,
+    /// Cached mesh normal data for path overlay normal-break preview.
+    /// Tuple of (resolution, data); invalidated on mesh reload or resolution change.
+    pub cached_mesh_normals: Option<(u32, practical_arcana_painter::object_normal::MeshNormalData)>,
 
     // ── Generation ──
     pub generation: GenerationManager,
@@ -191,6 +194,7 @@ impl AppState {
             preview_cache: PreviewCache::default(),
             path_overlay: preview::PathOverlayCache::default(),
             preset_thumbnails: preview::PresetThumbnailCache::default(),
+            cached_mesh_normals: None,
             generation: GenerationManager::default(),
             generated: None,
             pending_open: false,

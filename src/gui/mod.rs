@@ -15,6 +15,7 @@ use eframe::egui_wgpu;
 use state::{AppState, GuideTool, MapMode, ViewportTab};
 
 use practical_arcana_painter::object_normal::compute_mesh_normal_data;
+use practical_arcana_painter::stroke_color::ColorTextureRef;
 use practical_arcana_painter::types::{pixels_to_colors, Color, NormalMode};
 
 /// Main GUI application.
@@ -265,6 +266,7 @@ impl eframe::App for PainterApp {
         if self.state.pending_open {
             self.state.pending_open = false;
             dialogs::open_project(&mut self.state, ctx);
+            self.state.cached_mesh_normals = None;
             self.init_mesh_preview();
         }
         if self.state.pending_save {
@@ -286,11 +288,13 @@ impl eframe::App for PainterApp {
         if self.state.pending_new {
             self.state.pending_new = false;
             dialogs::new_project(&mut self.state, ctx);
+            self.state.cached_mesh_normals = None;
             self.init_mesh_preview();
         }
         if self.state.pending_reload_mesh {
             self.state.pending_reload_mesh = false;
             dialogs::reload_mesh(&mut self.state);
+            self.state.cached_mesh_normals = None;
             self.init_mesh_preview();
         }
         if self.state.pending_load_texture {
@@ -306,7 +310,54 @@ impl eframe::App for PainterApp {
         if self.state.viewport.path_overlay_idx.is_some() {
             let res = self.state.project.settings.resolution_preset.resolution();
             let seed = self.state.project.settings.seed;
-            self.state.path_overlay.update(&self.state.project.layers, seed, res);
+
+            // Prepare color texture ref for color-break preview
+            let colors: Option<Vec<practical_arcana_painter::types::Color>> = self
+                .state
+                .loaded_texture
+                .as_ref()
+                .map(|tex| pixels_to_colors(&tex.pixels));
+            let color_ref = match (&colors, &self.state.loaded_texture) {
+                (Some(c), Some(tex)) => Some(ColorTextureRef {
+                    data: c,
+                    width: tex.width,
+                    height: tex.height,
+                }),
+                _ => None,
+            };
+
+            // Prepare normal data for normal-break preview (lazily cached)
+            let needs_normal = self
+                .state
+                .project
+                .layers
+                .iter()
+                .any(|l| l.paint.normal_break_threshold.is_some());
+            if needs_normal {
+                let stale = match &self.state.cached_mesh_normals {
+                    Some((cached_res, _)) => *cached_res != res,
+                    None => true,
+                };
+                if stale {
+                    if let Some(mesh) = self.state.loaded_mesh.as_ref() {
+                        self.state.cached_mesh_normals =
+                            Some((res, compute_mesh_normal_data(mesh, res)));
+                    }
+                }
+            }
+            let normal_data = self
+                .state
+                .cached_mesh_normals
+                .as_ref()
+                .map(|(_, nd)| nd);
+
+            self.state.path_overlay.update(
+                &self.state.project.layers,
+                seed,
+                res,
+                color_ref.as_ref(),
+                normal_data,
+            );
         }
 
         // Poll generation results
