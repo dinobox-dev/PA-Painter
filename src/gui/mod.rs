@@ -103,7 +103,10 @@ impl PainterApp {
             base_normal_w,
             base_normal_h,
         });
-        self.state.generation_snapshot = Some(self.state.project.layers.clone());
+        self.state.generation_snapshot = Some((
+            self.state.project.layers.clone(),
+            self.state.project.settings.clone(),
+        ));
         self.state.status_message = format!("Generating at {}px...", resolution);
     }
 

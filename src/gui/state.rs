@@ -165,8 +165,8 @@ pub struct AppState {
     // ── Status ──
     pub status_message: String,
 
-    /// Snapshot of layers at last generation — used to detect outdated results.
-    pub generation_snapshot: Option<Vec<Layer>>,
+    /// Snapshot of layers + settings at last generation — used to detect outdated results.
+    pub generation_snapshot: Option<(Vec<Layer>, practical_arcana_painter::types::OutputSettings)>,
 
     // ── Undo/Redo ──
     pub undo: UndoHistory,
@@ -255,8 +255,8 @@ impl AppState {
             }
             return None;
         }
-        if let Some(ref snapshot) = self.generation_snapshot {
-            if *snapshot != self.project.layers {
+        if let Some((ref layers, ref settings)) = self.generation_snapshot {
+            if *layers != self.project.layers || *settings != self.project.settings {
                 return Some("Modified");
             }
         }
