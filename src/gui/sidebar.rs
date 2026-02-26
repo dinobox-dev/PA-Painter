@@ -148,8 +148,8 @@ pub fn show_left(ui: &mut egui::Ui, state: &mut AppState) {
 
     ui.separator();
 
-    // ── Output Settings ──
-    egui::CollapsingHeader::new("Output")
+    // ── Project Settings ──
+    egui::CollapsingHeader::new("Project Settings")
         .default_open(true)
         .show(ui, |ui: &mut egui::Ui| {
             // Resolution preset
