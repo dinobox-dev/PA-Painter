@@ -688,12 +688,10 @@ fn draw_path_overlay(painter: &egui::Painter, state: &AppState, rect: Rect) {
         .get(idx)
         .unwrap_or(&super::state::PATH_PALETTE[0]);
 
-    let visible = state.path_overlay.visible_paths(&state.project.layers);
-
     let path_stroke = egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(r, g, b, 80));
 
-    for (_layer_idx, paths) in &visible {
-        for path in *paths {
+    if let Some((_layer_idx, paths)) = state.path_overlay.selected_paths(state.selected_layer) {
+        for path in paths {
             for w in path.windows(2) {
                 let a = uv_to_screen(glam::Vec2::new(w[0][0], w[0][1]), state, rect);
                 let b = uv_to_screen(glam::Vec2::new(w[1][0], w[1][1]), state, rect);

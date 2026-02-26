@@ -179,33 +179,37 @@ impl PathOverlayCache {
         }
     }
 
-    /// Update caches for all visible layers at the given resolution.
-    /// Only recomputes stale entries. Each layer derives `base_seed + i`.
+    /// Update cache for the selected layer only.
+    /// Non-selected caches are cleared to free memory.
     pub fn update(
         &mut self,
         layers: &[Layer],
         base_seed: u32,
         resolution: u32,
+        selected: Option<usize>,
         color_tex: Option<&ColorTextureRef<'_>>,
         normal_data: Option<&MeshNormalData>,
     ) {
         self.sync_layer_count(layers.len());
-        for (i, layer) in layers.iter().enumerate() {
-            let seed = base_seed.wrapping_add(i as u32);
-            if layer.visible && self.caches[i].is_stale(layer, seed, resolution) {
-                self.caches[i].recompute(layer, seed, resolution, color_tex, normal_data);
+        for (i, cache) in self.caches.iter_mut().enumerate() {
+            if Some(i) == selected {
+                let layer = &layers[i];
+                let seed = base_seed.wrapping_add(i as u32);
+                if layer.visible && cache.is_stale(layer, seed, resolution) {
+                    cache.recompute(layer, seed, resolution, color_tex, normal_data);
+                }
+            } else {
+                // Free memory for non-selected layers
+                cache.key = None;
+                cache.paths = Vec::new();
             }
         }
     }
 
-    /// Get cached paths for all visible layers.
-    pub fn visible_paths<'a>(&'a self, layers: &[Layer]) -> Vec<(usize, &'a Vec<Vec<[f32; 2]>>)> {
-        layers
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| l.visible)
-            .filter_map(|(i, _)| self.caches.get(i).map(|c| (i, &c.paths)))
-            .collect()
+    /// Get cached paths for the selected layer (if any).
+    pub fn selected_paths(&self, selected: Option<usize>) -> Option<(usize, &Vec<Vec<[f32; 2]>>)> {
+        let i = selected?;
+        self.caches.get(i).map(|c| (i, &c.paths))
     }
 }
 

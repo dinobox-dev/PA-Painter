@@ -372,6 +372,7 @@ impl eframe::App for PainterApp {
                 &self.state.project.layers,
                 seed,
                 res,
+                self.state.selected_layer,
                 color_ref.as_ref(),
                 normal_data,
             );
