@@ -468,9 +468,16 @@ impl eframe::App for PainterApp {
                     .show_inside(ui, |ui: &mut egui::Ui| {
                         sidebar::show_bottom(ui, &mut self.state);
                     });
-                // Scrollable content above
+                // Top-pinned: Base + Project Settings + Layers header
+                egui::TopBottomPanel::top("left_top")
+                    .show_inside(ui, |ui: &mut egui::Ui| {
+                        sidebar::show_top(ui, &mut self.state);
+                        sidebar::show_layers_header(ui, &mut self.state);
+                    });
+                // Scrollable layer rows (thin scrollbar visible even when not hovering)
+                ui.spacing_mut().scroll.dormant_handle_opacity = 0.4;
                 egui::ScrollArea::vertical().show(ui, |ui: &mut egui::Ui| {
-                    sidebar::show_left(ui, &mut self.state);
+                    sidebar::show_layer_rows(ui, &mut self.state);
                 });
             });
 
