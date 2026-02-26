@@ -213,7 +213,10 @@ impl eframe::App for PainterApp {
         }
 
         // ── Escape: deselect guide + return to Select tool ──
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        // Skip when a modal popup is open so it can handle Escape itself.
+        if !self.state.popup_open
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
             self.state.selected_guide = None;
             self.state.guide_tool = GuideTool::Select;
         }

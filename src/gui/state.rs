@@ -165,6 +165,11 @@ pub struct AppState {
     /// Mesh reload diff summary shown as a dismissible window.
     pub reload_summary: Option<ReloadSummary>,
 
+    // ── Popup State ──
+    /// True while a modal popup (e.g. "Save as Preset") is open.
+    /// Used to prevent global key handlers from consuming events.
+    pub popup_open: bool,
+
     // ── Status ──
     pub status_message: String,
 
@@ -213,6 +218,7 @@ impl AppState {
             pending_load_normal: false,
             pending_reload_normal: false,
             reload_summary: None,
+            popup_open: false,
             status_message: "Ready".to_string(),
             generation_snapshot: None,
             undo: UndoHistory::default(),

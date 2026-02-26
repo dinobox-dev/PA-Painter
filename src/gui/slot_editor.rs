@@ -396,9 +396,21 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
         ui.data_mut(|d| d.insert_temp::<String>(save_name_id, String::new()));
     }
 
+    // Tell the global key handler whether this popup is open
+    state.popup_open = save_open;
+
     if save_open {
         let mut name: String = ui.data_mut(|d| d.get_temp(save_name_id).unwrap_or_default());
         let mut close = false;
+
+        // Check keys at context level so TextEdit focus doesn't swallow them
+        let enter = ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
+        let esc = ui
+            .ctx()
+            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        if esc {
+            close = true;
+        }
 
         let area_resp = egui::Area::new(egui::Id::new("save_preset_popup"))
             .order(egui::Order::Foreground)
@@ -416,8 +428,9 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
                             text_resp.request_focus();
                         }
                     });
+
                     ui.horizontal(|ui: &mut egui::Ui| {
-                        if ui.button("Save").clicked() && !name.trim().is_empty() {
+                        if (ui.button("Save").clicked() || enter) && !name.trim().is_empty() {
                             let preset = PaintPreset {
                                 name: name.trim().to_string(),
                                 values: state.project.layers[layer_idx].paint.clone(),
