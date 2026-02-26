@@ -53,8 +53,8 @@ pub fn show(
     // ── Top tab bar ──
     ui.horizontal(|ui: &mut egui::Ui| {
         let tabs = [
-            (ViewportTab::UvView, "UV View"),
             (ViewportTab::Guide, "Guide"),
+            (ViewportTab::UvView, "UV View"),
             (ViewportTab::Mesh3D, "3D"),
         ];
         for (tab, label) in &tabs {
@@ -124,6 +124,175 @@ fn icon_button(
     response.on_hover_text(tooltip).clicked()
 }
 
+/// Wireframe toggle + path overlay button with popup palette, shared by UV and Guide strips.
+fn strip_overlay_controls(ui: &mut egui::Ui, state: &mut AppState) {
+    overlay_text_button(ui, "Wireframe", state.viewport.show_wireframe, || {
+        state.viewport.show_wireframe = !state.viewport.show_wireframe;
+    });
+    path_overlay_button(ui, &mut state.viewport.path_overlay_idx);
+}
+
+/// 32px-tall text toggle button. Active = tinted background, inactive = plain.
+fn overlay_text_button(ui: &mut egui::Ui, label: &str, active: bool, on_click: impl FnOnce()) {
+    let font = egui::FontId::proportional(14.0);
+    let galley = ui.painter().layout_no_wrap(
+        label.to_string(),
+        font.clone(),
+        ui.visuals().text_color(),
+    );
+    let text_size = galley.size();
+    let pad_x = 8.0;
+    let desired = Vec2::new(text_size.x + pad_x * 2.0, 32.0);
+    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let p = ui.painter();
+        let cr = 4.0;
+        if active {
+            p.rect_filled(rect, cr, ui.visuals().selection.bg_fill);
+        } else if resp.hovered() {
+            p.rect_filled(rect, cr, ui.visuals().widgets.hovered.bg_fill);
+        }
+        let text_color = if active {
+            ui.visuals().selection.stroke.color
+        } else {
+            ui.visuals().text_color()
+        };
+        let text_pos = Pos2::new(rect.left() + pad_x, rect.center().y - text_size.y * 0.5);
+        p.galley(text_pos, galley, text_color);
+    }
+    if resp.clicked() {
+        on_click();
+    }
+}
+
+/// "Paths" + color dot as one 32px-tall button. Click opens popup palette above.
+fn path_overlay_button(ui: &mut egui::Ui, selected: &mut Option<usize>) {
+    use super::state::PATH_PALETTE;
+
+    let dot_r = 6.0;
+    let font = egui::FontId::proportional(14.0);
+    let galley = ui.painter().layout_no_wrap(
+        "Paths".to_string(),
+        font.clone(),
+        ui.visuals().text_color(),
+    );
+    let text_size = galley.size();
+
+    // Layout: [pad] text [gap] dot [pad]
+    let pad_x = 8.0;
+    let gap = 8.0;
+    let total_w = pad_x + text_size.x + gap + dot_r * 2.0 + pad_x;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(total_w, 32.0), Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let p = ui.painter();
+        let cr = 4.0;
+
+        if resp.hovered() {
+            p.rect_filled(rect, cr, ui.visuals().widgets.hovered.bg_fill);
+        }
+
+        // Text
+        let text_pos = Pos2::new(rect.left() + pad_x, rect.center().y - text_size.y * 0.5);
+        p.galley(text_pos, galley, ui.visuals().text_color());
+
+        // Color dot
+        let dot_center = Pos2::new(
+            rect.right() - pad_x - dot_r,
+            rect.center().y,
+        );
+        match *selected {
+            Some(idx) => {
+                let &[rc, gc, bc] = PATH_PALETTE.get(idx).unwrap_or(&PATH_PALETTE[0]);
+                // Fill + white border
+                p.circle_filled(dot_center, dot_r, Color32::from_rgb(rc, gc, bc));
+                p.circle_stroke(
+                    dot_center,
+                    dot_r,
+                    egui::Stroke::new(2.0, Color32::from_rgba_unmultiplied(255, 255, 255, 200)),
+                );
+            }
+            None => {
+                let gray: u8 = 100;
+                p.circle_stroke(
+                    dot_center,
+                    dot_r,
+                    egui::Stroke::new(1.0, Color32::from_gray(gray)),
+                );
+                let d = dot_r * 0.55;
+                p.line_segment(
+                    [
+                        Pos2::new(dot_center.x - d, dot_center.y + d),
+                        Pos2::new(dot_center.x + d, dot_center.y - d),
+                    ],
+                    egui::Stroke::new(1.0, Color32::from_gray(gray)),
+                );
+            }
+        }
+    }
+
+    // Popup palette — opens above the button
+    let popup_dot_r = 6.0;
+    let popup_dot_size = Vec2::splat(popup_dot_r * 2.0 + 6.0);
+
+    egui::Popup::from_toggle_button_response(&resp)
+        .align(egui::RectAlign::TOP_START)
+        .align_alternatives(&[egui::RectAlign::TOP_END])
+        .gap(8.0)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui: &mut egui::Ui| {
+            ui.horizontal(|ui: &mut egui::Ui| {
+                // "Off" option
+                let is_off = selected.is_none();
+                let (rect, resp) = ui.allocate_exact_size(popup_dot_size, Sense::click());
+                if ui.is_rect_visible(rect) {
+                    let c = rect.center();
+                    let p = ui.painter();
+                    if is_off {
+                        p.circle_stroke(c, popup_dot_r + 2.0, egui::Stroke::new(1.5, Color32::WHITE));
+                    }
+                    let gray = if resp.hovered() { 160 } else { 100 };
+                    p.circle_stroke(c, popup_dot_r, egui::Stroke::new(1.0, Color32::from_gray(gray)));
+                    let d = popup_dot_r * 0.55;
+                    p.line_segment(
+                        [Pos2::new(c.x - d, c.y + d), Pos2::new(c.x + d, c.y - d)],
+                        egui::Stroke::new(1.0, Color32::from_gray(gray)),
+                    );
+                }
+                if resp.on_hover_text("Off").clicked() {
+                    *selected = None;
+                }
+
+                // Palette colors
+                for (i, &[rc, gc, bc]) in PATH_PALETTE.iter().enumerate() {
+                    let is_sel = *selected == Some(i);
+                    let (rect, resp) = ui.allocate_exact_size(popup_dot_size, Sense::click());
+                    if ui.is_rect_visible(rect) {
+                        let c = rect.center();
+                        let p = ui.painter();
+                        let alpha = if resp.hovered() || is_sel { 255 } else { 180 };
+                        p.circle_filled(
+                            c,
+                            popup_dot_r,
+                            Color32::from_rgba_unmultiplied(rc, gc, bc, alpha),
+                        );
+                        if is_sel {
+                            p.circle_stroke(
+                                c,
+                                popup_dot_r + 2.0,
+                                egui::Stroke::new(1.5, Color32::WHITE),
+                            );
+                        }
+                    }
+                    if resp.clicked() {
+                        *selected = Some(i);
+                    }
+                }
+            });
+        });
+}
+
 fn strip_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 4.0;
     use egui_phosphor::fill::*;
@@ -139,8 +308,9 @@ fn strip_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
         }
     }
     ui.separator();
-    ui.checkbox(&mut state.viewport.show_wireframe, "Wireframe");
-    ui.checkbox(&mut state.viewport.show_path_overlay, "Paths");
+    overlay_text_button(ui, "Wireframe", state.viewport.show_wireframe, || {
+        state.viewport.show_wireframe = !state.viewport.show_wireframe;
+    });
 }
 
 fn strip_guide(ui: &mut egui::Ui, state: &mut AppState) {
@@ -162,6 +332,8 @@ fn strip_guide(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
     }
+    ui.separator();
+    strip_overlay_controls(ui, state);
 }
 
 fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
@@ -195,7 +367,6 @@ fn show_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
 
     draw_texture(&painter, tex, state, rect);
     draw_wireframe(&painter, state, rect);
-    draw_path_overlay(&painter, state, rect);
 
     draw_stale_badge(&painter, state, rect);
 
@@ -232,6 +403,16 @@ fn show_guide_view(ui: &mut egui::Ui, state: &mut AppState) {
         .or(state.textures.base_texture.as_ref());
     draw_texture(&painter, tex, state, rect);
     draw_wireframe(&painter, state, rect);
+
+    // Dim overlay so guides stand out
+    let uv_min = uv_to_screen(glam::Vec2::ZERO, state, rect);
+    let uv_max = uv_to_screen(glam::Vec2::ONE, state, rect);
+    painter.rect_filled(
+        Rect::from_min_max(uv_min, uv_max),
+        0.0,
+        Color32::from_rgba_unmultiplied(0, 0, 0, 100),
+    );
+
     draw_path_overlay(&painter, state, rect);
 
     // Guides (always shown in Guide tab)
@@ -324,7 +505,7 @@ fn draw_texture(
     painter.rect_stroke(
         tex_rect,
         0.0,
-        egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 80)),
+        egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160)),
         egui::StrokeKind::Outside,
     );
 }
@@ -334,8 +515,15 @@ fn draw_wireframe(painter: &egui::Painter, state: &AppState, rect: Rect) {
         return;
     }
     if let Some(ref edges) = state.uv_edges {
+        let halo_stroke =
+            egui::Stroke::new(2.0, Color32::from_rgba_unmultiplied(0, 0, 0, 100));
         let wire_stroke =
-            egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 200, 255, 50));
+            egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 150));
+        for &(a, b) in edges {
+            let sa = uv_to_screen(a, state, rect);
+            let sb = uv_to_screen(b, state, rect);
+            painter.line_segment([sa, sb], halo_stroke);
+        }
         for &(a, b) in edges {
             let sa = uv_to_screen(a, state, rect);
             let sb = uv_to_screen(b, state, rect);
@@ -359,12 +547,13 @@ fn draw_guides(painter: &egui::Painter, state: &AppState, rect: Rect) {
         let radius_px = guide.influence * state.viewport.zoom;
 
         // Influence circle
-        let circ_alpha = if is_sel { 80 } else { 40 };
+        let circ_width = if is_sel { 2.5 } else { 2.0 };
+        let circ_alpha = if is_sel { 200 } else { 120 };
         painter.circle_stroke(
             center,
             radius_px,
             egui::Stroke::new(
-                1.0,
+                circ_width,
                 Color32::from_rgba_unmultiplied(255, 200, 0, circ_alpha),
             ),
         );
@@ -492,29 +681,23 @@ fn draw_guide_vortex(
 
 /// Draw per-layer path overlay lines on the viewport.
 fn draw_path_overlay(painter: &egui::Painter, state: &AppState, rect: Rect) {
-    if !state.viewport.show_path_overlay {
+    let Some(idx) = state.viewport.path_overlay_idx else {
         return;
-    }
+    };
+    let &[r, g, b] = super::state::PATH_PALETTE
+        .get(idx)
+        .unwrap_or(&super::state::PATH_PALETTE[0]);
 
     let visible = state.path_overlay.visible_paths(&state.project.layers);
 
-    // Color palette for different layers (cycle through)
-    let layer_colors = [
-        Color32::from_rgba_unmultiplied(200, 180, 140, 100), // warm cream
-        Color32::from_rgba_unmultiplied(140, 180, 200, 100), // cool blue
-        Color32::from_rgba_unmultiplied(180, 200, 140, 100), // sage green
-        Color32::from_rgba_unmultiplied(200, 140, 180, 100), // pink
-    ];
+    let path_stroke = egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(r, g, b, 80));
 
-    for (layer_idx, paths) in &visible {
-        let color = layer_colors[*layer_idx % layer_colors.len()];
-        let stroke = egui::Stroke::new(1.0, color);
-
+    for (_layer_idx, paths) in &visible {
         for path in *paths {
             for w in path.windows(2) {
                 let a = uv_to_screen(glam::Vec2::new(w[0][0], w[0][1]), state, rect);
                 let b = uv_to_screen(glam::Vec2::new(w[1][0], w[1][1]), state, rect);
-                painter.line_segment([a, b], stroke);
+                painter.line_segment([a, b], path_stroke);
             }
         }
     }
@@ -526,14 +709,10 @@ fn draw_arrowhead(painter: &egui::Painter, tip: Pos2, dir: glam::Vec2, color: Co
     let hs = 8.0;
     let bx = tip.x - dir.x * hs;
     let by = tip.y - dir.y * hs;
-    painter.line_segment(
-        [tip, Pos2::new(bx + perp.x * hs * 0.5, by + perp.y * hs * 0.5)],
-        egui::Stroke::new(2.0, color),
-    );
-    painter.line_segment(
-        [tip, Pos2::new(bx - perp.x * hs * 0.5, by - perp.y * hs * 0.5)],
-        egui::Stroke::new(2.0, color),
-    );
+    let left = Pos2::new(bx + perp.x * hs * 0.5, by + perp.y * hs * 0.5);
+    let right = Pos2::new(bx - perp.x * hs * 0.5, by - perp.y * hs * 0.5);
+    painter.line_segment([tip, left], egui::Stroke::new(2.0, color));
+    painter.line_segment([tip, right], egui::Stroke::new(2.0, color));
 }
 
 /// Draw a stale/not-generated badge in the top-right corner of the viewport.

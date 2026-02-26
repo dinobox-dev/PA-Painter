@@ -67,8 +67,18 @@ pub struct ViewportState {
     /// Zoom level: pixels per UV unit. E.g., 512.0 means 1 UV = 512 screen pixels.
     pub zoom: f32,
     pub show_wireframe: bool,
-    pub show_path_overlay: bool,
+    /// Path overlay palette index, or None to hide paths.
+    pub path_overlay_idx: Option<usize>,
 }
+
+/// Predefined path overlay colors (RGB).
+pub const PATH_PALETTE: &[[u8; 3]] = &[
+    [80, 220, 255],  // cyan
+    [255, 220, 80],  // gold
+    [255, 100, 220], // pink
+    [120, 255, 80],  // lime
+    [220, 220, 220], // white
+];
 
 impl Default for ViewportState {
     fn default() -> Self {
@@ -76,7 +86,7 @@ impl Default for ViewportState {
             offset: Vec2::ZERO,
             zoom: 512.0,
             show_wireframe: true,
-            show_path_overlay: true,
+            path_overlay_idx: Some(0),
         }
     }
 }

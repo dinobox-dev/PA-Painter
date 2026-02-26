@@ -303,7 +303,7 @@ impl eframe::App for PainterApp {
         }
 
         // Update per-layer path overlay caches (only recomputes stale layers)
-        if self.state.viewport.show_path_overlay {
+        if self.state.viewport.path_overlay_idx.is_some() {
             let res = self.state.project.settings.resolution_preset.resolution();
             let seed = self.state.project.settings.seed;
             self.state.path_overlay.update(&self.state.project.layers, seed, res);
@@ -364,7 +364,11 @@ impl eframe::App for PainterApp {
                 });
                 ui.menu_button("View", |ui: &mut egui::Ui| {
                     ui.checkbox(&mut self.state.viewport.show_wireframe, "UV Wireframe");
-                    ui.checkbox(&mut self.state.viewport.show_path_overlay, "Path Overlay");
+                    let mut paths_on = self.state.viewport.path_overlay_idx.is_some();
+                    if ui.checkbox(&mut paths_on, "Path Overlay").changed() {
+                        self.state.viewport.path_overlay_idx =
+                            if paths_on { Some(0) } else { None };
+                    }
                 });
 
             });
