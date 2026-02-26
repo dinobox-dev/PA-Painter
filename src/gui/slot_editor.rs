@@ -186,18 +186,15 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
     let mut delete_user_idx: Option<usize> = None;
     let thumbs = &mut state.preset_thumbnails;
 
-    // Measure "Preset" label width to fill remaining space with combo button
-    let label_text = "Preset";
-    let label_galley = ui.painter().layout_no_wrap(
-        label_text.to_string(),
-        egui::TextStyle::Body.resolve(ui.style()),
-        egui::Color32::WHITE,
-    );
-    let combo_w = (ui.available_width() - label_galley.size().x - ui.spacing().item_spacing.x).max(60.0);
+    // Preset row: label first, then ComboBox fills remaining width
+    ui.horizontal(|ui: &mut egui::Ui| {
+    ui.label("Preset");
+    let combo_w = ui.available_width();
 
-    egui::ComboBox::from_label(label_text)
+    egui::ComboBox::from_id_salt("preset_combo")
         .selected_text(&current_name)
         .width(combo_w)
+        .truncate()
         .show_ui(ui, |ui: &mut egui::Ui| {
             // Fix popup content width to match combo button
             ui.set_max_width(combo_w);
@@ -372,6 +369,7 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
                 }
             }
         });
+    }); // horizontal
 
     if let Some(values) = selected_values {
         state.project.layers[layer_idx].paint = values;
