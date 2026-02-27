@@ -282,6 +282,11 @@ impl Default for StrokeParams {
     }
 }
 
+/// Reference resolution at which pixel-unit parameters (brush_width,
+/// max_stroke_length) are authored.  Changing output resolution scales
+/// these values so the painting retains the same proportions.
+pub const BASE_RESOLUTION: u32 = 1024;
+
 impl StrokeParams {
     /// Reconstruct StrokeParams from unified PaintValues, clamping to safe ranges.
     pub fn from_paint_values(paint: &PaintValues, seed: u32) -> StrokeParams {
@@ -300,6 +305,18 @@ impl StrokeParams {
             overlap_dist_factor: paint.overlap_dist_factor.map(|v| v.max(0.01)),
             color_variation: paint.color_variation.clamp(0.0, 1.0),
             seed,
+        }
+    }
+
+    /// Return a copy with pixel-unit fields scaled for the given output resolution.
+    /// At `BASE_RESOLUTION` the values are unchanged; at 2× the resolution,
+    /// brush_width and max_stroke_length double so UV-space proportions stay fixed.
+    pub fn scaled_for_resolution(&self, resolution: u32) -> StrokeParams {
+        let scale = resolution as f32 / BASE_RESOLUTION as f32;
+        StrokeParams {
+            brush_width: self.brush_width * scale,
+            max_stroke_length: self.max_stroke_length * scale,
+            ..self.clone()
         }
     }
 }

@@ -287,8 +287,9 @@ pub fn generate_paths(
     normal_data: Option<&MeshNormalData>,
     mask: Option<&UvMask>,
 ) -> Vec<StrokePath> {
+    let scaled = layer.params.scaled_for_resolution(resolution);
     let field = DirectionField::new(&layer.guides, resolution);
-    let brush_width_uv = layer.params.brush_width / resolution as f32;
+    let brush_width_uv = scaled.brush_width / resolution as f32;
     let overlap_ratio = layer.params.overlap_ratio.unwrap_or(0.7);
     let overlap_dist_factor = layer.params.overlap_dist_factor.unwrap_or(0.3);
     let margin = brush_width_uv * 3.0;
@@ -306,7 +307,7 @@ pub fn generate_paths(
         (Vec2::splat(-margin), Vec2::splat(1.0 + margin))
     };
 
-    let seeds = generate_seeds_poisson_in(&layer.params, resolution, seed_lo, seed_hi);
+    let seeds = generate_seeds_poisson_in(&scaled, resolution, seed_lo, seed_hi);
 
     // Filter seeds by mask
     let filtered_seeds: Vec<Vec2> = if let Some(m) = mask {
@@ -315,13 +316,13 @@ pub fn generate_paths(
         seeds
     };
 
-    let mut rng = SeededRng::new(layer.params.seed);
+    let mut rng = SeededRng::new(scaled.seed);
     let mut raw_paths: Vec<Vec<Vec2>> = Vec::new();
     for seed_point in &filtered_seeds {
         if let Some(path) = trace_streamline(
             *seed_point,
             &field,
-            &layer.params,
+            &scaled,
             resolution,
             &mut rng,
             color_tex,

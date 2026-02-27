@@ -440,12 +440,15 @@ pub fn composite_layer(
         &paths_owned
     };
 
+    // Scale pixel-unit params so painting proportions stay fixed across resolutions
+    let scaled = layer.params.scaled_for_resolution(resolution);
+
     // Generate brush profile once per layer (same seed for all strokes in layer)
     let brush_profile =
-        generate_brush_profile(layer.params.brush_width.round() as usize, layer.params.seed);
+        generate_brush_profile(scaled.brush_width.round() as usize, scaled.seed);
 
     // Step 1: Pre-compute stroke colors sequentially (preserves RNG determinism)
-    let mut rng = SeededRng::new(layer.params.seed);
+    let mut rng = SeededRng::new(scaled.seed);
     let stroke_colors: Vec<Color> = paths
         .iter()
         .map(|path| {
@@ -455,7 +458,7 @@ pub fn composite_layer(
                 base_color.tex_width,
                 base_color.tex_height,
                 base_color.solid_color,
-                layer.params.color_variation,
+                scaled.color_variation,
                 &mut rng,
             )
         })
@@ -502,10 +505,10 @@ pub fn composite_layer(
             let height = generate_stroke_height(
                 &brush_profile,
                 stroke_length_px,
-                &layer.params,
-                layer.params.seed + i as u32,
+                &scaled,
+                scaled.seed + i as u32,
             );
-            let gradient = compute_stroke_gradients(&height, &layer.params.pressure_curve);
+            let gradient = compute_stroke_gradients(&height, &scaled.pressure_curve);
             (height, gradient)
         })
         .collect();
