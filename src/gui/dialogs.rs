@@ -1,3 +1,4 @@
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use practical_arcana_painter::asset_io::{extract_uv_edges, load_mesh, load_texture};
@@ -25,17 +26,46 @@ fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<(), String> {
 }
 
 /// Load a texture from the given path into app state.
+/// Load a texture and update state. Returns `Ok(true)` if content changed, `Ok(false)` if identical.
 fn apply_texture(
     state: &mut AppState,
     ctx: &eframe::egui::Context,
     tex_path: &Path,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let tex = load_texture(tex_path).map_err(|e| format!("Texture load failed: {e}"))?;
     let handle = textures::loaded_texture_to_handle(ctx, &tex, "base_color");
     state.textures.base_texture = Some(handle);
-    state.cached_texture_colors = Some(pixels_to_colors(&tex.pixels));
+    let colors = pixels_to_colors(&tex.pixels);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for c in &colors {
+        c.r.to_bits().hash(&mut hasher);
+        c.g.to_bits().hash(&mut hasher);
+        c.b.to_bits().hash(&mut hasher);
+        c.a.to_bits().hash(&mut hasher);
+    }
+    let new_hash = hasher.finish();
+    let changed = new_hash != state.texture_colors_hash;
+    state.texture_colors_hash = new_hash;
+    state.cached_texture_colors = Some(colors);
     state.loaded_texture = Some(tex);
-    Ok(())
+    Ok(changed)
+}
+
+/// Load a normal map and update state. Returns `Ok(true)` if content changed, `Ok(false)` if identical.
+fn apply_normal(state: &mut AppState, normal_path: &Path) -> Result<bool, String> {
+    let tex = load_texture(normal_path).map_err(|e| format!("Normal load failed: {e}"))?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for p in &tex.pixels {
+        p[0].to_bits().hash(&mut hasher);
+        p[1].to_bits().hash(&mut hasher);
+        p[2].to_bits().hash(&mut hasher);
+        p[3].to_bits().hash(&mut hasher);
+    }
+    let new_hash = hasher.finish();
+    let changed = new_hash != state.normal_tex_hash;
+    state.normal_tex_hash = new_hash;
+    state.loaded_normal = Some(tex);
+    Ok(changed)
 }
 
 // ── Project Operations ─────────────────────────────────────────────
@@ -72,14 +102,8 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
             // Load base normal if referenced
             if let Some(ref normal_path) = project.base_normal {
                 let normal_file = resolve_asset_path(&path, normal_path);
-                match load_texture(&normal_file) {
-                    Ok(tex) => {
-                        state.loaded_normal = Some(tex);
-                    }
-                    Err(_) => {
-                        // Normal map is optional — silently skip if missing
-                    }
-                }
+                let _ = apply_normal(state, &normal_file);
+                // Normal map is optional — silently skip if missing
             }
 
             // Select first layer if any
@@ -149,7 +173,9 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
             state.textures.base_texture = None;
             state.loaded_texture = None;
             state.cached_texture_colors = None;
+            state.texture_colors_hash = 0;
             state.loaded_normal = None;
+            state.normal_tex_hash = 0;
             state.reload_summary = None;
             state.undo.clear();
 
@@ -292,15 +318,16 @@ pub fn load_texture_dialog(state: &mut AppState, ctx: &eframe::egui::Context) {
     };
 
     match apply_texture(state, ctx, &tex_path) {
-        Ok(()) => {
+        Ok(changed) => {
             state.project.base_color = BaseColor::Texture(tex_path.to_string_lossy().to_string());
-            // Invalidate generated maps so viewport shows the new base texture
-            state.textures.color = None;
-            state.textures.height = None;
-            state.textures.normal = None;
-            state.textures.stroke_id = None;
-            state.generated = None;
-            state.generation_snapshot = None;
+            if changed {
+                // Invalidate generated maps so viewport shows the new base texture
+                state.textures.color = None;
+                state.textures.height = None;
+                state.textures.normal = None;
+                state.textures.stroke_id = None;
+                state.generated = None;
+            }
             state.dirty = true;
             state.status_message = format!(
                 "Loaded texture: {}",
@@ -323,13 +350,14 @@ pub fn reload_texture(state: &mut AppState, ctx: &eframe::egui::Context) {
         return;
     };
     match apply_texture(state, ctx, Path::new(&tex_path)) {
-        Ok(()) => {
-            state.textures.color = None;
-            state.textures.height = None;
-            state.textures.normal = None;
-            state.textures.stroke_id = None;
-            state.generated = None;
-            state.generation_snapshot = None;
+        Ok(changed) => {
+            if changed {
+                state.textures.color = None;
+                state.textures.height = None;
+                state.textures.normal = None;
+                state.textures.stroke_id = None;
+                state.generated = None;
+            }
             state.status_message = "Texture reloaded.".to_string();
         }
         Err(e) => state.status_message = e,
@@ -342,18 +370,18 @@ pub fn reload_normal(state: &mut AppState) {
         state.status_message = "No normal map to reload.".to_string();
         return;
     };
-    match load_texture(Path::new(normal_path)) {
-        Ok(tex) => {
-            state.loaded_normal = Some(tex);
-            state.textures.color = None;
-            state.textures.height = None;
-            state.textures.normal = None;
-            state.textures.stroke_id = None;
-            state.generated = None;
-            state.generation_snapshot = None;
+    match apply_normal(state, Path::new(normal_path)) {
+        Ok(changed) => {
+            if changed {
+                state.textures.color = None;
+                state.textures.height = None;
+                state.textures.normal = None;
+                state.textures.stroke_id = None;
+                state.generated = None;
+            }
             state.status_message = "Normal reloaded.".to_string();
         }
-        Err(e) => state.status_message = format!("Normal reload failed: {e}"),
+        Err(e) => state.status_message = e,
     }
 }
 
@@ -368,16 +396,16 @@ pub fn load_normal_dialog(state: &mut AppState) {
         return;
     };
 
-    match load_texture(&tex_path) {
-        Ok(tex) => {
-            state.loaded_normal = Some(tex);
+    match apply_normal(state, &tex_path) {
+        Ok(changed) => {
             state.project.base_normal = Some(tex_path.to_string_lossy().to_string());
-            state.textures.color = None;
-            state.textures.height = None;
-            state.textures.normal = None;
-            state.textures.stroke_id = None;
-            state.generated = None;
-            state.generation_snapshot = None;
+            if changed {
+                state.textures.color = None;
+                state.textures.height = None;
+                state.textures.normal = None;
+                state.textures.stroke_id = None;
+                state.generated = None;
+            }
             state.dirty = true;
             state.status_message = format!(
                 "Loaded normal: {}",

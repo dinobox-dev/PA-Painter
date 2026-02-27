@@ -91,13 +91,15 @@ pub fn update_stroke_cache(
 
 // ── Per-Layer Path Overlay Cache ────────────────────────────────
 
-/// Key for invalidation: paint values + seed + guides + resolution.
+/// Key for invalidation: paint values + seed + guides + resolution + color texture hash.
 #[derive(Clone, PartialEq)]
 struct LayerPathKey {
     paint: PaintValues,
     seed: u32,
     guides: Vec<Guide>,
     resolution: u32,
+    /// Hash of the color texture data; changes when texture content is swapped or reloaded.
+    color_tex_hash: u64,
 }
 
 /// Cached path data for a single layer.
@@ -116,14 +118,15 @@ impl Default for LayerPathCache {
 }
 
 impl LayerPathCache {
-    /// Check if cache is stale for the given layer state, seed, and resolution.
-    pub fn is_stale(&self, layer: &Layer, seed: u32, resolution: u32) -> bool {
+    /// Check if cache is stale for the given layer state, seed, resolution, and color texture hash.
+    pub fn is_stale(&self, layer: &Layer, seed: u32, resolution: u32, color_tex_hash: u64) -> bool {
         match &self.key {
             Some(k) => {
                 k.paint != layer.paint
                     || k.seed != seed
                     || k.guides != layer.guides
                     || k.resolution != resolution
+                    || k.color_tex_hash != color_tex_hash
             }
             None => true,
         }
@@ -137,6 +140,7 @@ impl LayerPathCache {
         resolution: u32,
         color_tex: Option<&ColorTextureRef<'_>>,
         normal_data: Option<&MeshNormalData>,
+        color_tex_hash: u64,
     ) {
         let paint_layer = layer.to_paint_layer_with_seed(seed);
         let paths =
@@ -150,6 +154,7 @@ impl LayerPathCache {
             seed,
             guides: layer.guides.clone(),
             resolution,
+            color_tex_hash,
         });
     }
 }
@@ -189,14 +194,15 @@ impl PathOverlayCache {
         selected: Option<usize>,
         color_tex: Option<&ColorTextureRef<'_>>,
         normal_data: Option<&MeshNormalData>,
+        color_tex_hash: u64,
     ) {
         self.sync_layer_count(layers.len());
         for (i, cache) in self.caches.iter_mut().enumerate() {
             if Some(i) == selected {
                 let layer = &layers[i];
                 let seed = base_seed.wrapping_add(i as u32);
-                if layer.visible && cache.is_stale(layer, seed, resolution) {
-                    cache.recompute(layer, seed, resolution, color_tex, normal_data);
+                if layer.visible && cache.is_stale(layer, seed, resolution, color_tex_hash) {
+                    cache.recompute(layer, seed, resolution, color_tex, normal_data, color_tex_hash);
                 }
             } else {
                 // Free memory for non-selected layers

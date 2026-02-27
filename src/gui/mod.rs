@@ -102,6 +102,8 @@ impl PainterApp {
         self.state.generation_snapshot = Some((
             self.state.project.layers.clone(),
             self.state.project.settings.clone(),
+            self.state.texture_colors_hash,
+            self.state.normal_tex_hash,
         ));
         self.state.status_message = format!("Generating at {}px...", resolution);
     }
@@ -376,6 +378,7 @@ impl eframe::App for PainterApp {
                 self.state.selected_layer,
                 color_ref.as_ref(),
                 normal_data,
+                self.state.texture_colors_hash,
             );
         }
 
