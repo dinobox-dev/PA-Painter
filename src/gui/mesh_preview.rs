@@ -44,10 +44,8 @@ pub struct MeshPreviewState {
     pub lighting_panel_open: bool,
     /// Whether GPU resources have been initialized.
     pub gpu_ready: bool,
-    /// Texture handle for displaying the rendered result in egui.
-    pub rendered_texture: Option<egui::TextureHandle>,
-    /// Size of the last rendered frame (to detect resize).
-    pub last_render_size: (u32, u32),
+    /// Texture ID registered with egui's wgpu renderer for zero-copy display.
+    pub rendered_texture_id: Option<egui::TextureId>,
 }
 
 impl Default for MeshPreviewState {
@@ -61,8 +59,7 @@ impl Default for MeshPreviewState {
             light_elevation: 0.3,
             lighting_panel_open: false,
             gpu_ready: false,
-            rendered_texture: None,
-            last_render_size: (0, 0),
+            rendered_texture_id: None,
         }
     }
 }
@@ -113,7 +110,7 @@ struct MeshGpuResources {
     sampler: wgpu::Sampler,
     // Offscreen render targets
     render_texture: wgpu::Texture,
-    render_texture_view: wgpu::TextureView,
+    render_srgb_view: wgpu::TextureView,
     #[allow(dead_code)]
     depth_texture: wgpu::Texture,
     depth_texture_view: wgpu::TextureView,
@@ -203,11 +200,15 @@ fn create_placeholder_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgp
     texture
 }
 
-fn create_render_targets(
-    device: &wgpu::Device,
-    width: u32,
-    height: u32,
-) -> (wgpu::Texture, wgpu::TextureView, wgpu::Texture, wgpu::TextureView) {
+struct RenderTargets {
+    color_texture: wgpu::Texture,
+    /// sRGB view used as render attachment (GPU applies linear→sRGB automatically).
+    srgb_view: wgpu::TextureView,
+    depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
+}
+
+fn create_render_targets(device: &wgpu::Device, width: u32, height: u32) -> RenderTargets {
     let color_tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("mesh_render_color"),
         size: wgpu::Extent3d {
@@ -218,12 +219,14 @@ fn create_render_targets(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[wgpu::TextureFormat::Rgba8UnormSrgb],
     });
-    let color_view = color_tex.create_view(&wgpu::TextureViewDescriptor::default());
-
+    let srgb_view = color_tex.create_view(&wgpu::TextureViewDescriptor {
+        format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+        ..Default::default()
+    });
     let depth_tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("mesh_render_depth"),
         size: wgpu::Extent3d {
@@ -240,7 +243,12 @@ fn create_render_targets(
     });
     let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
-    (color_tex, color_view, depth_tex, depth_view)
+    RenderTargets {
+        color_texture: color_tex,
+        srgb_view,
+        depth_texture: depth_tex,
+        depth_view,
+    }
 }
 
 pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMesh) {
@@ -398,8 +406,7 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         cache: None,
     });
 
-    let (render_texture, render_texture_view, depth_texture, depth_texture_view) =
-        create_render_targets(device, 64, 64);
+    let rt = create_render_targets(device, 64, 64);
 
     let resources = MeshGpuResources {
         pipeline,
@@ -413,10 +420,10 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         texture_bind_group,
         texture_bind_group_layout,
         sampler,
-        render_texture,
-        render_texture_view,
-        depth_texture,
-        depth_texture_view,
+        render_texture: rt.color_texture,
+        render_srgb_view: rt.srgb_view,
+        depth_texture: rt.depth_texture,
+        depth_texture_view: rt.depth_view,
         render_size: (64, 64),
     };
 
@@ -590,24 +597,26 @@ pub fn show(
     };
 
     // Offscreen render
+    let device = &render_state.device;
+    let queue = &render_state.queue;
+    let needs_register;
     {
-        let device = &render_state.device;
-        let queue = &render_state.queue;
-
         let mut renderer = render_state.renderer.write();
         let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() else {
             return;
         };
 
         // Resize render targets if needed
-        if res.render_size != (w, h) {
-            let (rt, rv, dt, dv) = create_render_targets(device, w, h);
-            res.render_texture = rt;
-            res.render_texture_view = rv;
-            res.depth_texture = dt;
-            res.depth_texture_view = dv;
+        let resized = res.render_size != (w, h);
+        if resized {
+            let rt = create_render_targets(device, w, h);
+            res.render_texture = rt.color_texture;
+            res.render_srgb_view = rt.srgb_view;
+            res.depth_texture = rt.depth_texture;
+            res.depth_texture_view = rt.depth_view;
             res.render_size = (w, h);
         }
+        needs_register = resized || state.mesh_preview.rendered_texture_id.is_none();
 
         // Upload uniforms
         queue.write_buffer(&res.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -621,7 +630,7 @@ pub fn show(
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mesh_render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &res.render_texture_view,
+                    view: &res.render_srgb_view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -653,76 +662,44 @@ pub fn show(
             pass.draw_indexed(0..res.index_count, 0, 0..1);
         }
 
-        // Copy render result to buffer for CPU readback
-        let bytes_per_row = align_to(w * 4, 256);
-        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mesh_readback"),
-            size: (bytes_per_row * h) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &res.render_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &readback_buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bytes_per_row),
-                    rows_per_image: Some(h),
-                },
-            },
-            wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-        );
-
         queue.submit(std::iter::once(encoder.finish()));
+    }
 
-        // Synchronous readback
-        let buffer_slice = readback_buffer.slice(..);
-        let (sender, receiver) = std::sync::mpsc::channel::<Result<(), wgpu::BufferAsyncError>>();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = sender.send(result);
+    // Register/update the render texture with egui (zero-copy: no GPU→CPU readback).
+    // Split from render block to avoid double-borrowing renderer.
+    if needs_register {
+        let mut renderer = render_state.renderer.write();
+        let res = renderer.callback_resources.get::<MeshGpuResources>().unwrap();
+        let unorm_view = res.render_texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(wgpu::TextureFormat::Rgba8Unorm),
+            ..Default::default()
         });
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        if receiver.recv().ok().and_then(|r| r.ok()).is_some() {
-            let data = buffer_slice.get_mapped_range();
-            let mut pixels = Vec::with_capacity((w * h) as usize);
-            for row in 0..h {
-                let row_start = (row * bytes_per_row) as usize;
-                let row_end = row_start + (w * 4) as usize;
-                let row_data = &data[row_start..row_end];
-                for pixel in row_data.chunks(4) {
-                    pixels.push(egui::Color32::from_rgba_unmultiplied(
-                        pixel[0], pixel[1], pixel[2], pixel[3],
-                    ));
-                }
-            }
-            drop(data);
 
-            let image = egui::ColorImage::new([w as usize, h as usize], pixels);
-            state.mesh_preview.rendered_texture = Some(ui.ctx().load_texture(
-                "mesh_3d_preview",
-                image,
-                egui::TextureOptions::LINEAR,
-            ));
-            state.mesh_preview.last_render_size = (w, h);
+        match state.mesh_preview.rendered_texture_id {
+            Some(id) => {
+                renderer.update_egui_texture_from_wgpu_texture(
+                    device,
+                    &unorm_view,
+                    wgpu::FilterMode::Linear,
+                    id,
+                );
+            }
+            None => {
+                let id = renderer.register_native_texture(
+                    device,
+                    &unorm_view,
+                    wgpu::FilterMode::Linear,
+                );
+                state.mesh_preview.rendered_texture_id = Some(id);
+            }
         }
     }
 
     // Display the rendered texture
-    if let Some(ref tex) = state.mesh_preview.rendered_texture {
+    if let Some(tex_id) = state.mesh_preview.rendered_texture_id {
         let painter = ui.painter_at(rect);
         painter.image(
-            tex.id(),
+            tex_id,
             rect,
             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
             egui::Color32::WHITE,
@@ -854,6 +831,3 @@ fn draw_lighting_panel(
     }
 }
 
-fn align_to(value: u32, alignment: u32) -> u32 {
-    (value + alignment - 1) / alignment * alignment
-}
