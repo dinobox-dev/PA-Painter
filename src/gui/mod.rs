@@ -260,6 +260,9 @@ impl eframe::App for PainterApp {
         // This way the restore itself is invisible to the change tracker.
         let pre_frame = self.state.take_snapshot();
 
+        // Project-replacing actions explicitly set dirty=false; skip auto-dirty for those frames.
+        let project_replacing = self.state.pending_open || self.state.pending_new;
+
         // Handle deferred actions (flags set by child widgets on AppState)
         if self.state.pending_open {
             self.state.pending_open = false;
@@ -579,6 +582,9 @@ impl eframe::App for PainterApp {
 
         // ── Undo: track post-frame changes ──
         let post_frame = self.state.take_snapshot();
+        if pre_frame != post_frame && !project_replacing {
+            self.state.dirty = true;
+        }
         let pointer_down = ctx.input(|i| i.pointer.any_down());
         self.state.undo.track_frame(&pre_frame, &post_frame, pointer_down);
     }
