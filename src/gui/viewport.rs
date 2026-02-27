@@ -4,7 +4,7 @@ use eframe::egui_wgpu;
 use practical_arcana_painter::types::GuideType;
 
 use super::mesh_preview;
-use super::state::{AppState, GuideTool, MapMode, ViewportTab};
+use super::state::{AppState, GroupDimKey, GuideTool, MapMode, ViewportTab};
 
 /// Convert UV coordinate to screen position.
 pub fn uv_to_screen(uv: glam::Vec2, state: &AppState, viewport_rect: Rect) -> Pos2 {
@@ -40,6 +40,74 @@ pub fn make_checkerboard(ctx: &egui::Context) -> egui::TextureHandle {
         egui::ColorImage::new([size, size], pixels),
         egui::TextureOptions::NEAREST,
     )
+}
+
+// ── Group dim overlay ───────────────────────────────────────────────
+
+const GROUP_DIM_RESOLUTION: u32 = 256;
+
+/// Update the cached dim overlay texture for the selected layer's vertex group.
+/// Inside-group pixels get light dim; outside-group pixels get heavy dim.
+fn update_group_dim_cache(ctx: &egui::Context, state: &mut AppState) {
+    let desired_key = state.selected_layer.and_then(|idx| {
+        let layer = state.project.layers.get(idx)?;
+        if layer.group_name == "__all__" {
+            return None;
+        }
+        let mesh_group_count = state
+            .loaded_mesh
+            .as_ref()
+            .map(|m| m.groups.len())
+            .unwrap_or(0);
+        Some(GroupDimKey {
+            layer_idx: idx,
+            group_name: layer.group_name.clone(),
+            mesh_group_count,
+        })
+    });
+
+    if desired_key.is_none() {
+        if state.group_dim_cache.key.is_some() {
+            state.group_dim_cache.invalidate();
+        }
+        return;
+    }
+
+    if state.group_dim_cache.key == desired_key {
+        return;
+    }
+
+    let key = desired_key.unwrap();
+
+    let texture = state.loaded_mesh.as_ref().and_then(|mesh| {
+        let group = mesh.groups.iter().find(|g| g.name == key.group_name)?;
+        let mask = practical_arcana_painter::uv_mask::UvMask::from_mesh_group(
+            mesh,
+            group,
+            GROUP_DIM_RESOLUTION,
+        );
+
+        let inside_alpha: u8 = 80;
+        let outside_alpha: u8 = 160;
+        let res = GROUP_DIM_RESOLUTION as usize;
+        let pixels: Vec<Color32> = mask
+            .data
+            .iter()
+            .map(|&inside| {
+                let a = if inside { inside_alpha } else { outside_alpha };
+                Color32::from_rgba_unmultiplied(0, 0, 0, a)
+            })
+            .collect();
+
+        Some(ctx.load_texture(
+            "group_dim_overlay",
+            egui::ColorImage::new([res, res], pixels),
+            egui::TextureOptions::LINEAR,
+        ))
+    });
+
+    state.group_dim_cache.key = Some(key);
+    state.group_dim_cache.texture = texture;
 }
 
 // ── Main viewport entry point ───────────────────────────────────────
@@ -404,14 +472,25 @@ fn show_guide_view(ui: &mut egui::Ui, state: &mut AppState) {
     draw_texture(&painter, tex, state, rect);
     draw_wireframe(&painter, state, rect);
 
-    // Dim overlay so guides stand out
+    // Dim overlay — group-specific mask or uniform fallback
+    update_group_dim_cache(ui.ctx(), state);
     let uv_min = uv_to_screen(glam::Vec2::ZERO, state, rect);
     let uv_max = uv_to_screen(glam::Vec2::ONE, state, rect);
-    painter.rect_filled(
-        Rect::from_min_max(uv_min, uv_max),
-        0.0,
-        Color32::from_rgba_unmultiplied(0, 0, 0, 100),
-    );
+    let uv_rect = Rect::from_min_max(uv_min, uv_max);
+    if let Some(ref tex) = state.group_dim_cache.texture {
+        painter.image(
+            tex.id(),
+            uv_rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
+    } else {
+        painter.rect_filled(
+            uv_rect,
+            0.0,
+            Color32::from_rgba_unmultiplied(0, 0, 0, 80),
+        );
+    }
 
     draw_path_overlay(&painter, state, rect);
 

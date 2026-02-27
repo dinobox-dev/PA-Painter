@@ -273,6 +273,7 @@ impl eframe::App for PainterApp {
             self.state.pending_open = false;
             dialogs::open_project(&mut self.state, ctx);
             self.state.cached_mesh_normals = None;
+            self.state.group_dim_cache.invalidate();
             self.init_mesh_preview();
         }
         if self.state.pending_save {
@@ -295,18 +296,21 @@ impl eframe::App for PainterApp {
             self.state.pending_new = false;
             dialogs::new_project(&mut self.state, ctx);
             self.state.cached_mesh_normals = None;
+            self.state.group_dim_cache.invalidate();
             self.init_mesh_preview();
         }
         if self.state.pending_reload_mesh {
             self.state.pending_reload_mesh = false;
             dialogs::reload_mesh(&mut self.state);
             self.state.cached_mesh_normals = None;
+            self.state.group_dim_cache.invalidate();
             self.init_mesh_preview();
         }
         if self.state.pending_replace_mesh {
             self.state.pending_replace_mesh = false;
             dialogs::replace_mesh(&mut self.state);
             self.state.cached_mesh_normals = None;
+            self.state.group_dim_cache.invalidate();
             self.init_mesh_preview();
         }
         if self.state.pending_load_texture {

@@ -108,6 +108,36 @@ pub struct ReloadSummary {
     pub orphaned: Vec<String>,
 }
 
+/// Cache key for the group dim overlay in the Guide viewport.
+#[derive(PartialEq)]
+pub struct GroupDimKey {
+    pub layer_idx: usize,
+    pub group_name: String,
+    pub mesh_group_count: usize,
+}
+
+/// Cached dim overlay texture that dims outside the selected layer's vertex group.
+pub struct GroupDimCache {
+    pub key: Option<GroupDimKey>,
+    pub texture: Option<egui::TextureHandle>,
+}
+
+impl Default for GroupDimCache {
+    fn default() -> Self {
+        Self {
+            key: None,
+            texture: None,
+        }
+    }
+}
+
+impl GroupDimCache {
+    pub fn invalidate(&mut self) {
+        self.key = None;
+        self.texture = None;
+    }
+}
+
 /// Central GUI application state.
 pub struct AppState {
     // ── Project ──
@@ -165,6 +195,9 @@ pub struct AppState {
     /// Mesh reload diff summary shown as a dismissible window.
     pub reload_summary: Option<ReloadSummary>,
 
+    // ── Group Dim Overlay ──
+    pub group_dim_cache: GroupDimCache,
+
     // ── Popup State ──
     /// True while a modal popup (e.g. "Save as Preset") is open.
     /// Used to prevent global key handlers from consuming events.
@@ -218,6 +251,7 @@ impl AppState {
             pending_load_normal: false,
             pending_reload_normal: false,
             reload_summary: None,
+            group_dim_cache: GroupDimCache::default(),
             popup_open: false,
             status_message: "Ready".to_string(),
             generation_snapshot: None,
