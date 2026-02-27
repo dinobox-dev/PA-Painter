@@ -300,7 +300,7 @@ pub fn generate_all_paths(
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
 
-    sorted
+    let mut all_paths: Vec<Vec<StrokePath>> = sorted
         .par_iter()
         .map(|&(layer_index, layer)| {
             let tex_ref = base_color.texture.map(|data| ColorTextureRef {
@@ -311,7 +311,22 @@ pub fn generate_all_paths(
             let mask = masks.get(layer_index).and_then(|m| *m);
             generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref(), normal_data, mask)
         })
-        .collect()
+        .collect();
+
+    assign_unique_stroke_ids(&mut all_paths);
+    all_paths
+}
+
+/// Assign globally unique 1-based stroke IDs across all layers.
+/// 0 is reserved for "no stroke" in the compositing system.
+fn assign_unique_stroke_ids(all_paths: &mut [Vec<StrokePath>]) {
+    let mut next_id = 1u32;
+    for layer_paths in all_paths.iter_mut() {
+        for path in layer_paths.iter_mut() {
+            path.stroke_id = next_id;
+            next_id = next_id.wrapping_add(1);
+        }
+    }
 }
 
 /// Composite all strokes from all layers into global maps.
@@ -353,7 +368,7 @@ pub fn composite_all_with_paths(
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
 
     // Phase A: Generate paths (parallel across layers when not cached)
-    let generated;
+    let mut generated;
     let all_paths: &[Vec<StrokePath>] = if let Some(cp) = cached_paths {
         cp
     } else {
@@ -369,6 +384,7 @@ pub fn composite_all_with_paths(
                 generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref(), normal_data, mask)
             })
             .collect::<Vec<_>>();
+        assign_unique_stroke_ids(&mut generated);
         &generated
     };
 

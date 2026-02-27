@@ -266,7 +266,7 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 | Gradient | Winner-takes-all: 더 높은 밀도가 그래디언트 덮어씀 |
 | Color (Opaque) | 밀도 기반 opacity로 lerp |
 | Color (Transparent) | 첫 페인트 직접 설정, 오버페인트 lerp, alpha max |
-| Stroke ID | 마지막 승리 |
+| Stroke ID | 마지막 승리. 전역 고유 1-based (0 = 미페인팅) |
 
 **스트로크 색상**: 경로 중점에서 베이스 컬러 샘플링 → HSV 편차(`color_variation`). 스트로크 내 균일.
 
@@ -485,19 +485,13 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 |---|------|------|------|
 | 2 | **대부분의 편집에서 dirty 미설정** | `gui/state.rs:146` | 가이드 드래그, 슬라이더, 순서 변경, 가시성 토글에서 `dirty = true` 누락 |
 
-### 10-2. SIGNIFICANT
-
-| # | 이슈 | 파일 | 설명 |
-|---|------|------|------|
-| 5 | **Stroke ID 레이어 간 비고유** | `path_placement.rs:354` | 레이어 내 인덱스만 사용. 다른 레이어 간 ID 충돌 |
-
-### 10-3. MODERATE
+### 10-2. MODERATE
 
 | # | 이슈 | 파일 | 설명 |
 |---|------|------|------|
 | 8 | **popup_open 이전 프레임 상태** | `gui/mod.rs:217` | 팝업 프레임에서 Escape 오소비 가능 |
 
-### 10-4. MINOR
+### 10-3. MINOR
 
 | # | 이슈 | 파일 | 설명 |
 |---|------|------|------|

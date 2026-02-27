@@ -347,7 +347,7 @@ pub fn generate_paths(
     // Critical for correct wet-on-wet compositing order in Phase 08.
     raw_paths.sort_by(|a, b| a[0].y.total_cmp(&b[0].y));
 
-    // Convert to StrokePath with globally unique IDs
+    // Convert to StrokePath (IDs are layer-local; made globally unique by compositing)
     raw_paths
         .into_iter()
         .enumerate()
