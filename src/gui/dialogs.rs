@@ -282,6 +282,13 @@ pub fn load_texture_dialog(state: &mut AppState, ctx: &eframe::egui::Context) {
     match apply_texture(state, ctx, &tex_path) {
         Ok(()) => {
             state.project.base_color = BaseColor::Texture(tex_path.to_string_lossy().to_string());
+            // Invalidate generated maps so viewport shows the new base texture
+            state.textures.color = None;
+            state.textures.height = None;
+            state.textures.normal = None;
+            state.textures.stroke_id = None;
+            state.generated = None;
+            state.generation_snapshot = None;
             state.dirty = true;
             state.status_message = format!(
                 "Loaded texture: {}",
@@ -304,7 +311,15 @@ pub fn reload_texture(state: &mut AppState, ctx: &eframe::egui::Context) {
         return;
     };
     match apply_texture(state, ctx, Path::new(&tex_path)) {
-        Ok(()) => state.status_message = "Texture reloaded.".to_string(),
+        Ok(()) => {
+            state.textures.color = None;
+            state.textures.height = None;
+            state.textures.normal = None;
+            state.textures.stroke_id = None;
+            state.generated = None;
+            state.generation_snapshot = None;
+            state.status_message = "Texture reloaded.".to_string();
+        }
         Err(e) => state.status_message = e,
     }
 }
@@ -318,6 +333,12 @@ pub fn reload_normal(state: &mut AppState) {
     match load_texture(Path::new(normal_path)) {
         Ok(tex) => {
             state.loaded_normal = Some(tex);
+            state.textures.color = None;
+            state.textures.height = None;
+            state.textures.normal = None;
+            state.textures.stroke_id = None;
+            state.generated = None;
+            state.generation_snapshot = None;
             state.status_message = "Normal reloaded.".to_string();
         }
         Err(e) => state.status_message = format!("Normal reload failed: {e}"),
@@ -339,6 +360,12 @@ pub fn load_normal_dialog(state: &mut AppState) {
         Ok(tex) => {
             state.loaded_normal = Some(tex);
             state.project.base_normal = Some(tex_path.to_string_lossy().to_string());
+            state.textures.color = None;
+            state.textures.height = None;
+            state.textures.normal = None;
+            state.textures.stroke_id = None;
+            state.generated = None;
+            state.generation_snapshot = None;
             state.dirty = true;
             state.status_message = format!(
                 "Loaded normal: {}",

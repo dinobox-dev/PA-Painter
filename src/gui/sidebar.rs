@@ -125,6 +125,12 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
                     if resp_clear.on_hover_text("Clear normal").clicked() {
                         state.project.base_normal = None;
                         state.loaded_normal = None;
+                        state.textures.color = None;
+                        state.textures.height = None;
+                        state.textures.normal = None;
+                        state.textures.stroke_id = None;
+                        state.generated = None;
+                        state.generation_snapshot = None;
                         state.dirty = true;
                     }
                 }

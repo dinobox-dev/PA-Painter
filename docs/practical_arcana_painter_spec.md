@@ -304,7 +304,7 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 
 ### 5-3. 좌측 패널
 
-**Base 섹션**: 메시 (파일명, 그룹 수, Reload/Load), 컬러 (텍스처/단색), 노말 (텍스처/None)
+**Base 섹션**: 메시 (파일명, 그룹 수, Reload/Load), 컬러 (텍스처/단색), 노말 (텍스처/None). 컬러·노말 변경 시 생성 결과를 전부 무효화하고 "Not generated" 상태로 복귀
 
 **Settings 섹션**: Resolution, Normal Mode, Background Mode
 
