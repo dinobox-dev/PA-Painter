@@ -509,7 +509,6 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 | 11 | **bilinear 샘플링 중복** | compositing 외 3곳 | 유사 구현 통합 필요 |
 | 12 | **StrokeParams 검증 없음** | `types.rs` | 음수/0 값 → 무한 루프 가능 |
 | 13 | **Transparent 알파 불일치** | `compositing.rs` | 오버페인트: RGB lerp + alpha max → 비물리적 |
-| 14 | **썸네일 캐시 미정리** | `gui/preview.rs:219` | 삭제 없이 축적 |
 
 ---
 

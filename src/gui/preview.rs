@@ -271,4 +271,9 @@ impl PresetThumbnailCache {
         self.entries.push((values.clone(), handle));
         id
     }
+
+    /// Remove entries whose PaintValues are not in `active_values`.
+    pub fn retain_active(&mut self, active_values: &[&PaintValues]) {
+        self.entries.retain(|(v, _)| active_values.contains(&v));
+    }
 }

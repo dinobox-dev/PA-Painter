@@ -397,6 +397,16 @@ fn show_preset_combo_sized(ui: &mut egui::Ui, state: &mut AppState, layer_idx: u
         state.project.presets.presets.remove(idx);
         state.dirty = true;
         state.status_message = "Preset deleted".to_string();
+
+        // Clean up thumbnail cache: keep only entries for existing presets
+        let built_in = PresetLibrary::built_in();
+        let active: Vec<&PaintValues> = built_in
+            .presets
+            .iter()
+            .chain(state.project.presets.presets.iter())
+            .map(|p| &p.values)
+            .collect();
+        state.preset_thumbnails.retain_active(&active);
     }
 }
 
