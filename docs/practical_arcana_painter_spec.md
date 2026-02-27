@@ -265,7 +265,7 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 | Height | `max(h, prev_h)` — 가장 짙은 것 승리 |
 | Gradient | Winner-takes-all: 더 높은 밀도가 그래디언트 덮어씀 |
 | Color (Opaque) | 밀도 기반 opacity로 lerp |
-| Color (Transparent) | 첫 페인트 직접 설정, 오버페인트 lerp, alpha max |
+| Color (Transparent) | 첫 페인트 직접 설정, 오버페인트 lerp, alpha Porter-Duff "over" |
 | Stroke ID | 마지막 승리. 전역 고유 1-based (0 = 미페인팅) |
 
 **스트로크 색상**: 경로 중점에서 베이스 컬러 샘플링 → HSV 편차(`color_variation`). 스트로크 내 균일.
@@ -491,7 +491,6 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 |---|------|------|------|
 | 11 | **bilinear 샘플링 중복** | compositing 외 3곳 | 유사 구현 통합 필요 |
 | 12 | **StrokeParams 검증 없음** | `types.rs` | 음수/0 값 → 무한 루프 가능 |
-| 13 | **Transparent 알파 불일치** | `compositing.rs` | 오버페인트: RGB lerp + alpha max → 비물리적 |
 
 ---
 

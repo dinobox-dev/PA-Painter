@@ -257,13 +257,13 @@ pub fn composite_stroke(
                             opacity,
                         );
                     } else {
-                        // Over-paint: blend paint colors, alpha = max
+                        // Over-paint: blend paint colors, alpha accumulates (Porter-Duff "over")
                         let prev = global.color[idx];
                         global.color[idx] = Color::new(
                             lerp(prev.r, stroke_color.r, opacity),
                             lerp(prev.g, stroke_color.g, opacity),
                             lerp(prev.b, stroke_color.b, opacity),
-                            prev.a.max(opacity),
+                            prev.a + opacity * (1.0 - prev.a),
                         );
                     }
                 } else {
