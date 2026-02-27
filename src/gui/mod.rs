@@ -213,15 +213,6 @@ impl eframe::App for PainterApp {
             self.state.viewport_tab = self.state.viewport_tab.next();
         }
 
-        // ── Escape: deselect guide + return to Select tool ──
-        // Skip when a modal popup is open so it can handle Escape itself.
-        if !self.state.popup_open
-            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-        {
-            self.state.selected_guide = None;
-            self.state.guide_tool = GuideTool::Select;
-        }
-
         // ── Number keys 1-4: context-dependent (no text focus) ──
         {
             let has_text_focus = ctx.memory(|m| m.focused().is_some());
@@ -577,6 +568,13 @@ impl eframe::App for PainterApp {
         }
         if dismiss_summary {
             self.state.reload_summary = None;
+        }
+
+        // ── Escape: deselect guide + return to Select tool ──
+        // Runs after panels so popup consume_key takes priority.
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.state.selected_guide = None;
+            self.state.guide_tool = GuideTool::Select;
         }
 
         // ── Undo: track post-frame changes ──

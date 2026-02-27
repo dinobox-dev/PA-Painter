@@ -461,9 +461,6 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
         ui.data_mut(|d| d.insert_temp::<String>(save_name_id, String::new()));
     }
 
-    // Tell the global key handler whether this popup is open
-    state.popup_open = save_open;
-
     if save_open {
         let mut name: String = ui.data_mut(|d| d.get_temp(save_name_id).unwrap_or_default());
         let mut close = false;

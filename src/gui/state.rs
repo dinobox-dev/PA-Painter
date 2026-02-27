@@ -204,11 +204,6 @@ pub struct AppState {
     // ── Group Dim Overlay ──
     pub group_dim_cache: GroupDimCache,
 
-    // ── Popup State ──
-    /// True while a modal popup (e.g. "Save as Preset") is open.
-    /// Used to prevent global key handlers from consuming events.
-    pub popup_open: bool,
-
     // ── Status ──
     pub status_message: String,
 
@@ -262,7 +257,6 @@ impl AppState {
             pending_reload_normal: false,
             reload_summary: None,
             group_dim_cache: GroupDimCache::default(),
-            popup_open: false,
             status_message: "Ready".to_string(),
             generation_snapshot: None,
             undo: UndoHistory::default(),
