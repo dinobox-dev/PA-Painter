@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -40,12 +42,16 @@ pub struct GenResult {
 
 /// Manages a single background generation thread.
 pub struct GenerationManager {
-    handle: Option<thread::JoinHandle<GenResult>>,
+    handle: Option<thread::JoinHandle<Option<GenResult>>>,
+    cancel: Arc<AtomicBool>,
 }
 
 impl Default for GenerationManager {
     fn default() -> Self {
-        Self { handle: None }
+        Self {
+            handle: None,
+            cancel: Arc::new(AtomicBool::new(false)),
+        }
     }
 }
 
@@ -58,31 +64,38 @@ impl GenerationManager {
     /// Returns `Err` if the worker thread panicked.
     pub fn poll(&mut self) -> Option<Result<GenResult, String>> {
         if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
-            Some(self.handle.take().unwrap().join().map_err(|e| {
-                let msg = e
-                    .downcast_ref::<&str>()
-                    .copied()
-                    .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
-                    .unwrap_or("unknown error");
-                format!("Generation thread panicked: {msg}")
-            }))
+            match self.handle.take().unwrap().join() {
+                Ok(Some(result)) => Some(Ok(result)),
+                Ok(None) => None, // cancelled
+                Err(e) => {
+                    let msg = e
+                        .downcast_ref::<&str>()
+                        .copied()
+                        .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                        .unwrap_or("unknown error");
+                    Some(Err(format!("Generation thread panicked: {msg}")))
+                }
+            }
         } else {
             None
         }
     }
 
-    /// Discard any in-progress or finished result (thread detaches and is ignored).
+    /// Signal cancellation and drop the handle so the thread exits at the next checkpoint.
     pub fn discard(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
         self.handle = None;
     }
 
     /// Spawn a worker thread to run the full generation pipeline.
     pub fn start(&mut self, input: GenInput) {
-        self.handle = Some(thread::spawn(move || run_pipeline(input)));
+        self.cancel = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::clone(&self.cancel);
+        self.handle = Some(thread::spawn(move || run_pipeline(input, &cancel)));
     }
 }
 
-fn run_pipeline(input: GenInput) -> GenResult {
+fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
     let start = Instant::now();
 
     let base_color = match &input.base_colors {
@@ -102,6 +115,10 @@ fn run_pipeline(input: GenInput) -> GenResult {
         &mask_refs,
     );
 
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+
     let global = composite_all_with_paths(
         &input.layers,
         input.resolution,
@@ -111,6 +128,10 @@ fn run_pipeline(input: GenInput) -> GenResult {
         input.normal_data.as_ref(),
         &mask_refs,
     );
+
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
 
     let normal_map = match input.settings.normal_mode {
         NormalMode::DepictedForm => {
@@ -152,12 +173,12 @@ fn run_pipeline(input: GenInput) -> GenResult {
         );
     }
 
-    GenResult {
+    Some(GenResult {
         color: global.color,
         height: global.height,
         normal_map,
         stroke_id: global.stroke_id,
         resolution: input.resolution,
         elapsed: start.elapsed(),
-    }
+    })
 }
