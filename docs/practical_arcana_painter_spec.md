@@ -120,7 +120,7 @@
 |------|------|------|
 | name | String | 레이어 이름 |
 | visible | bool | 가시성 토글 (기본 true) |
-| order | i32 | 합성 순서 (낮을수록 먼저) |
+| order | i32 | 합성 순서 (낮을수록 먼저). UI 상단 = 높은 order = 나중에 페인팅(위). 추가/삭제/이동 시 전체 재할당 |
 | group_name | String | 메시 그룹명 또는 `"__all__"` |
 | paint | PaintValues | 통합 페인트 설정 |
 | guides | Vec\<Guide\> | 방향 가이드 |
@@ -490,7 +490,6 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 
 | # | 이슈 | 파일 | 설명 |
 |---|------|------|------|
-| 3 | **레이어 스왑 시 order 미갱신** | `gui/sidebar.rs:408` | Vec 위치만 스왑, `order` 필드 불변 → UI/합성 순서 불일치 |
 | 4 | **stale 감지가 visible 포함** | `gui/state.rs:304` | 가시성 토글 → "Modified" → 재생성 → 동일 결과 (거짓 stale) |
 | 5 | **Stroke ID 레이어 간 비고유** | `path_placement.rs:354` | 레이어 내 인덱스만 사용. 다른 레이어 간 ID 충돌 |
 

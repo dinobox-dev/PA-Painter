@@ -223,15 +223,19 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
                 draw_layer_icon(ui.painter(), ui, btn_rect, PLUS, has_mesh, resp.hovered());
             }
             if resp.on_hover_text("Add Layer").clicked() && has_mesh {
-                let order = state.project.layers.len() as i32;
                 state.project.layers.push(Layer {
                     name: "__all__".to_string(),
                     visible: true,
                     group_name: "__all__".to_string(),
-                    order,
+                    order: 0, // bottom of stack; all orders reassigned below
                     paint: PaintValues::default(),
                     guides: vec![],
                 });
+                // Reassign: index 0 (top of UI) = highest order (painted last = on top)
+                let n = state.project.layers.len() as i32;
+                for (i, layer) in state.project.layers.iter_mut().enumerate() {
+                    layer.order = n - 1 - i as i32;
+                }
                 state.selected_layer = Some(state.project.layers.len() - 1);
                 state.selected_guide = None;
             }
@@ -396,6 +400,7 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
         }
 
         // Apply deferred actions
+        let mut structure_changed = false;
         if let Some(idx) = delete_idx {
             state.project.layers.remove(idx);
             state.selected_guide = None;
@@ -404,10 +409,19 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
             } else {
                 state.selected_layer = Some(idx.min(state.project.layers.len() - 1));
             }
+            structure_changed = true;
         }
         if let Some((a, b)) = swap {
             state.project.layers.swap(a, b);
             state.selected_layer = Some(b);
+            structure_changed = true;
+        }
+        // Keep order fields in sync: index 0 (top of UI) = highest order (painted last = on top)
+        if structure_changed {
+            let n = state.project.layers.len() as i32;
+            for (i, layer) in state.project.layers.iter_mut().enumerate() {
+                layer.order = n - 1 - i as i32;
+            }
         }
     }
 
