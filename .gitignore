@@ -1,3 +1,17 @@
 /target
 /tests/results
 .DS_Store
+
+# Project files
+*.pap
+*.obj
+output/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db

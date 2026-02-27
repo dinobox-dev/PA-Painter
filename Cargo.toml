@@ -2,6 +2,12 @@
 name = "practical-arcana-painter"
 version = "0.1.0"
 edition = "2021"
+description = "Procedural paint stroke generator for 3D assets — turn any mesh into a hand-painted look"
+license = "MIT"
+authors = ["DiNo Box Inc."]
+keywords = ["procedural", "texture", "paint", "stroke", "3d"]
+categories = ["graphics", "game-development", "rendering"]
+readme = "README.md"
 
 [[bin]]
 name = "practical-arcana-painter"
