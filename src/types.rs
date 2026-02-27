@@ -401,22 +401,13 @@ pub struct PaintValues {
 
 impl Default for PaintValues {
     fn default() -> Self {
-        let d = StrokeParams::default();
-        Self {
-            brush_width: d.brush_width,
-            load: d.load,
-            body_wiggle: d.body_wiggle,
-            pressure_curve: crate::pressure::preset_to_custom(PressurePreset::FadeOut),
-            stroke_spacing: d.stroke_spacing,
-            max_stroke_length: d.max_stroke_length,
-            angle_variation: d.angle_variation,
-            max_turn_angle: d.max_turn_angle,
-            color_break_threshold: d.color_break_threshold,
-            normal_break_threshold: d.normal_break_threshold,
-            overlap_ratio: d.overlap_ratio,
-            overlap_dist_factor: d.overlap_dist_factor,
-            color_variation: d.color_variation,
-        }
+        // Match built-in "heavy_load" preset so new layers start with a known preset.
+        PresetLibrary::built_in()
+            .presets
+            .into_iter()
+            .find(|p| p.name == "heavy_load")
+            .unwrap()
+            .values
     }
 }
 
@@ -536,7 +527,7 @@ impl PresetLibrary {
                     name: "flat_wide".to_string(),
                     values: PaintValues {
                         brush_width: 40.0,
-                        load: 0.8,
+                        load: 1.4,
                         body_wiggle: 0.15,
                         pressure_curve: preset_to_custom(PressurePreset::FadeOut),
                         stroke_spacing: default_layout.stroke_spacing,
@@ -554,7 +545,7 @@ impl PresetLibrary {
                     name: "round_thin".to_string(),
                     values: PaintValues {
                         brush_width: 15.0,
-                        load: 0.9,
+                        load: 1.2,
                         body_wiggle: 0.1,
                         pressure_curve: preset_to_custom(PressurePreset::Taper),
                         stroke_spacing: 1.0,
@@ -572,7 +563,7 @@ impl PresetLibrary {
                     name: "dry_brush".to_string(),
                     values: PaintValues {
                         brush_width: 50.0,
-                        load: 0.3,
+                        load: 0.5,
                         body_wiggle: 0.2,
                         pressure_curve: preset_to_custom(PressurePreset::FadeOut),
                         stroke_spacing: 1.2,
@@ -590,7 +581,7 @@ impl PresetLibrary {
                     name: "impasto".to_string(),
                     values: PaintValues {
                         brush_width: 30.0,
-                        load: 1.0,
+                        load: 1.8,
                         body_wiggle: 0.1,
                         pressure_curve: preset_to_custom(PressurePreset::Bell),
                         stroke_spacing: 0.6,
@@ -608,7 +599,7 @@ impl PresetLibrary {
                     name: "glaze".to_string(),
                     values: PaintValues {
                         brush_width: 35.0,
-                        load: 0.5,
+                        load: 0.7,
                         body_wiggle: 0.1,
                         pressure_curve: preset_to_custom(PressurePreset::Uniform),
                         stroke_spacing: 1.0,
@@ -670,7 +661,7 @@ impl PresetLibrary {
                     name: "crosshatch".to_string(),
                     values: PaintValues {
                         brush_width: 30.0,
-                        load: 0.8,
+                        load: 1.2,
                         body_wiggle: 0.15,
                         pressure_curve: preset_to_custom(PressurePreset::FadeOut),
                         stroke_spacing: 0.8,
@@ -688,7 +679,7 @@ impl PresetLibrary {
                     name: "loose_organic".to_string(),
                     values: PaintValues {
                         brush_width: 30.0,
-                        load: 0.8,
+                        load: 1.3,
                         body_wiggle: 0.15,
                         pressure_curve: preset_to_custom(PressurePreset::FadeOut),
                         stroke_spacing: 1.2,
