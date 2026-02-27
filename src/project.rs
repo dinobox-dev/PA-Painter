@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use zip::write::SimpleFileOptions;
@@ -10,6 +11,38 @@ use crate::types::{
     Layer, OutputSettings, PaintLayer, PresetLibrary, StrokePath,
 };
 use crate::uv_mask::UvMask;
+
+/// Return the current UTC time as an ISO 8601 string (e.g. `"2026-02-27T14:30:00Z"`).
+pub fn utc_now_iso8601() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let day_secs = (secs % 86400) as u32;
+    let mut days = (secs / 86400) as i64;
+
+    let mut year = 1970i32;
+    loop {
+        let len = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
+        if days < len { break; }
+        days -= len;
+        year += 1;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let mdays = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month = 1u32;
+    for &m in &mdays {
+        if days < m { break; }
+        days -= m;
+        month += 1;
+    }
+    let day = days + 1;
+    let h = day_secs / 3600;
+    let m = (day_secs % 3600) / 60;
+    let s = day_secs % 60;
+    format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
+}
 
 // ── Data Structures ──
 
@@ -92,8 +125,8 @@ impl Default for Project {
             manifest: Manifest {
                 version: "4".to_string(),
                 app_name: "PracticalArcanaPainter".to_string(),
-                created_at: String::new(),
-                modified_at: String::new(),
+                created_at: utc_now_iso8601(),
+                modified_at: utc_now_iso8601(),
             },
             mesh_ref: MeshRef {
                 path: String::new(),

@@ -99,7 +99,7 @@
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| manifest | Manifest | 버전 "4", 앱 이름, 타임스탬프 |
+| manifest | Manifest | 버전 "4", 앱 이름, 타임스탬프 (created\_at: 생성 시 UTC, modified\_at: 저장 시 UTC) |
 | mesh_ref | MeshRef | 외부 메시 파일 경로 + 포맷 |
 | base_color | BaseColor | 프로젝트 전역 컬러 |
 | base_normal | Option\<String\> | 프로젝트 전역 노말맵 경로 |
@@ -380,7 +380,7 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 
 | 파일 | 내용 |
 |------|------|
-| `manifest.json` | version "4", app_name, timestamps |
+| `manifest.json` | version "4", app\_name, created\_at (생성 시), modified\_at (저장 시) — ISO 8601 UTC |
 | `mesh_ref.json` | 외부 메시 파일 경로 + 포맷 |
 | `base_sources.json` | base_color + base_normal |
 | `layer_stack.json` | `Vec<Layer>` |
@@ -506,7 +506,6 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 
 | # | 이슈 | 파일 | 설명 |
 |---|------|------|------|
-| 10 | **modified_at 미갱신** | `project.rs:254` | 저장 시 타임스탬프 불변 |
 | 11 | **bilinear 샘플링 중복** | compositing 외 3곳 | 유사 구현 통합 필요 |
 | 12 | **StrokeParams 검증 없음** | `types.rs` | 음수/0 값 → 무한 루프 가능 |
 | 13 | **Transparent 알파 불일치** | `compositing.rs` | 오버페인트: RGB lerp + alpha max → 비물리적 |

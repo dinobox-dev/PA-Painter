@@ -6,7 +6,7 @@ use practical_arcana_painter::output::{
     export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
     normalize_height_map,
 };
-use practical_arcana_painter::project::{load_project, save_project, BaseColor, Project};
+use practical_arcana_painter::project::{load_project, save_project, utc_now_iso8601, BaseColor, Project};
 use practical_arcana_painter::types::{BackgroundMode, Layer, PaintValues};
 
 use super::state::ReloadSummary;
@@ -367,6 +367,8 @@ pub fn save_project_action(state: &mut AppState) {
         };
         path
     };
+
+    state.project.manifest.modified_at = utc_now_iso8601();
 
     match save_project(&state.project, &path) {
         Ok(()) => {
