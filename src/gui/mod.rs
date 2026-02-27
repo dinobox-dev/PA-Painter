@@ -171,6 +171,9 @@ impl PainterApp {
 
 impl eframe::App for PainterApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Thin scrollbar always visible even when not hovering
+        ctx.style_mut(|s| s.spacing.scroll.dormant_handle_opacity = 0.4);
+
         // Lazy-init checkerboard
         if self.checkerboard.is_none() {
             self.checkerboard = Some(viewport::make_checkerboard(ctx));
@@ -478,8 +481,7 @@ impl eframe::App for PainterApp {
                 // Fixed top: Base + Project Settings + Layers header
                 sidebar::show_top(ui, &mut self.state);
                 sidebar::show_layers_header(ui, &mut self.state);
-                // Scrollable layer rows (thin scrollbar visible even when not hovering)
-                ui.spacing_mut().scroll.dormant_handle_opacity = 0.4;
+                // Scrollable layer rows
                 egui::ScrollArea::vertical().show(ui, |ui: &mut egui::Ui| {
                     sidebar::show_layer_rows(ui, &mut self.state);
                 });

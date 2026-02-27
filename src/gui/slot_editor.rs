@@ -220,6 +220,7 @@ fn show_preset_combo_sized(ui: &mut egui::Ui, state: &mut AppState, layer_idx: u
             let delete_btn_w = 18.0;
             let thumb_w = 60.0;
             let spacing = ui.spacing().item_spacing.x;
+            let scrollbar_margin = ui.spacing().scroll.bar_width + ui.spacing().scroll.bar_outer_margin;
 
             // User presets first (if any)
             if !user_presets.is_empty() {
@@ -227,7 +228,7 @@ fn show_preset_combo_sized(ui: &mut egui::Ui, state: &mut AppState, layer_idx: u
                 for (i, preset) in user_presets.iter().enumerate() {
                     let thumb_id = thumbs.get_or_create(ui.ctx(), &preset.values, layer_seed);
                     let selected = current_name == preset.name;
-                    let row_w = ui.available_width();
+                    let row_w = ui.available_width() - scrollbar_margin;
 
                     // Row: [thumb] [name...] [delete]
                     let row_h = 20.0;
@@ -326,7 +327,7 @@ fn show_preset_combo_sized(ui: &mut egui::Ui, state: &mut AppState, layer_idx: u
             for preset in &builtin_presets {
                 let thumb_id = thumbs.get_or_create(ui.ctx(), &preset.values, layer_seed);
                 let selected = current_name == preset.name;
-                let row_w = ui.available_width();
+                let row_w = ui.available_width() - scrollbar_margin;
                 let row_h = 20.0;
                 let (rect, resp) = ui.allocate_exact_size(
                     egui::Vec2::new(row_w, row_h),
