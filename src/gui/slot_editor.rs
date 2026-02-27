@@ -8,7 +8,7 @@ use practical_arcana_painter::types::{
 use super::preview::StrokePreviewCache;
 
 use super::preview;
-use super::sidebar::build_group_names;
+use super::sidebar::{build_group_names, section_header, SECTION_INDENT};
 use super::state::AppState;
 
 /// Draw the right-panel layer editor for the currently selected layer.
@@ -22,120 +22,139 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     }
 
     let group_names = build_group_names(state);
+    ui.spacing_mut().indent = SECTION_INDENT;
 
-    ui.heading(format!("Layer: {}", state.project.layers[idx].name));
+    // ── Layer ──
+    section_header(ui, "Layer");
+    ui.indent("layer_content", |ui: &mut egui::Ui| {
+        // Name row — always-visible TextEdit, same pattern as sidebar Mesh/Color fields.
+        ui.horizontal(|ui: &mut egui::Ui| {
+            ui.label("Name");
+            let text_w = ui.available_width();
+            ui.add(
+                egui::TextEdit::singleline(&mut state.project.layers[idx].name)
+                    .desired_width(text_w),
+            );
+        });
 
-    // Group selector (scoped borrow of layer.group_name)
-    {
-        let layer = &mut state.project.layers[idx];
-        egui::ComboBox::from_label("Group")
-            .selected_text(&layer.group_name)
-            .show_ui(ui, |ui: &mut egui::Ui| {
-                for name in &group_names {
-                    ui.selectable_value(&mut layer.group_name, name.clone(), name.as_str());
-                }
+        // Group selector
+        {
+            let layer = &mut state.project.layers[idx];
+            ui.horizontal(|ui: &mut egui::Ui| {
+                ui.label("Group");
+                let combo_w = ui.available_width();
+                egui::ComboBox::from_id_salt("layer_group_combo")
+                    .selected_text(&layer.group_name)
+                    .width(combo_w)
+                    .show_ui(ui, |ui: &mut egui::Ui| {
+                        for name in &group_names {
+                            ui.selectable_value(
+                                &mut layer.group_name,
+                                name.clone(),
+                                name.as_str(),
+                            );
+                        }
+                    });
             });
-    }
+        }
+    });
 
     ui.separator();
 
-    // ── Preset Picker ──
-    show_preset_picker(ui, state, idx);
+    // ── Paint ──
+    // Header row: "Paint" label + preset combo + save icon inline
+    ui.add_space(2.0);
+    ui.horizontal(|ui: &mut egui::Ui| {
+        let font = egui::FontId::proportional(14.0);
+        ui.label(egui::RichText::new("Paint").font(font).strong());
+        // Reserve icon on the right first, then combo fills the rest.
+        let spacing = ui.spacing().item_spacing.x;
+        let icon_w = 20.0;
+        let combo_w = (ui.available_width() - icon_w - spacing).max(40.0);
+        show_preset_combo_sized(ui, state, idx, combo_w);
+        show_save_preset_icon(ui, state, idx);
+    });
+    ui.add_space(1.0);
 
-    ui.add_space(4.0);
+    ui.indent("paint_content", |ui: &mut egui::Ui| {
+        let layer_seed = state.project.settings.seed.wrapping_add(idx as u32);
+        let layer = &mut state.project.layers[idx];
+        let cache = &mut state.preview_cache;
 
-    // Derive per-layer seed from project seed + layer index
-    let layer_seed = state.project.settings.seed.wrapping_add(idx as u32);
+        // Pressure curve + stroke preview (top)
+        show_combined_stroke_curve(ui, &mut layer.paint, layer_seed, &mut cache.stroke);
 
-    // Reborrow layer + cache for Brush + Layout sections
-    let layer = &mut state.project.layers[idx];
-    let cache = &mut state.preview_cache;
+        ui.add_space(4.0);
 
-    // ── Paint Settings (unified brush + layout) ──
-    egui::CollapsingHeader::new("Brush")
-        .default_open(true)
-        .show(ui, |ui: &mut egui::Ui| {
-            ui.add(
-                egui::Slider::new(&mut layer.paint.brush_width, 5.0..=100.0)
-                    .text("Brush Width"),
-            );
-            ui.add(
-                egui::Slider::new(&mut layer.paint.load, 0.0..=2.0)
-                    .step_by(0.01)
-                    .text("Load"),
-            );
-            ui.add(
-                egui::Slider::new(&mut layer.paint.body_wiggle, 0.0..=0.5)
-                    .step_by(0.01)
-                    .text("Body Wiggle"),
-            );
+        ui.label(egui::RichText::new("Brush").weak());
+        ui.add(
+            egui::Slider::new(&mut layer.paint.brush_width, 5.0..=100.0)
+                .text("Brush Width"),
+        );
+        ui.add(
+            egui::Slider::new(&mut layer.paint.load, 0.0..=2.0)
+                .step_by(0.01)
+                .text("Load"),
+        );
+        ui.add(
+            egui::Slider::new(&mut layer.paint.body_wiggle, 0.0..=0.5)
+                .step_by(0.01)
+                .text("Body Wiggle"),
+        );
 
-            // Combined pressure curve + stroke density preview
-            show_combined_stroke_curve(ui, &mut layer.paint, layer_seed, &mut cache.stroke);
-        });
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Layout").weak());
+        ui.add(
+            egui::Slider::new(&mut layer.paint.stroke_spacing, 0.1..=3.0)
+                .step_by(0.1)
+                .text("Spacing"),
+        );
+        ui.add(
+            egui::Slider::new(&mut layer.paint.max_stroke_length, 10.0..=500.0)
+                .text("Max Length"),
+        );
+        ui.add(
+            egui::Slider::new(&mut layer.paint.angle_variation, 0.0..=45.0)
+                .text("Angle Var"),
+        );
+        ui.add(
+            egui::Slider::new(&mut layer.paint.max_turn_angle, 0.0..=90.0)
+                .text("Max Turn"),
+        );
+        ui.add(
+            egui::Slider::new(&mut layer.paint.color_variation, 0.0..=0.5)
+                .step_by(0.01)
+                .text("Color Var"),
+        );
 
-    ui.add_space(4.0);
+        let mut color_break_enabled = layer.paint.color_break_threshold.is_some();
+        ui.checkbox(&mut color_break_enabled, "Color Break");
+        if color_break_enabled {
+            let val = layer.paint.color_break_threshold.get_or_insert(0.1);
+            ui.add(egui::Slider::new(val, 0.01..=0.5).text("Threshold"));
+        } else {
+            layer.paint.color_break_threshold = None;
+        }
 
-    // ── Layout Settings ──
-    egui::CollapsingHeader::new("Layout")
-        .default_open(true)
-        .show(ui, |ui: &mut egui::Ui| {
-            ui.add(
-                egui::Slider::new(&mut layer.paint.stroke_spacing, 0.1..=3.0)
-                    .step_by(0.1)
-                    .text("Spacing"),
-            );
-            ui.add(
-                egui::Slider::new(&mut layer.paint.max_stroke_length, 10.0..=500.0)
-                    .text("Max Length"),
-            );
-            ui.add(
-                egui::Slider::new(&mut layer.paint.angle_variation, 0.0..=45.0)
-                    .text("Angle Var"),
-            );
-            ui.add(
-                egui::Slider::new(&mut layer.paint.max_turn_angle, 0.0..=90.0)
-                    .text("Max Turn"),
-            );
-            ui.add(
-                egui::Slider::new(&mut layer.paint.color_variation, 0.0..=0.5)
-                    .step_by(0.01)
-                    .text("Color Var"),
-            );
+        let mut normal_break_enabled = layer.paint.normal_break_threshold.is_some();
+        ui.checkbox(&mut normal_break_enabled, "Normal Break");
+        if normal_break_enabled {
+            let val = layer.paint.normal_break_threshold.get_or_insert(0.5);
+            ui.add(egui::Slider::new(val, 0.0..=1.0).text("Threshold"));
+        } else {
+            layer.paint.normal_break_threshold = None;
+        }
 
-            // Optional thresholds
-            let mut color_break_enabled = layer.paint.color_break_threshold.is_some();
-            ui.checkbox(&mut color_break_enabled, "Color Break");
-            if color_break_enabled {
-                let val = layer.paint.color_break_threshold.get_or_insert(0.1);
-                ui.add(egui::Slider::new(val, 0.01..=0.5).text("Threshold"));
-            } else {
-                layer.paint.color_break_threshold = None;
-            }
+    });
 
-            let mut normal_break_enabled = layer.paint.normal_break_threshold.is_some();
-            ui.checkbox(&mut normal_break_enabled, "Normal Break");
-            if normal_break_enabled {
-                let val = layer.paint.normal_break_threshold.get_or_insert(0.5);
-                ui.add(egui::Slider::new(val, 0.0..=1.0).text("Threshold"));
-            } else {
-                layer.paint.normal_break_threshold = None;
-            }
-        });
-
-    // End layer/cache borrows so we can access state.selected_guide
-    let _ = cache;
-    let _ = layer;
-
-    ui.add_space(4.0);
+    ui.separator();
 
     // ── Guides ──
-    egui::CollapsingHeader::new(format!(
-        "Guides ({})",
-        state.project.layers[idx].guides.len()
-    ))
-    .default_open(true)
-    .show(ui, |ui: &mut egui::Ui| {
+    section_header(
+        ui,
+        &format!("Guides ({})", state.project.layers[idx].guides.len()),
+    );
+    ui.indent("guides_content", |ui: &mut egui::Ui| {
         if state.project.layers[idx].guides.is_empty() {
             ui.label(
                 egui::RichText::new("No guides")
@@ -161,12 +180,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
 // ── Preset Picker ──────────────────────────────────────────────
 
-/// Preset combo box with stroke thumbnails + "Save as Preset" button.
-///
-/// Separated from `show()` for borrow-splitting: this function accesses
-/// `state.project.presets` and `state.preset_thumbnails` in a scope where
-/// `state.project.layers[idx]` is not mutably borrowed.
-fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
+/// Preset combo box only (no label, no save button).
+/// Width is caller-specified. Applies selection immediately.
+fn show_preset_combo_sized(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize, combo_w: f32) {
     let layer_seed = state.project.settings.seed.wrapping_add(layer_idx as u32);
     let current_paint = state.project.layers[layer_idx].paint.clone();
 
@@ -186,10 +202,12 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
     let mut delete_user_idx: Option<usize> = None;
     let thumbs = &mut state.preset_thumbnails;
 
-    // Preset row: label first, then ComboBox fills remaining width
-    ui.horizontal(|ui: &mut egui::Ui| {
-    ui.label("Preset");
-    let combo_w = ui.available_width();
+    // Wrap ComboBox in a fixed-width sub-UI so its internal
+    // available_width() matches combo_w and .truncate() works correctly.
+    ui.allocate_ui_with_layout(
+        egui::Vec2::new(combo_w, ui.available_height()),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui: &mut egui::Ui| {
 
     egui::ComboBox::from_id_salt("preset_combo")
         .selected_text(&current_name)
@@ -369,7 +387,8 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
                 }
             }
         });
-    }); // horizontal
+
+    }); // allocate_ui_with_layout
 
     if let Some(values) = selected_values {
         state.project.layers[layer_idx].paint = values;
@@ -379,18 +398,53 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
         state.dirty = true;
         state.status_message = "Preset deleted".to_string();
     }
+}
 
-    // "Save as Preset" button + popup
-    let is_custom = current_name == "Custom";
+/// "Save as Preset" button with popup.
+fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
+    use egui_phosphor::fill::FLOPPY_DISK;
+
+    let current_paint = state.project.layers[layer_idx].paint.clone();
+    let built_in = PresetLibrary::built_in();
+    let is_custom = built_in
+        .matching_preset(&current_paint)
+        .or_else(|| state.project.presets.matching_preset(&current_paint))
+        .is_none();
     let save_open_id = ui.id().with("preset_save_open");
     let save_name_id = ui.id().with("preset_save_name");
     let mut save_open: bool = ui.data_mut(|d| d.get_temp(save_open_id).unwrap_or(false));
 
-    let btn = egui::Button::new("Save as Preset");
-    let btn_resp = ui.add_enabled(is_custom && !save_open, btn);
-    let btn_rect = btn_resp.rect;
+    let icon_h = ui.spacing().interact_size.y;
+    let icon_w = 20.0;
+    let enabled = is_custom && !save_open;
+    let (btn_rect, btn_resp) =
+        ui.allocate_exact_size(egui::Vec2::new(icon_w, icon_h), egui::Sense::click());
+    if ui.is_rect_visible(btn_rect) {
+        let hovered = btn_resp.hovered() && enabled;
+        if hovered {
+            ui.painter()
+                .rect_filled(btn_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+        }
+        let color = if !enabled {
+            ui.visuals().weak_text_color().gamma_multiply(0.4)
+        } else {
+            ui.visuals().text_color()
+        };
+        ui.painter().text(
+            btn_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            FLOPPY_DISK,
+            egui::FontId::proportional(14.0),
+            color,
+        );
+    }
+    if enabled {
+        btn_resp.clone().on_hover_text("Save as Preset");
+    } else {
+        btn_resp.clone().on_hover_text("Matches existing preset");
+    }
 
-    let just_opened = btn_resp.clicked();
+    let just_opened = enabled && btn_resp.clicked();
     if just_opened {
         save_open = true;
         ui.data_mut(|d| d.insert_temp::<String>(save_name_id, String::new()));
@@ -417,20 +471,45 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
             .fixed_pos(egui::Pos2::new(btn_rect.left(), btn_rect.bottom() + 4.0))
             .show(ui.ctx(), |ui: &mut egui::Ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui: &mut egui::Ui| {
+                    use egui_phosphor::fill::{CHECK, X};
+                    let btn_h = ui.spacing().interact_size.y;
+                    let btn_w = 20.0;
+
                     ui.horizontal(|ui: &mut egui::Ui| {
-                        ui.label("Name:");
+                        let text_w = 140.0_f32;
                         let text_resp = ui.add(
                             egui::TextEdit::singleline(&mut name)
-                                .desired_width(140.0)
+                                .desired_width(text_w)
                                 .hint_text("Preset name"),
                         );
                         if name.is_empty() {
                             text_resp.request_focus();
                         }
-                    });
 
-                    ui.horizontal(|ui: &mut egui::Ui| {
-                        if (ui.button("Save").clicked() || enter) && !name.trim().is_empty() {
+                        let can_save = !name.trim().is_empty();
+
+                        // Save (check) icon
+                        let (save_rect, save_resp) =
+                            ui.allocate_exact_size(egui::Vec2::new(btn_w, btn_h), egui::Sense::click());
+                        if ui.is_rect_visible(save_rect) {
+                            let hovered = save_resp.hovered() && can_save;
+                            if hovered {
+                                ui.painter().rect_filled(save_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                            }
+                            let color = if !can_save {
+                                ui.visuals().weak_text_color().gamma_multiply(0.4)
+                            } else {
+                                ui.visuals().text_color()
+                            };
+                            ui.painter().text(
+                                save_rect.center(), egui::Align2::CENTER_CENTER,
+                                CHECK, egui::FontId::proportional(14.0), color,
+                            );
+                        }
+                        if can_save {
+                            save_resp.clone().on_hover_text("Save (Enter)");
+                        }
+                        if (save_resp.clicked() || enter) && can_save {
                             let preset = PaintPreset {
                                 name: name.trim().to_string(),
                                 values: state.project.layers[layer_idx].paint.clone(),
@@ -448,7 +527,26 @@ fn show_preset_picker(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
                             }
                             close = true;
                         }
-                        if ui.button("Cancel").clicked() {
+
+                        // Cancel (X) icon
+                        let (cancel_rect, cancel_resp) =
+                            ui.allocate_exact_size(egui::Vec2::new(btn_w, btn_h), egui::Sense::click());
+                        if ui.is_rect_visible(cancel_rect) {
+                            if cancel_resp.hovered() {
+                                ui.painter().rect_filled(cancel_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                            }
+                            let color = if cancel_resp.hovered() {
+                                ui.visuals().text_color()
+                            } else {
+                                ui.visuals().weak_text_color()
+                            };
+                            ui.painter().text(
+                                cancel_rect.center(), egui::Align2::CENTER_CENTER,
+                                X, egui::FontId::proportional(14.0), color,
+                            );
+                        }
+                        cancel_resp.clone().on_hover_text("Cancel (Esc)");
+                        if cancel_resp.clicked() {
                             close = true;
                         }
                     });
@@ -657,7 +755,7 @@ fn draw_curve_knots_and_handles(
                 egui::Rect::from_center_size(center, egui::Vec2::splat(HIT_RADIUS * 2.0));
             let resp = ui.interact(hit_rect, id, egui::Sense::click_and_drag());
 
-            if resp.dragged() {
+            if resp.dragged_by(egui::PointerButton::Primary) {
                 knot_dragged = Some(i);
             }
             if resp.secondary_clicked() && i > 0 && i < n - 1 && n > 2 {
@@ -672,7 +770,7 @@ fn draw_curve_knots_and_handles(
                 let hit_rect =
                     egui::Rect::from_center_size(center, egui::Vec2::splat(HIT_RADIUS * 2.0));
                 let resp = ui.interact(hit_rect, id, egui::Sense::drag());
-                if resp.dragged() {
+                if resp.dragged_by(egui::PointerButton::Primary) {
                     hin_dragged = Some(i);
                 }
             }
@@ -682,7 +780,7 @@ fn draw_curve_knots_and_handles(
                 let hit_rect =
                     egui::Rect::from_center_size(center, egui::Vec2::splat(HIT_RADIUS * 2.0));
                 let resp = ui.interact(hit_rect, id, egui::Sense::drag());
-                if resp.dragged() {
+                if resp.dragged_by(egui::PointerButton::Primary) {
                     hout_dragged = Some(i);
                 }
             }
@@ -754,9 +852,13 @@ fn draw_curve_knots_and_handles(
             }
         }
 
-        ui.colored_label(
-            egui::Color32::from_gray(100),
-            "Drag points · Double-click add · Right-click remove",
-        );
+        let hint_color = egui::Color32::from_gray(100);
+        ui.horizontal(|ui: &mut egui::Ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            ui.colored_label(hint_color, "Dbl-click");
+            ui.colored_label(egui::Color32::from_gray(150), "add");
+            ui.colored_label(hint_color, " / Right-click");
+            ui.colored_label(egui::Color32::from_gray(150), "remove");
+        });
     }
 }

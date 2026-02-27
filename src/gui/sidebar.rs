@@ -6,10 +6,10 @@ use practical_arcana_painter::types::{
 
 use super::state::AppState;
 
-const SECTION_INDENT: f32 = 8.0;
+pub const SECTION_INDENT: f32 = 8.0;
 
 /// Draw a section header label with a slightly larger font.
-fn section_header(ui: &mut egui::Ui, label: &str) {
+pub fn section_header(ui: &mut egui::Ui, label: &str) {
     let font = egui::FontId::proportional(14.0);
     ui.add_space(2.0);
     ui.label(egui::RichText::new(label).font(font).strong());
