@@ -283,22 +283,22 @@ impl Default for StrokeParams {
 }
 
 impl StrokeParams {
-    /// Reconstruct StrokeParams from unified PaintValues.
+    /// Reconstruct StrokeParams from unified PaintValues, clamping to safe ranges.
     pub fn from_paint_values(paint: &PaintValues, seed: u32) -> StrokeParams {
         StrokeParams {
-            brush_width: paint.brush_width,
-            load: paint.load,
-            body_wiggle: paint.body_wiggle,
+            brush_width: paint.brush_width.max(1.0),
+            load: paint.load.clamp(0.0, 2.0),
+            body_wiggle: paint.body_wiggle.max(0.0),
             pressure_curve: paint.pressure_curve.clone(),
-            stroke_spacing: paint.stroke_spacing,
-            max_stroke_length: paint.max_stroke_length,
-            angle_variation: paint.angle_variation,
-            max_turn_angle: paint.max_turn_angle,
-            color_break_threshold: paint.color_break_threshold,
-            normal_break_threshold: paint.normal_break_threshold,
-            overlap_ratio: paint.overlap_ratio,
-            overlap_dist_factor: paint.overlap_dist_factor,
-            color_variation: paint.color_variation,
+            stroke_spacing: paint.stroke_spacing.max(0.01),
+            max_stroke_length: paint.max_stroke_length.max(1.0),
+            angle_variation: paint.angle_variation.max(0.0),
+            max_turn_angle: paint.max_turn_angle.max(0.0),
+            color_break_threshold: paint.color_break_threshold.map(|v| v.max(0.0)),
+            normal_break_threshold: paint.normal_break_threshold.map(|v| v.max(0.0)),
+            overlap_ratio: paint.overlap_ratio.map(|v| v.clamp(0.0, 1.0)),
+            overlap_dist_factor: paint.overlap_dist_factor.map(|v| v.max(0.01)),
+            color_variation: paint.color_variation.clamp(0.0, 1.0),
             seed,
         }
     }
