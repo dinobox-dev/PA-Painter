@@ -16,7 +16,7 @@ use state::{AppState, GuideTool, MapMode, ViewportTab};
 
 use practical_arcana_painter::object_normal::compute_mesh_normal_data;
 use practical_arcana_painter::stroke_color::ColorTextureRef;
-use practical_arcana_painter::types::{pixels_to_colors, Color, NormalMode};
+use practical_arcana_painter::types::{Color, NormalMode};
 
 /// Main GUI application.
 pub struct PainterApp {
@@ -49,12 +49,8 @@ impl PainterApp {
         let layers = self.state.project.paint_layers();
         let settings = self.state.project.settings.clone();
 
-        // Base color
-        let base_colors = self
-            .state
-            .loaded_texture
-            .as_ref()
-            .map(|tex| pixels_to_colors(&tex.pixels));
+        // Base color (clone from cached conversion)
+        let base_colors = self.state.cached_texture_colors.clone();
         let (base_w, base_h) = self
             .state
             .loaded_texture
@@ -338,13 +334,8 @@ impl eframe::App for PainterApp {
             let res = self.state.project.settings.resolution_preset.resolution();
             let seed = self.state.project.settings.seed;
 
-            // Prepare color texture ref for color-break preview
-            let colors: Option<Vec<practical_arcana_painter::types::Color>> = self
-                .state
-                .loaded_texture
-                .as_ref()
-                .map(|tex| pixels_to_colors(&tex.pixels));
-            let color_ref = match (&colors, &self.state.loaded_texture) {
+            // Prepare color texture ref for color-break preview (uses cached conversion)
+            let color_ref = match (&self.state.cached_texture_colors, &self.state.loaded_texture) {
                 (Some(c), Some(tex)) => Some(ColorTextureRef {
                     data: c,
                     width: tex.width,

@@ -7,7 +7,7 @@ use practical_arcana_painter::output::{
     normalize_height_map,
 };
 use practical_arcana_painter::project::{load_project, save_project, utc_now_iso8601, BaseColor, Project};
-use practical_arcana_painter::types::{BackgroundMode, Layer, PaintValues};
+use practical_arcana_painter::types::{pixels_to_colors, BackgroundMode, Layer, PaintValues};
 
 use super::state::ReloadSummary;
 
@@ -33,6 +33,7 @@ fn apply_texture(
     let tex = load_texture(tex_path).map_err(|e| format!("Texture load failed: {e}"))?;
     let handle = textures::loaded_texture_to_handle(ctx, &tex, "base_color");
     state.textures.base_texture = Some(handle);
+    state.cached_texture_colors = Some(pixels_to_colors(&tex.pixels));
     state.loaded_texture = Some(tex);
     Ok(())
 }
@@ -89,6 +90,13 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
             state.project = project;
             state.project_path = Some(path);
             state.dirty = false;
+            state.generated = None;
+            state.generation_snapshot = None;
+            state.generation.discard();
+            state.textures.color = None;
+            state.textures.height = None;
+            state.textures.normal = None;
+            state.textures.stroke_id = None;
             state.undo.clear();
             true
         }
@@ -132,11 +140,15 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
             };
             state.selected_guide = None;
             state.generated = None;
+            state.generation_snapshot = None;
+            state.generation.discard();
             state.textures.color = None;
             state.textures.height = None;
             state.textures.normal = None;
             state.textures.stroke_id = None;
+            state.textures.base_texture = None;
             state.loaded_texture = None;
+            state.cached_texture_colors = None;
             state.loaded_normal = None;
             state.reload_summary = None;
             state.undo.clear();

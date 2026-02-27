@@ -63,6 +63,11 @@ impl GenerationManager {
         }
     }
 
+    /// Discard any in-progress or finished result (thread detaches and is ignored).
+    pub fn discard(&mut self) {
+        self.handle = None;
+    }
+
     /// Spawn a worker thread to run the full generation pipeline.
     pub fn start(&mut self, input: GenInput) {
         self.handle = Some(thread::spawn(move || run_pipeline(input)));

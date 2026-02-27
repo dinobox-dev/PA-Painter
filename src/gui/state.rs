@@ -150,6 +150,8 @@ pub struct AppState {
     pub loaded_texture: Option<practical_arcana_painter::asset_io::LoadedTexture>,
     pub loaded_normal: Option<practical_arcana_painter::asset_io::LoadedTexture>,
     pub uv_edges: Option<Vec<(Vec2, Vec2)>>,
+    /// Cached `pixels_to_colors` result for `loaded_texture`. Invalidated on texture reload.
+    pub cached_texture_colors: Option<Vec<practical_arcana_painter::types::Color>>,
 
     // ── Viewport ──
     pub viewport: ViewportState,
@@ -223,6 +225,7 @@ impl AppState {
             loaded_texture: None,
             loaded_normal: None,
             uv_edges: None,
+            cached_texture_colors: None,
             viewport: ViewportState::default(),
             viewport_tab: ViewportTab::Guide,
             map_mode: MapMode::Color,

@@ -499,7 +499,6 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 |---|------|------|------|
 | 7 | **경로 캐시에 base_color 미포함** | `gui/preview.rs:94` | `color_break_threshold` 사용 시 텍스처 교체해도 미갱신 |
 | 8 | **popup_open 이전 프레임 상태** | `gui/mod.rs:217` | 팝업 프레임에서 Escape 오소비 가능 |
-| 9 | **path overlay에서 반복 Vec 할당** | `gui/mod.rs:343` | 경로 프리뷰 갱신 시 `pixels_to_colors` 매번 할당 |
 
 ### 10-4. MINOR
 
