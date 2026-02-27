@@ -34,6 +34,57 @@ pub fn lerp_color(a: Color, b: Color, t: f32) -> Color {
     }
 }
 
+/// Bilinear sample a row-major Color texture at UV coordinates.
+/// Uses half-texel offset for texel-center convention, edge-clamped.
+pub fn sample_bilinear_color(texture: &[Color], width: u32, height: u32, uv: Vec2) -> Color {
+    let x = uv.x * width as f32 - 0.5;
+    let y = uv.y * height as f32 - 0.5;
+
+    let x0 = x.floor() as i32;
+    let y0 = y.floor() as i32;
+    let fx = x - x0 as f32;
+    let fy = y - y0 as f32;
+
+    let x0c = x0.clamp(0, width as i32 - 1) as u32;
+    let y0c = y0.clamp(0, height as i32 - 1) as u32;
+    let x1c = (x0 + 1).clamp(0, width as i32 - 1) as u32;
+    let y1c = (y0 + 1).clamp(0, height as i32 - 1) as u32;
+
+    let c00 = texture[(y0c * width + x0c) as usize];
+    let c10 = texture[(y0c * width + x1c) as usize];
+    let c01 = texture[(y1c * width + x0c) as usize];
+    let c11 = texture[(y1c * width + x1c) as usize];
+
+    let top = lerp_color(c00, c10, fx);
+    let bot = lerp_color(c01, c11, fx);
+    lerp_color(top, bot, fy)
+}
+
+/// Bilinear sample a row-major f32 map at UV coordinates.
+/// Uses half-texel offset for texel-center convention, edge-clamped.
+pub fn sample_bilinear_f32(data: &[f32], width: u32, height: u32, uv: Vec2) -> f32 {
+    let x = uv.x * width as f32 - 0.5;
+    let y = uv.y * height as f32 - 0.5;
+
+    let x0 = x.floor() as i32;
+    let y0 = y.floor() as i32;
+    let fx = x - x0 as f32;
+    let fy = y - y0 as f32;
+
+    let x0c = x0.clamp(0, width as i32 - 1) as u32;
+    let y0c = y0.clamp(0, height as i32 - 1) as u32;
+    let x1c = (x0 + 1).clamp(0, width as i32 - 1) as u32;
+    let y1c = (y0 + 1).clamp(0, height as i32 - 1) as u32;
+
+    let v00 = data[(y0c * width + x0c) as usize];
+    let v10 = data[(y0c * width + x1c) as usize];
+    let v01 = data[(y1c * width + x0c) as usize];
+    let v11 = data[(y1c * width + x1c) as usize];
+
+    v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy)
+        + v01 * (1.0 - fx) * fy + v11 * fx * fy
+}
+
 /// Linearly interpolate a 1D array at fractional index.
 pub fn interpolate_array(arr: &[f32], index: f32) -> f32 {
     if arr.is_empty() {

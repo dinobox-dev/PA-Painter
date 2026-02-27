@@ -1,4 +1,3 @@
-use crate::math::lerp_color;
 use crate::rng::SeededRng;
 use crate::types::{Color, HsvColor, StrokePath};
 use glam::Vec2;
@@ -86,29 +85,7 @@ pub fn hsv_to_rgb(hsv: HsvColor) -> Color {
 ///
 /// Returns the interpolated color.
 pub fn sample_bilinear(texture: &[Color], tex_width: u32, tex_height: u32, uv: Vec2) -> Color {
-    let x = uv.x * tex_width as f32 - 0.5;
-    let y = uv.y * tex_height as f32 - 0.5;
-
-    let x0 = x.floor() as i32;
-    let y0 = y.floor() as i32;
-    let x1 = x0 + 1;
-    let y1 = y0 + 1;
-    let fx = x - x0 as f32;
-    let fy = y - y0 as f32;
-
-    let x0c = x0.clamp(0, tex_width as i32 - 1) as u32;
-    let y0c = y0.clamp(0, tex_height as i32 - 1) as u32;
-    let x1c = x1.clamp(0, tex_width as i32 - 1) as u32;
-    let y1c = y1.clamp(0, tex_height as i32 - 1) as u32;
-
-    let c00 = texture[(y0c * tex_width + x0c) as usize];
-    let c10 = texture[(y0c * tex_width + x1c) as usize];
-    let c01 = texture[(y1c * tex_width + x0c) as usize];
-    let c11 = texture[(y1c * tex_width + x1c) as usize];
-
-    let top = lerp_color(c00, c10, fx);
-    let bot = lerp_color(c01, c11, fx);
-    lerp_color(top, bot, fy)
+    crate::math::sample_bilinear_color(texture, tex_width, tex_height, uv)
 }
 
 // ── Per-Stroke Color with Variation ──

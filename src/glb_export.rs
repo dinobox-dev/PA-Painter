@@ -190,26 +190,7 @@ fn subdivide_and_displace(
 }
 
 fn sample_map_bilinear(map: &[f32], resolution: u32, uv: Vec2) -> f32 {
-    let res = resolution as f32;
-    let x = (uv.x * res - 0.5).clamp(0.0, res - 1.0);
-    let y = (uv.y * res - 0.5).clamp(0.0, res - 1.0);
-
-    let x0 = x.floor() as u32;
-    let y0 = y.floor() as u32;
-    let x1 = (x0 + 1).min(resolution - 1);
-    let y1 = (y0 + 1).min(resolution - 1);
-
-    let fx = x - x.floor();
-    let fy = y - y.floor();
-
-    let idx = |px: u32, py: u32| (py * resolution + px) as usize;
-
-    let v00 = map[idx(x0, y0)];
-    let v10 = map[idx(x1, y0)];
-    let v01 = map[idx(x0, y1)];
-    let v11 = map[idx(x1, y1)];
-
-    v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy) + v01 * (1.0 - fx) * fy + v11 * fx * fy
+    crate::math::sample_bilinear_f32(map, resolution, resolution, uv)
 }
 
 // ── Texture Encoding ────────────────────────────────────────────────────────
