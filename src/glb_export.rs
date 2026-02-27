@@ -71,7 +71,7 @@ fn export_preview_glb_inner(
     let bin = build_bin_buffer(&subdiv, &color_png, &normal_png);
 
     // 4. Build glTF JSON
-    let json = build_gltf_json(&subdiv, &bin, alpha_blend);
+    let json = build_gltf_json(&subdiv, &bin, alpha_blend)?;
 
     // 5. Write GLB
     write_glb(path, &json, &bin.data)?;
@@ -342,7 +342,7 @@ fn pad_to_4(buf: &mut Vec<u8>) {
 
 // ── glTF JSON ───────────────────────────────────────────────────────────────
 
-fn build_gltf_json(mesh: &SubdividedMesh, bin: &BinLayout, alpha_blend: bool) -> Vec<u8> {
+fn build_gltf_json(mesh: &SubdividedMesh, bin: &BinLayout, alpha_blend: bool) -> Result<Vec<u8>, serde_json::Error> {
     let vertex_count = mesh.positions.len();
     let index_count = mesh.indices.len();
 
@@ -463,13 +463,13 @@ fn build_gltf_json(mesh: &SubdividedMesh, bin: &BinLayout, alpha_blend: bool) ->
         }]
     });
 
-    let json_str = serde_json::to_string(&json).expect("JSON serialization");
+    let json_str = serde_json::to_string(&json)?;
     let mut json_bytes = json_str.into_bytes();
     // Pad JSON to 4-byte boundary with spaces (per GLB spec)
     while json_bytes.len() % 4 != 0 {
         json_bytes.push(b' ');
     }
-    json_bytes
+    Ok(json_bytes)
 }
 
 // ── GLB Binary Writer ───────────────────────────────────────────────────────

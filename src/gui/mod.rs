@@ -377,8 +377,11 @@ impl eframe::App for PainterApp {
         }
 
         // Poll generation results
-        if let Some(result) = self.state.generation.poll() {
-            self.apply_generation_result(ctx, result);
+        if let Some(poll_result) = self.state.generation.poll() {
+            match poll_result {
+                Ok(result) => self.apply_generation_result(ctx, result),
+                Err(msg) => self.state.status_message = msg,
+            }
         }
         // Keep repainting while generation is in progress
         if self.state.generation.is_running() {

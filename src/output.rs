@@ -16,6 +16,8 @@ pub enum OutputError {
     ImageError(#[from] image::ImageError),
     #[error("EXR error: {0}")]
     ExrError(String),
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
 }
 
 // ── Export Format ──

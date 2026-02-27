@@ -4,6 +4,9 @@ use glam::Vec2;
 /// Hermite smoothstep: 0 at edge0, 1 at edge1, smooth transition.
 /// Argument order follows GLSL convention: (edge0, edge1, x).
 pub fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if edge1 <= edge0 {
+        return if x < edge0 { 0.0 } else { 1.0 };
+    }
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }

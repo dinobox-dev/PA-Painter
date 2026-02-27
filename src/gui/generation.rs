@@ -55,9 +55,17 @@ impl GenerationManager {
     }
 
     /// Returns the result if the worker has finished.
-    pub fn poll(&mut self) -> Option<GenResult> {
+    /// Returns `Err` if the worker thread panicked.
+    pub fn poll(&mut self) -> Option<Result<GenResult, String>> {
         if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
-            self.handle.take().and_then(|h| h.join().ok())
+            Some(self.handle.take().unwrap().join().map_err(|e| {
+                let msg = e
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                    .unwrap_or("unknown error");
+                format!("Generation thread panicked: {msg}")
+            }))
         } else {
             None
         }

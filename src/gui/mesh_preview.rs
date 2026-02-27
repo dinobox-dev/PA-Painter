@@ -6,6 +6,8 @@ use glam::{Mat4, Vec3};
 
 use practical_arcana_painter::asset_io::LoadedMesh;
 
+use super::textures::linear_to_srgb_u8;
+
 // ── Vertex format ──────────────────────────────────────────────────
 
 #[repr(C)]
@@ -467,9 +469,9 @@ pub fn upload_color_texture(
         .iter()
         .flat_map(|c| {
             [
-                (c.r.clamp(0.0, 1.0) * 255.0) as u8,
-                (c.g.clamp(0.0, 1.0) * 255.0) as u8,
-                (c.b.clamp(0.0, 1.0) * 255.0) as u8,
+                linear_to_srgb_u8(c.r),
+                linear_to_srgb_u8(c.g),
+                linear_to_srgb_u8(c.b),
                 (c.a.clamp(0.0, 1.0) * 255.0) as u8,
             ]
         })
