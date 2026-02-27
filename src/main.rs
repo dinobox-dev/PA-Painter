@@ -149,7 +149,7 @@ fn main() {
     let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = loaded_mesh {
         project.build_masks(mesh, resolution)
     } else {
-        (0..project.layers.len()).map(|_| None).collect()
+        (0..project.layers.iter().filter(|l| l.visible).count()).map(|_| None).collect()
     };
     let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 

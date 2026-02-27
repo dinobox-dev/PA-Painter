@@ -153,22 +153,24 @@ fn base_color_cache_key(bc: &BaseColor) -> String {
 }
 
 impl Project {
-    /// Convert all layers to PaintLayers for downstream pipeline compatibility.
+    /// Convert visible layers to PaintLayers for downstream pipeline compatibility.
     /// Each layer gets `seed + layer_index` for unique randomness.
     pub fn paint_layers(&self) -> Vec<PaintLayer> {
         let base_seed = self.settings.seed;
         self.layers
             .iter()
             .enumerate()
+            .filter(|(_, l)| l.visible)
             .map(|(i, l)| l.to_paint_layer_with_seed(base_seed.wrapping_add(i as u32)))
             .collect()
     }
 
-    /// Build UV masks for each layer from the loaded mesh.
+    /// Build UV masks for visible layers from the loaded mesh.
     /// Returns `None` for `__all__` groups (paint entire UV space).
     pub fn build_masks(&self, mesh: &LoadedMesh, resolution: u32) -> Vec<Option<UvMask>> {
         self.layers
             .iter()
+            .filter(|l| l.visible)
             .map(|layer| {
                 if layer.group_name == "__all__" {
                     None

@@ -110,7 +110,7 @@
 | cached_color | Option\<Vec\<[f32;4]\>\> | 런타임 캐시 (직렬화 제외) |
 | cached_paths | Option\<...\> | 런타임 경로 캐시 (직렬화 제외) |
 
-`paint_layers()` — 모든 레이어를 파이프라인용 `PaintLayer`로 변환. 레이어별 시드 = `seed + layer_index`.
+`paint_layers()` — `visible == true`인 레이어만 파이프라인용 `PaintLayer`로 변환. 레이어별 시드 = `seed + layer_index` (원본 인덱스 보존).
 
 ### 3-2. Layer
 
@@ -469,7 +469,7 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 
 ## 9. 검증
 
-246개 테스트 (243 통과 + 3 ignored 벤치마크). `cargo test`.
+251개 테스트 (248 통과 + 3 ignored 벤치마크). `cargo test`.
 
 주요 검증 영역: 방향장 보간, 경로 커버리지, 밀도 범위, 합성 규칙 (max, 비누적), 노말맵, 프로젝트 왕복.
 
@@ -477,20 +477,18 @@ Gather 방식 합성. 레이어 `order` 오름차순, 레이어 내 스트로크
 
 ## 10. 알려진 버그
 
-> 코드 감사 기준: 2026-02-27
+> 코드 감사 기준: 2026-02-28
 
 ### 10-1. CRITICAL
 
 | # | 이슈 | 파일 | 설명 |
 |---|------|------|------|
-| 1 | **숨긴 레이어가 생성에 포함됨** | `project.rs:125` | `paint_layers()`가 `visible` 미필터. PaintLayer에 visible 필드 없음 |
 | 2 | **대부분의 편집에서 dirty 미설정** | `gui/state.rs:146` | 가이드 드래그, 슬라이더, 순서 변경, 가시성 토글에서 `dirty = true` 누락 |
 
 ### 10-2. SIGNIFICANT
 
 | # | 이슈 | 파일 | 설명 |
 |---|------|------|------|
-| 4 | **stale 감지가 visible 포함** | `gui/state.rs:304` | 가시성 토글 → "Modified" → 재생성 → 동일 결과 (거짓 stale) |
 | 5 | **Stroke ID 레이어 간 비고유** | `path_placement.rs:354` | 레이어 내 인덱스만 사용. 다른 레이어 간 ID 충돌 |
 
 ### 10-3. MODERATE

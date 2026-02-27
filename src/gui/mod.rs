@@ -74,7 +74,7 @@ impl PainterApp {
         let masks = if let Some(ref mesh) = self.state.loaded_mesh {
             self.state.project.build_masks(mesh, resolution)
         } else {
-            (0..self.state.project.layers.len()).map(|_| None).collect()
+            (0..self.state.project.layers.iter().filter(|l| l.visible).count()).map(|_| None).collect()
         };
 
         // Base normal pixels (for UDN blending)
