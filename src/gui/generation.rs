@@ -3,8 +3,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use practical_arcana_painter::asset_io::LoadedMesh;
 use practical_arcana_painter::compositing::{composite_all_with_paths, generate_all_paths};
-use practical_arcana_painter::object_normal::MeshNormalData;
+use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::output::{
     blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
 };
@@ -17,13 +18,17 @@ use practical_arcana_painter::uv_mask::UvMask;
 pub struct GenInput {
     pub layers: Vec<PaintLayer>,
     pub resolution: u32,
-    pub base_colors: Option<Vec<Color>>,
+    pub base_colors: Option<Arc<Vec<Color>>>,
     pub base_w: u32,
     pub base_h: u32,
     pub solid_color: Color,
     pub settings: OutputSettings,
-    pub normal_data: Option<MeshNormalData>,
-    pub masks: Vec<Option<UvMask>>,
+    /// Mesh for on-thread computation of normal data and UV masks.
+    pub mesh: Option<Arc<LoadedMesh>>,
+    /// Cached mesh normals — reused if resolution matches, otherwise recomputed.
+    pub cached_normals: Option<(u32, Arc<MeshNormalData>)>,
+    /// Group names for visible layers (parallel to `layers`), used to build UV masks.
+    pub layer_group_names: Vec<String>,
     /// Base normal map pixels (linear RGBA [0,1]), if loaded.
     pub base_normal_pixels: Option<Vec<[f32; 4]>>,
     pub base_normal_w: u32,
@@ -38,12 +43,17 @@ pub struct GenResult {
     pub stroke_id: Vec<u32>,
     pub resolution: u32,
     pub elapsed: Duration,
+    /// Freshly computed mesh normals — returned so the main thread can cache them.
+    pub computed_normals: Option<(u32, Arc<MeshNormalData>)>,
 }
 
 /// Manages a single background generation thread.
 pub struct GenerationManager {
     handle: Option<thread::JoinHandle<Option<GenResult>>>,
     cancel: Arc<AtomicBool>,
+    /// Wall-clock start time recorded before pre-computation, so the displayed
+    /// elapsed duration includes main-thread prep work the user actually waits for.
+    pub start_time: Option<Instant>,
 }
 
 impl Default for GenerationManager {
@@ -51,6 +61,7 @@ impl Default for GenerationManager {
         Self {
             handle: None,
             cancel: Arc::new(AtomicBool::new(false)),
+            start_time: None,
         }
     }
 }
@@ -62,10 +73,17 @@ impl GenerationManager {
 
     /// Returns the result if the worker has finished.
     /// Returns `Err` if the worker thread panicked.
+    /// The elapsed time is overridden to include main-thread pre-computation.
     pub fn poll(&mut self) -> Option<Result<GenResult, String>> {
         if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
+            let total_elapsed = self.start_time.take().map(|t| t.elapsed());
             match self.handle.take().unwrap().join() {
-                Ok(Some(result)) => Some(Ok(result)),
+                Ok(Some(mut result)) => {
+                    if let Some(elapsed) = total_elapsed {
+                        result.elapsed = elapsed;
+                    }
+                    Some(Ok(result))
+                }
                 Ok(None) => None, // cancelled
                 Err(e) => {
                     let msg = e
@@ -98,6 +116,66 @@ impl GenerationManager {
 fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
     let start = Instant::now();
 
+    // ── Pre-computation (previously on main thread) ──
+
+    // Compute mesh normals: reuse cached if resolution matches, otherwise compute.
+    let fresh_normals: Option<Arc<MeshNormalData>> =
+        if input.settings.normal_mode == NormalMode::DepictedForm {
+            match &input.cached_normals {
+                Some((res, _)) if *res == input.resolution => None, // will use cached
+                _ => input
+                    .mesh
+                    .as_ref()
+                    .map(|mesh| Arc::new(compute_mesh_normal_data(mesh, input.resolution))),
+            }
+        } else {
+            None
+        };
+
+    let normal_data: Option<&MeshNormalData> =
+        if let Some(ref nd) = fresh_normals {
+            Some(nd)
+        } else if input.settings.normal_mode == NormalMode::DepictedForm {
+            input.cached_normals.as_ref().map(|(_, nd)| nd.as_ref())
+        } else {
+            None
+        };
+
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+
+    // Build UV masks from mesh groups.
+    let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = input.mesh {
+        input
+            .layer_group_names
+            .iter()
+            .map(|group_name| {
+                if group_name == "__all__" {
+                    None
+                } else {
+                    mesh.groups
+                        .iter()
+                        .find(|g| g.name == *group_name)
+                        .map(|group| {
+                            let mut mask =
+                                UvMask::from_mesh_group(mesh, group, input.resolution);
+                            mask.dilate(2);
+                            mask
+                        })
+                }
+            })
+            .collect()
+    } else {
+        input.layer_group_names.iter().map(|_| None).collect()
+    };
+
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+
+    // ── Main pipeline ──
+
     let base_color = match &input.base_colors {
         Some(colors) => {
             BaseColorSource::textured(colors, input.base_w, input.base_h, input.solid_color)
@@ -105,13 +183,13 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
         None => BaseColorSource::solid(input.solid_color),
     };
 
-    let mask_refs: Vec<Option<&UvMask>> = input.masks.iter().map(|m| m.as_ref()).collect();
+    let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 
     let paths = generate_all_paths(
         &input.layers,
         input.resolution,
         &base_color,
-        input.normal_data.as_ref(),
+        normal_data,
         &mask_refs,
     );
 
@@ -125,7 +203,7 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
         &base_color,
         &input.settings,
         Some(&paths),
-        input.normal_data.as_ref(),
+        normal_data,
         &mask_refs,
     );
 
@@ -135,7 +213,7 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
 
     let normal_map = match input.settings.normal_mode {
         NormalMode::DepictedForm => {
-            if let Some(ref nd) = input.normal_data {
+            if let Some(nd) = normal_data {
                 generate_normal_map_depicted_form(
                     &global.gradient_x,
                     &global.gradient_y,
@@ -180,5 +258,6 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
         stroke_id: global.stroke_id,
         resolution: input.resolution,
         elapsed: start.elapsed(),
+        computed_normals: fresh_normals.map(|nd| (input.resolution, nd)),
     })
 }

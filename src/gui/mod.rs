@@ -14,9 +14,7 @@ use eframe::egui;
 use eframe::egui_wgpu;
 use state::{AppState, GuideTool, MapMode, ViewportTab};
 
-use practical_arcana_painter::object_normal::compute_mesh_normal_data;
-use practical_arcana_painter::stroke_color::ColorTextureRef;
-use practical_arcana_painter::types::{Color, NormalMode};
+use practical_arcana_painter::types::Color;
 
 /// Main GUI application.
 pub struct PainterApp {
@@ -46,10 +44,15 @@ impl PainterApp {
         }
 
         let resolution = self.state.project.settings.resolution_preset.resolution();
+
+        // Show feedback immediately — no heavy work before this point.
+        self.state.status_message = format!("Generating at {}px...", resolution);
+        self.state.generation.start_time = Some(std::time::Instant::now());
+
         let layers = self.state.project.paint_layers();
         let settings = self.state.project.settings.clone();
 
-        // Base color (clone from cached conversion)
+        // All Arc clones below are O(1) pointer copies.
         let base_colors = self.state.cached_texture_colors.clone();
         let (base_w, base_h) = self
             .state
@@ -60,22 +63,18 @@ impl PainterApp {
         let sc = self.state.project.base_color.solid_color();
         let solid_color = Color::from(sc);
 
-        // Normal data (computed on main thread — brief freeze at high res)
-        let normal_data = if settings.normal_mode == NormalMode::DepictedForm {
-            self.state
-                .loaded_mesh
-                .as_ref()
-                .map(|mesh| compute_mesh_normal_data(mesh, resolution))
-        } else {
-            None
-        };
+        let mesh = self.state.loaded_mesh.clone(); // Arc clone
+        let cached_normals = self.state.cached_mesh_normals.clone(); // (u32, Arc) clone
 
-        // UV masks from mesh groups
-        let masks = if let Some(ref mesh) = self.state.loaded_mesh {
-            self.state.project.build_masks(mesh, resolution)
-        } else {
-            (0..self.state.project.layers.iter().filter(|l| l.visible).count()).map(|_| None).collect()
-        };
+        // Group names for visible layers — parallel to `layers` vec
+        let layer_group_names: Vec<String> = self
+            .state
+            .project
+            .layers
+            .iter()
+            .filter(|l| l.visible)
+            .map(|l| l.group_name.clone())
+            .collect();
 
         // Base normal pixels (for UDN blending)
         let (base_normal_pixels, base_normal_w, base_normal_h) = self
@@ -93,8 +92,9 @@ impl PainterApp {
             base_h,
             solid_color,
             settings,
-            normal_data,
-            masks,
+            mesh,
+            cached_normals,
+            layer_group_names,
             base_normal_pixels,
             base_normal_w,
             base_normal_h,
@@ -105,7 +105,6 @@ impl PainterApp {
             self.state.texture_colors_hash,
             self.state.normal_tex_hash,
         ));
-        self.state.status_message = format!("Generating at {}px...", resolution);
     }
 
     fn apply_generation_result(&mut self, ctx: &egui::Context, result: generation::GenResult) {
@@ -139,6 +138,11 @@ impl PainterApp {
             }
         }
 
+        // Cache mesh normals computed on the worker thread
+        if let Some(normals) = &result.computed_normals {
+            self.state.cached_mesh_normals =
+                Some((normals.0, std::sync::Arc::clone(&normals.1)));
+        }
         self.state.status_message = format!("Generated in {:.1}s", result.elapsed.as_secs_f32());
         self.state.generated = Some(result);
     }
@@ -268,6 +272,7 @@ impl eframe::App for PainterApp {
             self.state.pending_open = false;
             dialogs::open_project(&mut self.state, ctx);
             self.state.cached_mesh_normals = None;
+            self.state.path_worker.discard();
             self.state.group_dim_cache.invalidate();
             self.init_mesh_preview();
         }
@@ -291,6 +296,7 @@ impl eframe::App for PainterApp {
             self.state.pending_new = false;
             dialogs::new_project(&mut self.state, ctx);
             self.state.cached_mesh_normals = None;
+            self.state.path_worker.discard();
             self.state.group_dim_cache.invalidate();
             self.init_mesh_preview();
         }
@@ -298,6 +304,7 @@ impl eframe::App for PainterApp {
             self.state.pending_reload_mesh = false;
             dialogs::reload_mesh(&mut self.state);
             self.state.cached_mesh_normals = None;
+            self.state.path_worker.discard();
             self.state.group_dim_cache.invalidate();
             self.init_mesh_preview();
         }
@@ -305,6 +312,7 @@ impl eframe::App for PainterApp {
             self.state.pending_replace_mesh = false;
             dialogs::replace_mesh(&mut self.state);
             self.state.cached_mesh_normals = None;
+            self.state.path_worker.discard();
             self.state.group_dim_cache.invalidate();
             self.init_mesh_preview();
         }
@@ -325,55 +333,87 @@ impl eframe::App for PainterApp {
             dialogs::reload_normal(&mut self.state);
         }
 
-        // Update per-layer path overlay caches (only recomputes stale layers)
-        if self.state.viewport.path_overlay_idx.is_some() {
-            let res = self.state.project.settings.resolution_preset.resolution();
-            let seed = self.state.project.settings.seed;
-
-            // Prepare color texture ref for color-break preview (uses cached conversion)
-            let color_ref = match (&self.state.cached_texture_colors, &self.state.loaded_texture) {
-                (Some(c), Some(tex)) => Some(ColorTextureRef {
-                    data: c,
-                    width: tex.width,
-                    height: tex.height,
-                }),
-                _ => None,
-            };
-
-            // Prepare normal data for normal-break preview (lazily cached)
-            let needs_normal = self
-                .state
-                .project
-                .layers
-                .iter()
-                .any(|l| l.paint.normal_break_threshold.is_some());
-            if needs_normal {
-                let stale = match &self.state.cached_mesh_normals {
-                    Some((cached_res, _)) => *cached_res != res,
-                    None => true,
-                };
-                if stale {
-                    if let Some(mesh) = self.state.loaded_mesh.as_ref() {
+        // ── Path overlay: async worker pattern ──
+        // Poll for completed results first
+        if let Some(poll_result) = self.state.path_worker.poll() {
+            match poll_result {
+                Ok(result) => {
+                    // Cache freshly computed mesh normals for future reuse
+                    if let Some(normals) = &result.computed_normals {
                         self.state.cached_mesh_normals =
-                            Some((res, compute_mesh_normal_data(mesh, res)));
+                            Some((normals.0, std::sync::Arc::clone(&normals.1)));
+                    }
+                    self.state.path_overlay.apply_result(&result);
+                }
+                Err(msg) => {
+                    self.state.status_message = format!("Path overlay error: {msg}");
+                }
+            }
+        }
+        // Submit new computation if overlay is active and cache is stale
+        if self.state.viewport.path_overlay_idx.is_some() {
+            if let Some(selected) = self.state.selected_layer {
+                if selected < self.state.project.layers.len() {
+                    let layer = &self.state.project.layers[selected];
+                    if layer.visible {
+                        let res = self.state.project.settings.resolution_preset.resolution();
+                        let seed = self.state.project.settings.seed.wrapping_add(selected as u32);
+                        let hash = self.state.texture_colors_hash;
+
+                        let stale = self
+                            .state
+                            .path_overlay
+                            .is_stale_for_layer(selected, layer, seed, res, hash);
+
+                        if stale && !self.state.path_worker.is_running() {
+                            let needs_normal = layer.paint.normal_break_threshold.is_some();
+                            let normals_stale = needs_normal
+                                && !self
+                                    .state
+                                    .cached_mesh_normals
+                                    .as_ref()
+                                    .is_some_and(|(r, _)| *r == res);
+
+                            let input = preview::PathOverlayInput {
+                                layer: layer.clone(),
+                                layer_index: selected,
+                                layer_count: self.state.project.layers.len(),
+                                seed,
+                                resolution: res,
+                                color_data: self.state.cached_texture_colors.clone(),
+                                color_w: self
+                                    .state
+                                    .loaded_texture
+                                    .as_ref()
+                                    .map(|t| t.width)
+                                    .unwrap_or(0),
+                                color_h: self
+                                    .state
+                                    .loaded_texture
+                                    .as_ref()
+                                    .map(|t| t.height)
+                                    .unwrap_or(0),
+                                color_tex_hash: hash,
+                                cached_normals: if needs_normal {
+                                    self.state.cached_mesh_normals.clone()
+                                } else {
+                                    None
+                                },
+                                mesh: if normals_stale {
+                                    self.state.loaded_mesh.clone()
+                                } else {
+                                    None
+                                },
+                            };
+                            self.state.path_worker.start(input);
+                        }
                     }
                 }
             }
-            let normal_data = self
-                .state
-                .cached_mesh_normals
-                .as_ref()
-                .map(|(_, nd)| nd);
-
-            self.state.path_overlay.update(
-                &self.state.project.layers,
-                seed,
-                res,
-                self.state.selected_layer,
-                color_ref.as_ref(),
-                normal_data,
-                self.state.texture_colors_hash,
-            );
+        }
+        // Keep repainting while path overlay worker is active
+        if self.state.path_worker.is_running() {
+            ctx.request_repaint();
         }
 
         // Poll generation results

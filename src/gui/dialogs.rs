@@ -1,5 +1,6 @@
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use practical_arcana_painter::asset_io::{extract_uv_edges, load_mesh, load_texture};
 use practical_arcana_painter::glb_export;
@@ -21,7 +22,7 @@ use super::textures;
 fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<(), String> {
     let mesh = load_mesh(mesh_path).map_err(|e| format!("Mesh load failed: {e}"))?;
     state.uv_edges = Some(extract_uv_edges(&mesh));
-    state.loaded_mesh = Some(mesh);
+    state.loaded_mesh = Some(Arc::new(mesh));
     Ok(())
 }
 
@@ -46,7 +47,7 @@ fn apply_texture(
     let new_hash = hasher.finish();
     let changed = new_hash != state.texture_colors_hash;
     state.texture_colors_hash = new_hash;
-    state.cached_texture_colors = Some(colors);
+    state.cached_texture_colors = Some(Arc::new(colors));
     state.loaded_texture = Some(tex);
     Ok(changed)
 }

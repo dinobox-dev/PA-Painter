@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use eframe::egui;
 use glam::Vec2;
 
@@ -146,12 +148,12 @@ pub struct AppState {
     pub dirty: bool,
 
     // ── Loaded Assets ──
-    pub loaded_mesh: Option<practical_arcana_painter::asset_io::LoadedMesh>,
+    pub loaded_mesh: Option<Arc<practical_arcana_painter::asset_io::LoadedMesh>>,
     pub loaded_texture: Option<practical_arcana_painter::asset_io::LoadedTexture>,
     pub loaded_normal: Option<practical_arcana_painter::asset_io::LoadedTexture>,
     pub uv_edges: Option<Vec<(Vec2, Vec2)>>,
     /// Cached `pixels_to_colors` result for `loaded_texture`. Invalidated on texture reload.
-    pub cached_texture_colors: Option<Vec<practical_arcana_painter::types::Color>>,
+    pub cached_texture_colors: Option<Arc<Vec<practical_arcana_painter::types::Color>>>,
     /// Hash of `cached_texture_colors` for path cache invalidation.
     pub texture_colors_hash: u64,
     /// Hash of loaded normal texture pixels for path cache invalidation.
@@ -178,11 +180,14 @@ pub struct AppState {
     pub preset_thumbnails: preview::PresetThumbnailCache,
     /// Cached mesh normal data for path overlay normal-break preview.
     /// Tuple of (resolution, data); invalidated on mesh reload or resolution change.
-    pub cached_mesh_normals: Option<(u32, practical_arcana_painter::object_normal::MeshNormalData)>,
+    pub cached_mesh_normals: Option<(u32, Arc<practical_arcana_painter::object_normal::MeshNormalData>)>,
 
     // ── Generation ──
     pub generation: GenerationManager,
     pub generated: Option<GenResult>,
+
+    // ── Path Overlay Worker ──
+    pub path_worker: preview::PathOverlayWorker,
 
     // ── Deferred Actions (set by child widgets, consumed by PainterApp) ──
     pub pending_open: bool,
@@ -243,6 +248,7 @@ impl AppState {
             cached_mesh_normals: None,
             generation: GenerationManager::default(),
             generated: None,
+            path_worker: preview::PathOverlayWorker::default(),
             pending_open: false,
             pending_new: false,
             pending_save: false,

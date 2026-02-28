@@ -1,11 +1,16 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+
 use eframe::egui;
 
+use practical_arcana_painter::asset_io::LoadedMesh;
 use practical_arcana_painter::brush_profile;
-use practical_arcana_painter::object_normal::MeshNormalData;
+use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::path_placement;
 use practical_arcana_painter::stroke_color::ColorTextureRef;
 use practical_arcana_painter::stroke_height;
-use practical_arcana_painter::types::{Guide, Layer, PaintValues, StrokeParams};
+use practical_arcana_painter::types::{Color, Guide, Layer, PaintValues, StrokeParams};
 
 // ── Caches ──────────────────────────────────────────────────────
 
@@ -132,31 +137,6 @@ impl LayerPathCache {
         }
     }
 
-    /// Recompute paths for this layer at the given resolution.
-    pub fn recompute(
-        &mut self,
-        layer: &Layer,
-        seed: u32,
-        resolution: u32,
-        color_tex: Option<&ColorTextureRef<'_>>,
-        normal_data: Option<&MeshNormalData>,
-        color_tex_hash: u64,
-    ) {
-        let paint_layer = layer.to_paint_layer_with_seed(seed);
-        let paths =
-            path_placement::generate_paths(&paint_layer, 0, resolution, color_tex, normal_data, None);
-        self.paths = paths
-            .iter()
-            .map(|p| p.points.iter().map(|v| [v.x, v.y]).collect())
-            .collect();
-        self.key = Some(LayerPathKey {
-            paint: layer.paint.clone(),
-            seed,
-            guides: layer.guides.clone(),
-            resolution,
-            color_tex_hash,
-        });
-    }
 }
 
 /// Per-layer path preview caches for viewport overlay.
@@ -184,39 +164,209 @@ impl PathOverlayCache {
         }
     }
 
-    /// Update cache for the selected layer only.
-    /// Non-selected caches are cleared to free memory.
-    pub fn update(
-        &mut self,
-        layers: &[Layer],
-        base_seed: u32,
-        resolution: u32,
-        selected: Option<usize>,
-        color_tex: Option<&ColorTextureRef<'_>>,
-        normal_data: Option<&MeshNormalData>,
-        color_tex_hash: u64,
-    ) {
-        self.sync_layer_count(layers.len());
-        for (i, cache) in self.caches.iter_mut().enumerate() {
-            if Some(i) == selected {
-                let layer = &layers[i];
-                let seed = base_seed.wrapping_add(i as u32);
-                if layer.visible && cache.is_stale(layer, seed, resolution, color_tex_hash) {
-                    cache.recompute(layer, seed, resolution, color_tex, normal_data, color_tex_hash);
-                }
-            } else {
-                // Free memory for non-selected layers
-                cache.key = None;
-                cache.paths = Vec::new();
-            }
-        }
-    }
-
     /// Get cached paths for the selected layer (if any).
     pub fn selected_paths(&self, selected: Option<usize>) -> Option<(usize, &Vec<Vec<[f32; 2]>>)> {
         let i = selected?;
         self.caches.get(i).map(|c| (i, &c.paths))
     }
+
+    /// Check if the cache for the given layer index is stale.
+    pub fn is_stale_for_layer(
+        &self,
+        layer_index: usize,
+        layer: &Layer,
+        seed: u32,
+        resolution: u32,
+        color_tex_hash: u64,
+    ) -> bool {
+        match self.caches.get(layer_index) {
+            Some(cache) => cache.is_stale(layer, seed, resolution, color_tex_hash),
+            None => true,
+        }
+    }
+
+    /// Write a completed worker result into the cache slot.
+    pub fn apply_result(&mut self, result: &PathOverlayResult) {
+        self.sync_layer_count(result.layer_count);
+        if let Some(cache) = self.caches.get_mut(result.layer_index) {
+            cache.paths = result.paths.clone();
+            cache.key = Some(LayerPathKey {
+                paint: result.paint.clone(),
+                seed: result.seed,
+                guides: result.guides.clone(),
+                resolution: result.resolution,
+                color_tex_hash: result.color_tex_hash,
+            });
+        }
+        // Clear non-selected layers
+        for (i, cache) in self.caches.iter_mut().enumerate() {
+            if i != result.layer_index {
+                cache.key = None;
+                cache.paths = Vec::new();
+            }
+        }
+    }
+}
+
+// ── Path Overlay Worker ─────────────────────────────────────────
+
+/// Input for the background path overlay computation.
+/// All data is fully owned or Arc-shared — Send + 'static.
+pub struct PathOverlayInput {
+    pub layer: Layer,
+    pub layer_index: usize,
+    pub layer_count: usize,
+    pub seed: u32,
+    pub resolution: u32,
+    pub color_data: Option<Arc<Vec<Color>>>,
+    pub color_w: u32,
+    pub color_h: u32,
+    pub color_tex_hash: u64,
+    /// Cached mesh normals from a previous computation. Reused if resolution matches.
+    pub cached_normals: Option<(u32, Arc<MeshNormalData>)>,
+    /// Mesh for on-demand normal computation when cache is cold.
+    pub mesh: Option<Arc<LoadedMesh>>,
+}
+
+/// Result from a completed path overlay computation.
+pub struct PathOverlayResult {
+    pub paths: Vec<Vec<[f32; 2]>>,
+    pub layer_index: usize,
+    pub layer_count: usize,
+    pub seed: u32,
+    pub resolution: u32,
+    pub color_tex_hash: u64,
+    /// Copy of the layer's PaintValues + guides for cache key storage.
+    pub paint: PaintValues,
+    pub guides: Vec<Guide>,
+    /// Freshly computed mesh normals — returned so the main thread can cache them.
+    pub computed_normals: Option<(u32, Arc<MeshNormalData>)>,
+}
+
+/// Background worker for path overlay computation.
+/// Mirrors the GenerationManager pattern: one thread, cancel token, poll/discard.
+pub struct PathOverlayWorker {
+    handle: Option<thread::JoinHandle<Option<PathOverlayResult>>>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Default for PathOverlayWorker {
+    fn default() -> Self {
+        Self {
+            handle: None,
+            cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl PathOverlayWorker {
+    pub fn is_running(&self) -> bool {
+        self.handle.as_ref().is_some_and(|h| !h.is_finished())
+    }
+
+    /// Signal cancellation and drop the handle.
+    /// The old thread finishes on its own; its result is discarded.
+    pub fn discard(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        self.handle = None;
+    }
+
+    /// Poll for a completed result. Returns `None` if still running or cancelled.
+    pub fn poll(&mut self) -> Option<Result<PathOverlayResult, String>> {
+        if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
+            match self.handle.take().unwrap().join() {
+                Ok(Some(result)) => Some(Ok(result)),
+                Ok(None) => None, // cancelled
+                Err(e) => {
+                    let msg = e
+                        .downcast_ref::<&str>()
+                        .copied()
+                        .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                        .unwrap_or("unknown error");
+                    Some(Err(format!("Path overlay thread panicked: {msg}")))
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Spawn a new worker thread. Cancels any in-flight computation first.
+    pub fn start(&mut self, input: PathOverlayInput) {
+        self.discard();
+        self.cancel = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::clone(&self.cancel);
+        self.handle = Some(thread::spawn(move || run_path_overlay(input, &cancel)));
+    }
+}
+
+/// Background thread function for path overlay computation.
+fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<PathOverlayResult> {
+    let needs_normal = input.layer.paint.normal_break_threshold.is_some();
+
+    // Resolve mesh normals: reuse cached if resolution matches, else compute.
+    let cached_valid = needs_normal
+        && input
+            .cached_normals
+            .as_ref()
+            .is_some_and(|(res, _)| *res == input.resolution);
+
+    let fresh_normals: Option<Arc<MeshNormalData>> = if needs_normal && !cached_valid {
+        input
+            .mesh
+            .as_ref()
+            .map(|mesh| Arc::new(compute_mesh_normal_data(mesh, input.resolution)))
+    } else {
+        None
+    };
+
+    let normal_ref: Option<&MeshNormalData> = if cached_valid {
+        input.cached_normals.as_ref().map(|(_, nd)| nd.as_ref())
+    } else {
+        fresh_normals.as_deref()
+    };
+
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+
+    // Build color texture reference (borrows from Arc — valid for this scope)
+    let color_ref = input.color_data.as_ref().map(|data| ColorTextureRef {
+        data,
+        width: input.color_w,
+        height: input.color_h,
+    });
+
+    let paint_layer = input.layer.to_paint_layer_with_seed(input.seed);
+    let paths = path_placement::generate_paths(
+        &paint_layer,
+        0,
+        input.resolution,
+        color_ref.as_ref(),
+        normal_ref,
+        None,
+    );
+
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+
+    let path_points: Vec<Vec<[f32; 2]>> = paths
+        .iter()
+        .map(|p| p.points.iter().map(|v| [v.x, v.y]).collect())
+        .collect();
+
+    Some(PathOverlayResult {
+        paths: path_points,
+        layer_index: input.layer_index,
+        layer_count: input.layer_count,
+        seed: input.seed,
+        resolution: input.resolution,
+        color_tex_hash: input.color_tex_hash,
+        paint: input.layer.paint.clone(),
+        guides: input.layer.guides.clone(),
+        computed_normals: fresh_normals.map(|nd| (input.resolution, nd)),
+    })
 }
 
 // ── Preset Thumbnail Cache ─────────────────────────────────────
