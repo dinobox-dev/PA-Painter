@@ -145,6 +145,14 @@ impl PainterApp {
         }
         self.state.status_message = format!("Generated in {:.1}s", result.elapsed.as_secs_f32());
         self.state.generated = Some(result);
+
+        // Chain: auto-export to pre-selected path if requested via Generate & Export
+        if let Some(dir) = self.state.post_gen_export_maps.take() {
+            dialogs::export_maps_to(&mut self.state, &dir);
+        }
+        if let Some(path) = self.state.post_gen_export_glb.take() {
+            dialogs::export_glb_to(&mut self.state, &path);
+        }
     }
 
     /// Initialize or update 3D preview GPU resources after mesh load.
@@ -420,7 +428,11 @@ impl eframe::App for PainterApp {
         if let Some(poll_result) = self.state.generation.poll() {
             match poll_result {
                 Ok(result) => self.apply_generation_result(ctx, result),
-                Err(msg) => self.state.status_message = msg,
+                Err(msg) => {
+                    self.state.status_message = msg;
+                    self.state.post_gen_export_maps = None;
+                    self.state.post_gen_export_glb = None;
+                }
             }
         }
         // Keep repainting while generation is in progress
@@ -445,13 +457,43 @@ impl eframe::App for PainterApp {
                         self.state.pending_save = true;
                     }
                     ui.separator();
-                    if ui.button("Export Maps...").clicked() {
+                    let has_gen = self.state.generated.is_some();
+                    let stale = self.state.stale_reason();
+                    let maps_label = match stale {
+                        Some(reason) if has_gen => format!("Export Maps... ({reason})"),
+                        _ => "Export Maps...".to_string(),
+                    };
+                    if ui.add_enabled(has_gen, egui::Button::new(maps_label)).clicked() {
                         ui.close();
                         self.state.pending_export = true;
                     }
-                    if ui.button("Export GLB...").clicked() {
+                    let glb_label = match stale {
+                        Some(reason) if has_gen => format!("Export GLB... ({reason})"),
+                        _ => "Export GLB...".to_string(),
+                    };
+                    if ui.add_enabled(has_gen, egui::Button::new(glb_label)).clicked() {
                         ui.close();
                         self.state.pending_export_glb = true;
+                    }
+                    ui.separator();
+                    let can_gen = !self.state.generation.is_running();
+                    if ui.add_enabled(can_gen, egui::Button::new("Generate & Export Maps...")).clicked() {
+                        ui.close();
+                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                            self.state.post_gen_export_maps = Some(dir);
+                            self.state.pending_generate = true;
+                        }
+                    }
+                    if ui.add_enabled(can_gen, egui::Button::new("Generate & Export GLB...")).clicked() {
+                        ui.close();
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("glTF Binary", &["glb"])
+                            .set_file_name("preview.glb")
+                            .save_file()
+                        {
+                            self.state.post_gen_export_glb = Some(path);
+                            self.state.pending_generate = true;
+                        }
                     }
                 });
                 ui.menu_button("Edit", |ui: &mut egui::Ui| {

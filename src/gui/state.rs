@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use eframe::egui;
@@ -202,6 +203,9 @@ pub struct AppState {
     pub pending_reload_texture: bool,
     pub pending_load_normal: bool,
     pub pending_reload_normal: bool,
+    /// Chain: auto-export to pre-selected path after next generation completes.
+    pub post_gen_export_maps: Option<PathBuf>,
+    pub post_gen_export_glb: Option<PathBuf>,
 
     /// Mesh reload diff summary shown as a dismissible window.
     pub reload_summary: Option<ReloadSummary>,
@@ -261,6 +265,8 @@ impl AppState {
             pending_reload_texture: false,
             pending_load_normal: false,
             pending_reload_normal: false,
+            post_gen_export_maps: None,
+            post_gen_export_glb: None,
             reload_summary: None,
             group_dim_cache: GroupDimCache::default(),
             status_message: "Ready".to_string(),

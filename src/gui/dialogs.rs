@@ -118,6 +118,8 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
             state.generated = None;
             state.generation_snapshot = None;
             state.generation.discard();
+            state.post_gen_export_maps = None;
+            state.post_gen_export_glb = None;
             state.textures.color = None;
             state.textures.height = None;
             state.textures.normal = None;
@@ -167,6 +169,8 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
             state.generated = None;
             state.generation_snapshot = None;
             state.generation.discard();
+            state.post_gen_export_maps = None;
+            state.post_gen_export_glb = None;
             state.textures.color = None;
             state.textures.height = None;
             state.textures.normal = None;
@@ -452,12 +456,16 @@ pub fn save_project_action(state: &mut AppState) {
 
 /// Export generated maps to a user-selected folder as PNG files.
 pub fn export_maps(state: &mut AppState) {
-    let Some(ref gen) = state.generated else {
-        state.status_message = "Nothing to export — generate first".to_string();
+    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
         return;
     };
+    export_maps_to(state, &dir);
+}
 
-    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+/// Export generated maps to the given folder (no dialog).
+pub fn export_maps_to(state: &mut AppState, dir: &Path) {
+    let Some(ref gen) = state.generated else {
+        state.status_message = "Nothing to export — generate first".to_string();
         return;
     };
 
@@ -486,20 +494,24 @@ pub fn export_maps(state: &mut AppState) {
 
 /// Export a 3D preview GLB with paint textures baked onto the mesh.
 pub fn export_glb(state: &mut AppState) {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("glTF Binary", &["glb"])
+        .set_file_name("preview.glb")
+        .save_file()
+    else {
+        return;
+    };
+    export_glb_to(state, &path);
+}
+
+/// Export a 3D preview GLB to the given path (no dialog).
+pub fn export_glb_to(state: &mut AppState, path: &Path) {
     let Some(ref gen) = state.generated else {
         state.status_message = "Nothing to export — generate first".to_string();
         return;
     };
     let Some(ref mesh) = state.loaded_mesh else {
         state.status_message = "No mesh loaded".to_string();
-        return;
-    };
-
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter("glTF Binary", &["glb"])
-        .set_file_name("preview.glb")
-        .save_file()
-    else {
         return;
     };
 
@@ -514,7 +526,7 @@ pub fn export_glb(state: &mut AppState) {
             &gen.normal_map,
             gen.resolution,
             0.0,
-            &path,
+            path,
         )
     } else {
         glb_export::export_preview_glb(
@@ -524,7 +536,7 @@ pub fn export_glb(state: &mut AppState) {
             &gen.normal_map,
             gen.resolution,
             0.0,
-            &path,
+            path,
         )
     };
 
