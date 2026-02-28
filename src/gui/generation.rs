@@ -1,16 +1,20 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
 use practical_arcana_painter::asset_io::LoadedMesh;
-use practical_arcana_painter::compositing::{composite_all_with_paths, generate_all_paths};
+use practical_arcana_painter::compositing::{composite_layer, GlobalMaps};
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::output::{
     blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
 };
+use practical_arcana_painter::path_placement::generate_paths_cancellable;
+use practical_arcana_painter::stroke_color::ColorTextureRef;
 use practical_arcana_painter::types::{
-    BaseColorSource, Color, NormalMode, OutputSettings, PaintLayer,
+    BaseColorSource, Color, NormalMode, OutputSettings, PaintLayer, StrokePath,
 };
 use practical_arcana_painter::uv_mask::UvMask;
 
@@ -48,9 +52,19 @@ pub struct GenResult {
 }
 
 /// Manages a single background generation thread.
+/// Pipeline stage identifiers for UI display.
+pub const STAGE_NORMALS: u8 = 1;
+pub const STAGE_MASKS: u8 = 2;
+pub const STAGE_PATHS: u8 = 3;
+pub const STAGE_COMPOSITE: u8 = 4;
+pub const STAGE_NORMAL_MAP: u8 = 5;
+pub const STAGE_BLENDING: u8 = 6;
+
 pub struct GenerationManager {
     handle: Option<thread::JoinHandle<Option<GenResult>>>,
     cancel: Arc<AtomicBool>,
+    progress: Arc<AtomicU32>,
+    stage: Arc<AtomicU8>,
     /// Wall-clock start time recorded before pre-computation, so the displayed
     /// elapsed duration includes main-thread prep work the user actually waits for.
     pub start_time: Option<Instant>,
@@ -61,6 +75,8 @@ impl Default for GenerationManager {
         Self {
             handle: None,
             cancel: Arc::new(AtomicBool::new(false)),
+            progress: Arc::new(AtomicU32::new(0f32.to_bits())),
+            stage: Arc::new(AtomicU8::new(0)),
             start_time: None,
         }
     }
@@ -69,6 +85,16 @@ impl Default for GenerationManager {
 impl GenerationManager {
     pub fn is_running(&self) -> bool {
         self.handle.as_ref().is_some_and(|h| !h.is_finished())
+    }
+
+    /// Current generation progress (0.0–1.0).
+    pub fn progress(&self) -> f32 {
+        f32::from_bits(self.progress.load(Ordering::Relaxed))
+    }
+
+    /// Current pipeline stage identifier.
+    pub fn stage(&self) -> u8 {
+        self.stage.load(Ordering::Relaxed)
     }
 
     /// Returns the result if the worker has finished.
@@ -108,21 +134,48 @@ impl GenerationManager {
     /// Spawn a worker thread to run the full generation pipeline.
     pub fn start(&mut self, input: GenInput) {
         self.cancel = Arc::new(AtomicBool::new(false));
+        self.progress = Arc::new(AtomicU32::new(0f32.to_bits()));
+        self.stage = Arc::new(AtomicU8::new(STAGE_NORMALS));
         let cancel = Arc::clone(&self.cancel);
-        self.handle = Some(thread::spawn(move || run_pipeline(input, &cancel)));
+        let progress = Arc::clone(&self.progress);
+        let stage = Arc::clone(&self.stage);
+        self.handle = Some(thread::spawn(move || run_pipeline(input, &cancel, &progress, &stage)));
     }
 }
 
-fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
+/// Helper to store progress as f32 bits in an AtomicU32.
+fn set_progress(progress: &AtomicU32, value: f32) {
+    progress.store(value.to_bits(), Ordering::Relaxed);
+}
+
+fn run_pipeline(input: GenInput, cancel: &AtomicBool, progress: &AtomicU32, stage: &AtomicU8) -> Option<GenResult> {
     let start = Instant::now();
 
-    // ── Pre-computation (previously on main thread) ──
+    // ── Progress weight model ──
+    // Fixed stages cost 1 unit each (normals, masks, normal_map, blending = 4).
+    // Per-layer stages cost 2 units each (paths, compositing = 4n).
+    // Total = 4 + 4n.  This ensures per-layer stages dominate when n is large,
+    // while fixed stages get meaningful weight when n is small.
+    let n = input.layers.len().max(1) as f32;
+    let total = 4.0 + 4.0 * n;
+    let p_normals   = 0.0;                        // start of normals
+    let p_masks     = 1.0 / total;                 // start of masks
+    let p_paths     = 2.0 / total;                 // start of paths
+    let p_composite = (2.0 + 2.0 * n) / total;    // start of compositing
+    let p_normal_map = (2.0 + 4.0 * n) / total;   // start of normal map
+    let p_blending  = (3.0 + 4.0 * n) / total;    // start of blending
+    let path_span = p_composite - p_paths;         // width of paths stage
+    let comp_span = p_normal_map - p_composite;    // width of compositing stage
 
-    // Compute mesh normals: reuse cached if resolution matches, otherwise compute.
+    // ── Stage 1: Mesh normals ──
+
+    stage.store(STAGE_NORMALS, Ordering::Relaxed);
+    set_progress(progress, p_normals);
+
     let fresh_normals: Option<Arc<MeshNormalData>> =
         if input.settings.normal_mode == NormalMode::DepictedForm {
             match &input.cached_normals {
-                Some((res, _)) if *res == input.resolution => None, // will use cached
+                Some((res, _)) if *res == input.resolution => None,
                 _ => input
                     .mesh
                     .as_ref()
@@ -145,7 +198,11 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
         return None;
     }
 
-    // Build UV masks from mesh groups.
+    // ── Stage 2: UV masks ──
+
+    stage.store(STAGE_MASKS, Ordering::Relaxed);
+    set_progress(progress, p_masks);
+
     let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = input.mesh {
         input
             .layer_group_names
@@ -174,7 +231,10 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
         return None;
     }
 
-    // ── Main pipeline ──
+    // ── Stage 3: Path generation — parallel per layer ──
+
+    stage.store(STAGE_PATHS, Ordering::Relaxed);
+    set_progress(progress, p_paths);
 
     let base_color = match &input.base_colors {
         Some(colors) => {
@@ -185,30 +245,76 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
 
     let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 
-    let paths = generate_all_paths(
-        &input.layers,
-        &base_color,
-        normal_data,
-        &mask_refs,
-    );
+    let mut sorted: Vec<(usize, &PaintLayer)> = input.layers.iter().enumerate().collect();
+    sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
+
+    let completed_paths = AtomicUsize::new(0);
+
+    let mut all_paths: Vec<Vec<StrokePath>> = sorted
+        .par_iter()
+        .map(|&(layer_index, layer)| {
+            let tex_ref = base_color.texture.map(|data| ColorTextureRef {
+                data,
+                width: base_color.tex_width,
+                height: base_color.tex_height,
+            });
+            let mask = mask_refs.get(layer_index).and_then(|m| *m);
+            let result =
+                generate_paths_cancellable(layer, layer_index as u32, tex_ref.as_ref(), normal_data, mask, Some(cancel));
+            let done = completed_paths.fetch_add(1, Ordering::Relaxed) + 1;
+            set_progress(progress, p_paths + path_span * done as f32 / n);
+            result
+        })
+        .collect();
+
+    // Assign globally unique stroke IDs (1-based; 0 = no stroke).
+    let mut next_id = 1u32;
+    for layer_paths in all_paths.iter_mut() {
+        for path in layer_paths.iter_mut() {
+            path.stroke_id = next_id;
+            next_id = next_id.wrapping_add(1);
+        }
+    }
 
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
 
-    let global = composite_all_with_paths(
-        &input.layers,
+    // ── Stage 4: Compositing — sequential per layer ──
+
+    stage.store(STAGE_COMPOSITE, Ordering::Relaxed);
+    set_progress(progress, p_composite);
+
+    let mut global = GlobalMaps::new(
         input.resolution,
         &base_color,
-        &input.settings,
-        Some(&paths),
-        normal_data,
-        &mask_refs,
+        input.settings.normal_mode,
+        input.settings.background_mode,
     );
 
-    if cancel.load(Ordering::Relaxed) {
-        return None;
+    for (sorted_idx, &(layer_index, layer)) in sorted.iter().enumerate() {
+        let mask = mask_refs.get(layer_index).and_then(|m| *m);
+        composite_layer(
+            layer,
+            layer_index as u32,
+            &mut global,
+            &input.settings,
+            &base_color,
+            Some(&all_paths[sorted_idx]),
+            normal_data,
+            mask,
+        );
+        set_progress(progress, p_composite + comp_span * (sorted_idx + 1) as f32 / n);
+
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
     }
+
+    // ── Stage 5: Normal map ──
+
+    stage.store(STAGE_NORMAL_MAP, Ordering::Relaxed);
+    set_progress(progress, p_normal_map);
 
     let normal_map = match input.settings.normal_mode {
         NormalMode::DepictedForm => {
@@ -238,7 +344,11 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
         ),
     };
 
-    // Apply base normal blending (UDN) if a base normal texture is provided
+    // ── Stage 6: Normal blending ──
+
+    stage.store(STAGE_BLENDING, Ordering::Relaxed);
+    set_progress(progress, p_blending);
+
     let mut normal_map = normal_map;
     if let Some(ref base_pixels) = input.base_normal_pixels {
         blend_normals_udn(
@@ -249,6 +359,8 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
             input.resolution,
         );
     }
+
+    set_progress(progress, 1.0);
 
     Some(GenResult {
         color: global.color,

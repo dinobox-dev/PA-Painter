@@ -462,36 +462,81 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
 
     // ── Generate ──
     let running = state.generation.is_running();
-    let stale = state.stale_reason();
-    let (label, text_color, fill) = if running {
-        (
-            "Generating...".to_string(),
-            egui::Color32::from_gray(160),
-            egui::Color32::from_gray(50),
-        )
-    } else if let Some(reason) = stale {
-        (
-            format!("Generate ({reason})"),
-            egui::Color32::from_rgb(255, 220, 80),
-            egui::Color32::from_rgb(80, 65, 20),
-        )
+    if running {
+        let p = state.generation.progress();
+        let stage = state.generation.stage();
+        let stage_label = match stage {
+            super::generation::STAGE_NORMALS => "Preparing...",
+            super::generation::STAGE_MASKS => "Building UV masks...",
+            super::generation::STAGE_PATHS => "Generating paths...",
+            super::generation::STAGE_COMPOSITE => "Compositing...",
+            super::generation::STAGE_NORMAL_MAP => "Generating normal map...",
+            super::generation::STAGE_BLENDING => "Finalizing...",
+            _ => "Generating...",
+        };
+        let text = format!("{stage_label} {:.0}%", p * 100.0);
+        let size = egui::Vec2::new(ui.available_width(), 36.0);
+        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+        let painter = ui.painter();
+        let rounding = ui.visuals().widgets.inactive.corner_radius;
+        let bg = egui::Color32::from_gray(50);
+        let fill = egui::Color32::from_gray(80);
+        painter.rect_filled(rect, rounding, bg);
+        if p > 0.0 {
+            let fill_rect = egui::Rect::from_min_size(
+                rect.min,
+                egui::Vec2::new(rect.width() * p.clamp(0.0, 1.0), rect.height()),
+            );
+            // Round left corners always; round right corners only when full.
+            let fill_rounding = if p >= 0.99 {
+                rounding
+            } else {
+                egui::CornerRadius { nw: rounding.nw, sw: rounding.sw, ..Default::default() }
+            };
+            painter.rect_filled(fill_rect, fill_rounding, fill);
+        }
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            &text,
+            egui::FontId::proportional(14.0),
+            egui::Color32::from_gray(200),
+        );
     } else {
-        (
-            "Generate".to_string(),
-            egui::Color32::WHITE,
-            egui::Color32::from_gray(60),
-        )
-    };
-    let btn = ui.scope(|ui: &mut egui::Ui| {
-        ui.visuals_mut().widgets.hovered.expansion = 0.0;
-        ui.visuals_mut().widgets.active.expansion = 0.0;
-        let button = egui::Button::new(egui::RichText::new(&label).color(text_color))
-            .min_size(egui::Vec2::new(ui.available_width(), 36.0))
-            .fill(fill);
-        ui.add(button)
-    }).inner;
-    if btn.on_hover_text("⌘G").clicked() && !running {
-        state.pending_generate = true;
+        let stale = state.stale_reason();
+        let (label, text_color, bg) = if let Some(reason) = stale {
+            (
+                format!("Generate ({reason})"),
+                egui::Color32::from_rgb(255, 220, 80),
+                egui::Color32::from_rgb(80, 65, 20),
+            )
+        } else {
+            (
+                "Generate".to_string(),
+                egui::Color32::WHITE,
+                egui::Color32::from_gray(60),
+            )
+        };
+        let size = egui::Vec2::new(ui.available_width(), 36.0);
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+        let painter = ui.painter();
+        let rounding = ui.visuals().widgets.inactive.corner_radius;
+        let fill = if response.hovered() {
+            bg.linear_multiply(1.3)
+        } else {
+            bg
+        };
+        painter.rect_filled(rect, rounding, fill);
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            &label,
+            egui::FontId::proportional(14.0),
+            text_color,
+        );
+        if response.on_hover_text("⌘G").clicked() {
+            state.pending_generate = true;
+        }
     }
 }
 
