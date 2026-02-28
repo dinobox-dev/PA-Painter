@@ -868,7 +868,7 @@ mod tests {
 
         // Generate paths with overscan + Poisson + 3 passes
         let paths = generate_paths(
-            &layer, 0, res, None, Some(&nd), None,
+            &layer, 0, None, Some(&nd), None,
         );
         eprintln!("Overscan+Poisson: {} paths generated", paths.len());
 

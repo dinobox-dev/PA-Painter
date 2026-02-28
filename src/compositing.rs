@@ -292,7 +292,6 @@ pub fn composite_stroke(
 /// across layers using rayon.
 pub fn generate_all_paths(
     layers: &[PaintLayer],
-    resolution: u32,
     base_color: &BaseColorSource,
     normal_data: Option<&MeshNormalData>,
     masks: &[Option<&UvMask>],
@@ -309,7 +308,7 @@ pub fn generate_all_paths(
                 height: base_color.tex_height,
             });
             let mask = masks.get(layer_index).and_then(|m| *m);
-            generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref(), normal_data, mask)
+            generate_paths(layer, layer_index as u32, tex_ref.as_ref(), normal_data, mask)
         })
         .collect();
 
@@ -381,7 +380,7 @@ pub fn composite_all_with_paths(
                     height: base_color.tex_height,
                 });
                 let mask = masks.get(layer_index).and_then(|m| *m);
-                generate_paths(layer, layer_index as u32, resolution, tex_ref.as_ref(), normal_data, mask)
+                generate_paths(layer, layer_index as u32, tex_ref.as_ref(), normal_data, mask)
             })
             .collect::<Vec<_>>();
         assign_unique_stroke_ids(&mut generated);
@@ -436,7 +435,7 @@ pub fn composite_layer(
             width: base_color.tex_width,
             height: base_color.tex_height,
         });
-        paths_owned = generate_paths(layer, layer_index, resolution, tex_ref.as_ref(), normal_data, mask);
+        paths_owned = generate_paths(layer, layer_index, tex_ref.as_ref(), normal_data, mask);
         &paths_owned
     };
 

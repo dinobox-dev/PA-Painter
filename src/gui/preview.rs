@@ -96,13 +96,13 @@ pub fn update_stroke_cache(
 
 // ── Per-Layer Path Overlay Cache ────────────────────────────────
 
-/// Key for invalidation: paint values + seed + guides + resolution + color texture hash.
+/// Key for invalidation: paint values + seed + guides + color texture hash.
+/// Resolution is NOT included because path generation always uses BASE_RESOLUTION.
 #[derive(Clone, PartialEq)]
 struct LayerPathKey {
     paint: PaintValues,
     seed: u32,
     guides: Vec<Guide>,
-    resolution: u32,
     /// Hash of the color texture data; changes when texture content is swapped or reloaded.
     color_tex_hash: u64,
 }
@@ -111,6 +111,8 @@ struct LayerPathKey {
 pub struct LayerPathCache {
     key: Option<LayerPathKey>,
     pub paths: Vec<Vec<[f32; 2]>>,
+    /// Original total segments before worker-side simplification.
+    pub original_total_segments: usize,
 }
 
 impl Default for LayerPathCache {
@@ -118,19 +120,19 @@ impl Default for LayerPathCache {
         Self {
             key: None,
             paths: Vec::new(),
+            original_total_segments: 0,
         }
     }
 }
 
 impl LayerPathCache {
-    /// Check if cache is stale for the given layer state, seed, resolution, and color texture hash.
-    pub fn is_stale(&self, layer: &Layer, seed: u32, resolution: u32, color_tex_hash: u64) -> bool {
+    /// Check if cache is stale for the given layer state, seed, and color texture hash.
+    pub fn is_stale(&self, layer: &Layer, seed: u32, color_tex_hash: u64) -> bool {
         match &self.key {
             Some(k) => {
                 k.paint != layer.paint
                     || k.seed != seed
                     || k.guides != layer.guides
-                    || k.resolution != resolution
                     || k.color_tex_hash != color_tex_hash
             }
             None => true,
@@ -143,12 +145,16 @@ impl LayerPathCache {
 /// Maintains one cache entry per layer index, growing/shrinking with the layer stack.
 pub struct PathOverlayCache {
     caches: Vec<LayerPathCache>,
+    /// Tracks the parameters of the currently in-flight worker computation.
+    /// Prevents restarting the worker every frame while a correct computation is running.
+    pending: Option<(usize, LayerPathKey)>,
 }
 
 impl Default for PathOverlayCache {
     fn default() -> Self {
         Self {
             caches: Vec::new(),
+            pending: None,
         }
     }
 }
@@ -165,36 +171,66 @@ impl PathOverlayCache {
     }
 
     /// Get cached paths for the selected layer (if any).
-    pub fn selected_paths(&self, selected: Option<usize>) -> Option<(usize, &Vec<Vec<[f32; 2]>>)> {
+    /// Returns (layer_index, paths, original_total_segments).
+    pub fn selected_paths(&self, selected: Option<usize>) -> Option<(usize, &Vec<Vec<[f32; 2]>>, usize)> {
         let i = selected?;
-        self.caches.get(i).map(|c| (i, &c.paths))
+        self.caches.get(i).map(|c| (i, &c.paths, c.original_total_segments))
     }
 
     /// Check if the cache for the given layer index is stale.
+    /// Returns false if a worker is already computing with matching parameters.
     pub fn is_stale_for_layer(
         &self,
         layer_index: usize,
         layer: &Layer,
         seed: u32,
-        resolution: u32,
         color_tex_hash: u64,
     ) -> bool {
-        match self.caches.get(layer_index) {
-            Some(cache) => cache.is_stale(layer, seed, resolution, color_tex_hash),
-            None => true,
+        // If the completed cache already matches, not stale.
+        let cache_hit = self
+            .caches
+            .get(layer_index)
+            .is_some_and(|cache| !cache.is_stale(layer, seed, color_tex_hash));
+        if cache_hit {
+            return false;
         }
+
+        // If a worker is already computing exactly these params, not stale either.
+        if let Some((idx, ref key)) = self.pending {
+            if idx == layer_index
+                && key.paint == layer.paint
+                && key.seed == seed
+                && key.guides == layer.guides
+                && key.color_tex_hash == color_tex_hash
+            {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Record that a worker has been started for the given layer params.
+    pub fn set_pending(&mut self, layer_index: usize, layer: &Layer, seed: u32, color_tex_hash: u64) {
+        self.pending = Some((layer_index, LayerPathKey {
+            paint: layer.paint.clone(),
+            seed,
+            guides: layer.guides.clone(),
+            color_tex_hash,
+        }));
     }
 
     /// Write a completed worker result into the cache slot.
     pub fn apply_result(&mut self, result: &PathOverlayResult) {
+        self.pending = None;
         self.sync_layer_count(result.layer_count);
         if let Some(cache) = self.caches.get_mut(result.layer_index) {
             cache.paths = result.paths.clone();
+            cache.original_total_segments = result.original_total_segments;
             cache.key = Some(LayerPathKey {
                 paint: result.paint.clone(),
                 seed: result.seed,
                 guides: result.guides.clone(),
-                resolution: result.resolution,
                 color_tex_hash: result.color_tex_hash,
             });
         }
@@ -231,10 +267,11 @@ pub struct PathOverlayInput {
 /// Result from a completed path overlay computation.
 pub struct PathOverlayResult {
     pub paths: Vec<Vec<[f32; 2]>>,
+    /// Original total segments before simplification (for badge display).
+    pub original_total_segments: usize,
     pub layer_index: usize,
     pub layer_count: usize,
     pub seed: u32,
-    pub resolution: u32,
     pub color_tex_hash: u64,
     /// Copy of the layer's PaintValues + guides for cache key storage.
     pub paint: PaintValues,
@@ -338,30 +375,59 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
     });
 
     let paint_layer = input.layer.to_paint_layer_with_seed(input.seed);
-    let paths = path_placement::generate_paths(
+    let paths = path_placement::generate_paths_cancellable(
         &paint_layer,
         0,
-        input.resolution,
         color_ref.as_ref(),
         normal_ref,
         None,
+        Some(cancel),
     );
 
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
 
+    // Simplify paths for overlay rendering: cap total points to keep UI responsive.
+    // At 100K points, 7000 paths get ~14 pts each (~70px spacing) — enough for preview.
+    const OVERLAY_POINT_BUDGET: usize = 100_000;
+    let original_total_points: usize = paths.iter().map(|p| p.points.len()).sum();
+    let original_total_segments = original_total_points.saturating_sub(paths.len());
+    let point_stride = if original_total_points > OVERLAY_POINT_BUDGET {
+        (original_total_points + OVERLAY_POINT_BUDGET - 1) / OVERLAY_POINT_BUDGET
+    } else {
+        1
+    };
+
     let path_points: Vec<Vec<[f32; 2]>> = paths
         .iter()
-        .map(|p| p.points.iter().map(|v| [v.x, v.y]).collect())
+        .map(|p| {
+            if point_stride > 1 && p.points.len() > 2 {
+                let mut pts: Vec<[f32; 2]> = p
+                    .points
+                    .iter()
+                    .step_by(point_stride)
+                    .map(|v| [v.x, v.y])
+                    .collect();
+                // Always include the last point for path continuity
+                let last = p.points.last().unwrap();
+                let last_pt = [last.x, last.y];
+                if pts.last() != Some(&last_pt) {
+                    pts.push(last_pt);
+                }
+                pts
+            } else {
+                p.points.iter().map(|v| [v.x, v.y]).collect()
+            }
+        })
         .collect();
 
     Some(PathOverlayResult {
         paths: path_points,
+        original_total_segments,
         layer_index: input.layer_index,
         layer_count: input.layer_count,
         seed: input.seed,
-        resolution: input.resolution,
         color_tex_hash: input.color_tex_hash,
         paint: input.layer.paint.clone(),
         guides: input.layer.guides.clone(),

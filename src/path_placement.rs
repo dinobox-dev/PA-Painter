@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use glam::Vec2;
 
@@ -7,8 +8,14 @@ use crate::math::rotate_vec2;
 use crate::object_normal::{sample_object_normal, MeshNormalData};
 use crate::rng::SeededRng;
 use crate::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
-use crate::types::{PaintLayer, StrokePath, StrokeParams};
+use crate::types::{PaintLayer, StrokePath, StrokeParams, BASE_RESOLUTION};
 use crate::uv_mask::UvMask;
+
+/// Check cancellation token, returning early if set.
+#[inline]
+fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {
+    cancel.is_some_and(|c| c.load(Ordering::Relaxed))
+}
 
 /// Generate Poisson disk seeds within an arbitrary UV rectangle `[lo, hi]`.
 ///
@@ -19,6 +26,7 @@ fn generate_seeds_poisson_in(
     resolution: u32,
     lo: Vec2,
     hi: Vec2,
+    cancel: Option<&AtomicBool>,
 ) -> Vec<Vec2> {
     let min_dist = params.brush_width / resolution as f32 * params.stroke_spacing;
     if min_dist <= 0.0 || !min_dist.is_finite() {
@@ -48,6 +56,9 @@ fn generate_seeds_poisson_in(
     grid[gj * grid_w + gi] = Some(0);
 
     while !active.is_empty() {
+        if is_cancelled(cancel) {
+            return Vec::new();
+        }
         let active_idx = (rng.next_f32() * active.len() as f32) as usize % active.len();
         let center = points[active[active_idx]];
 
@@ -282,11 +293,28 @@ pub fn filter_overlapping_paths(
 pub fn generate_paths(
     layer: &PaintLayer,
     layer_index: u32,
-    resolution: u32,
     color_tex: Option<&ColorTextureRef<'_>>,
     normal_data: Option<&MeshNormalData>,
     mask: Option<&UvMask>,
 ) -> Vec<StrokePath> {
+    generate_paths_cancellable(layer, layer_index, color_tex, normal_data, mask, None)
+}
+
+/// Like [`generate_paths`] but accepts an optional cancellation token.
+/// When the token is set, the function returns an empty Vec as soon as possible.
+pub fn generate_paths_cancellable(
+    layer: &PaintLayer,
+    layer_index: u32,
+    color_tex: Option<&ColorTextureRef<'_>>,
+    normal_data: Option<&MeshNormalData>,
+    mask: Option<&UvMask>,
+    cancel: Option<&AtomicBool>,
+) -> Vec<StrokePath> {
+    // Path geometry is resolution-independent in UV space: seed density and
+    // curve shape are identical at any output resolution.  Tracing at
+    // BASE_RESOLUTION avoids O(R) point bloat while the compositing stage
+    // still rasterises at the actual output resolution.
+    let resolution = BASE_RESOLUTION;
     let scaled = layer.params.scaled_for_resolution(resolution);
     let field = DirectionField::new(&layer.guides, resolution);
     let brush_width_uv = scaled.brush_width / resolution as f32;
@@ -307,7 +335,10 @@ pub fn generate_paths(
         (Vec2::splat(-margin), Vec2::splat(1.0 + margin))
     };
 
-    let seeds = generate_seeds_poisson_in(&scaled, resolution, seed_lo, seed_hi);
+    let seeds = generate_seeds_poisson_in(&scaled, resolution, seed_lo, seed_hi, cancel);
+    if is_cancelled(cancel) {
+        return Vec::new();
+    }
 
     // Filter seeds by mask
     let filtered_seeds: Vec<Vec2> = if let Some(m) = mask {
@@ -318,7 +349,11 @@ pub fn generate_paths(
 
     let mut rng = SeededRng::new(scaled.seed);
     let mut raw_paths: Vec<Vec<Vec2>> = Vec::new();
-    for seed_point in &filtered_seeds {
+    for (i, seed_point) in filtered_seeds.iter().enumerate() {
+        // Check cancellation every 256 seeds to avoid excessive atomic loads
+        if i & 0xFF == 0 && is_cancelled(cancel) {
+            return Vec::new();
+        }
         if let Some(path) = trace_streamline(
             *seed_point,
             &field,
@@ -400,7 +435,7 @@ mod tests {
     fn seed_poisson_coverage() {
         let layer = make_layer();
         let seeds = generate_seeds_poisson_in(
-            &layer.params, 512, Vec2::ZERO, Vec2::ONE,
+            &layer.params, 512, Vec2::ZERO, Vec2::ONE, None,
         );
         // Poisson disk should produce a reasonable number of seeds
         assert!(
@@ -414,7 +449,7 @@ mod tests {
     fn seeds_poisson_within_bounds() {
         let layer = make_layer();
         let seeds = generate_seeds_poisson_in(
-            &layer.params, 512, Vec2::ZERO, Vec2::ONE,
+            &layer.params, 512, Vec2::ZERO, Vec2::ONE, None,
         );
         assert!(!seeds.is_empty());
         for seed in &seeds {
@@ -431,10 +466,10 @@ mod tests {
     fn seed_poisson_determinism() {
         let layer = make_layer();
         let seeds1 = generate_seeds_poisson_in(
-            &layer.params, 512, Vec2::ZERO, Vec2::ONE,
+            &layer.params, 512, Vec2::ZERO, Vec2::ONE, None,
         );
         let seeds2 = generate_seeds_poisson_in(
-            &layer.params, 512, Vec2::ZERO, Vec2::ONE,
+            &layer.params, 512, Vec2::ZERO, Vec2::ONE, None,
         );
         assert_eq!(seeds1.len(), seeds2.len());
         for (a, b) in seeds1.iter().zip(seeds2.iter()) {
@@ -449,7 +484,7 @@ mod tests {
         let resolution = 512u32;
         let min_dist = layer.params.brush_width / resolution as f32 * layer.params.stroke_spacing;
         let seeds = generate_seeds_poisson_in(
-            &layer.params, resolution, Vec2::ZERO, Vec2::ONE,
+            &layer.params, resolution, Vec2::ZERO, Vec2::ONE, None,
         );
         // Verify all pairs respect minimum distance
         for (i, a) in seeds.iter().enumerate() {
@@ -655,8 +690,8 @@ mod tests {
     #[test]
     fn generate_paths_determinism() {
         let layer = make_layer();
-        let paths1 = generate_paths(&layer, 0, 256, None, None, None);
-        let paths2 = generate_paths(&layer, 0, 256, None, None, None);
+        let paths1 = generate_paths(&layer, 0, None, None, None);
+        let paths2 = generate_paths(&layer, 0, None, None, None);
 
         assert_eq!(paths1.len(), paths2.len());
         for (a, b) in paths1.iter().zip(paths2.iter()) {
@@ -673,7 +708,7 @@ mod tests {
     #[test]
     fn generate_paths_sorted_by_y() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 256, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None);
 
         assert!(!paths.is_empty(), "should generate some paths");
         for i in 1..paths.len() {
@@ -691,7 +726,7 @@ mod tests {
     #[test]
     fn generate_paths_unique_stroke_ids() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 256, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None);
 
         let mut ids: Vec<u32> = paths.iter().map(|p| p.stroke_id).collect();
         ids.sort();
@@ -703,7 +738,7 @@ mod tests {
     fn area_coverage_90_percent() {
         let layer = make_layer();
         let resolution = 512u32;
-        let paths = generate_paths(&layer, 0, resolution, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None);
 
         let mut covered = vec![false; (resolution * resolution) as usize];
         let brush_radius_uv = layer.params.brush_width / resolution as f32 / 2.0;
@@ -756,7 +791,7 @@ mod tests {
     #[test]
     fn paths_stay_within_uv() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, 512, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None);
 
         for path in &paths {
             for point in &path.points {
@@ -915,7 +950,7 @@ mod tests {
     fn visual_horizontal_strokes() {
         let layer = make_layer();
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, resolution, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None);
 
         eprintln!("visual_horizontal_strokes: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "horizontal_strokes.png");
@@ -962,7 +997,7 @@ mod tests {
             ],
         };
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, resolution, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None);
 
         eprintln!("visual_spiral_guides: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "spiral_guides.png");
@@ -1066,8 +1101,8 @@ mod tests {
         let mut layer_on = layer_off.clone();
         layer_on.params.color_break_threshold = Some(0.08);
 
-        let paths_off = generate_paths(&layer_off, 0, resolution, Some(&tex_ref), None, None);
-        let paths_on = generate_paths(&layer_on, 0, resolution, Some(&tex_ref), None, None);
+        let paths_off = generate_paths(&layer_off, 0, Some(&tex_ref), None, None);
+        let paths_on = generate_paths(&layer_on, 0, Some(&tex_ref), None, None);
 
         eprintln!(
             "color_break OFF: {} paths, ON: {} paths",
@@ -1797,8 +1832,8 @@ mod tests {
         let mut layer_on = layer_off.clone();
         layer_on.params.normal_break_threshold = Some(0.5);
 
-        let paths_off = generate_paths(&layer_off, 0, resolution, None, Some(&nd), None);
-        let paths_on = generate_paths(&layer_on, 0, resolution, None, Some(&nd), None);
+        let paths_off = generate_paths(&layer_off, 0, None, Some(&nd), None);
+        let paths_on = generate_paths(&layer_on, 0, None, Some(&nd), None);
 
         eprintln!(
             "normal_break OFF: {} paths, ON: {} paths",
@@ -1890,7 +1925,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_base = generate_paths(&layer_base, 0, resolution, None, None, None);
+        let paths_base = generate_paths(&layer_base, 0, None, None, None);
 
         // ── 2. Method A: tight spacing ──
         let layer_a = PaintLayer {
@@ -1902,7 +1937,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_a = generate_paths(&layer_a, 0, resolution, None, None, None);
+        let paths_a = generate_paths(&layer_a, 0, None, None, None);
 
         // ── 3. Method A+B: tight spacing + relaxed overlap filter ──
         let layer_ab = PaintLayer {
@@ -1916,7 +1951,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_ab = generate_paths(&layer_ab, 0, resolution, None, None, None);
+        let paths_ab = generate_paths(&layer_ab, 0, None, None, None);
 
         eprintln!("=== Density Comparison ===");
         eprintln!("  Baseline:      {} paths", paths_base.len());

@@ -187,7 +187,6 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool) -> Option<GenResult> {
 
     let paths = generate_all_paths(
         &input.layers,
-        input.resolution,
         &base_color,
         normal_data,
         &mask_refs,

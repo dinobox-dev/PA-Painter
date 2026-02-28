@@ -96,7 +96,6 @@ impl BaseColor {
 #[derive(Debug)]
 struct PathCacheKey {
     layers: Vec<Layer>,
-    resolution: u32,
     base_color_key: String,
 }
 
@@ -188,16 +187,12 @@ impl Project {
             .collect()
     }
 
-    /// Return cached paths if they are still valid for the current layers,
-    /// resolution, and base color. Returns `None` on cache miss.
-    pub fn cached_paths_if_valid(
-        &self,
-        resolution: u32,
-    ) -> Option<&[Vec<StrokePath>]> {
+    /// Return cached paths if they are still valid for the current layers
+    /// and base color. Returns `None` on cache miss.
+    pub fn cached_paths_if_valid(&self) -> Option<&[Vec<StrokePath>]> {
         let key = self.path_cache_key.as_ref()?;
         let paths = self.cached_paths.as_ref()?;
-        if key.resolution == resolution
-            && key.layers == self.layers
+        if key.layers == self.layers
             && key.base_color_key == base_color_cache_key(&self.base_color)
         {
             Some(paths.as_slice())
@@ -208,10 +203,9 @@ impl Project {
 
     /// Store newly generated paths in the cache, along with a snapshot of the
     /// current project state that produced them.
-    pub fn set_cached_paths(&mut self, paths: Vec<Vec<StrokePath>>, resolution: u32) {
+    pub fn set_cached_paths(&mut self, paths: Vec<Vec<StrokePath>>) {
         self.path_cache_key = Some(PathCacheKey {
             layers: self.layers.clone(),
-            resolution,
             base_color_key: base_color_cache_key(&self.base_color),
         });
         self.cached_paths = Some(paths);

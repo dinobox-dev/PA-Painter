@@ -14,7 +14,7 @@ use eframe::egui;
 use eframe::egui_wgpu;
 use state::{AppState, GuideTool, MapMode, ViewportTab};
 
-use practical_arcana_painter::types::Color;
+use practical_arcana_painter::types::{Color, BASE_RESOLUTION};
 
 /// Main GUI application.
 pub struct PainterApp {
@@ -356,30 +356,29 @@ impl eframe::App for PainterApp {
                 if selected < self.state.project.layers.len() {
                     let layer = &self.state.project.layers[selected];
                     if layer.visible {
-                        let res = self.state.project.settings.resolution_preset.resolution();
                         let seed = self.state.project.settings.seed.wrapping_add(selected as u32);
                         let hash = self.state.texture_colors_hash;
 
                         let stale = self
                             .state
                             .path_overlay
-                            .is_stale_for_layer(selected, layer, seed, res, hash);
+                            .is_stale_for_layer(selected, layer, seed, hash);
 
-                        if stale && !self.state.path_worker.is_running() {
+                        if stale {
                             let needs_normal = layer.paint.normal_break_threshold.is_some();
                             let normals_stale = needs_normal
                                 && !self
                                     .state
                                     .cached_mesh_normals
                                     .as_ref()
-                                    .is_some_and(|(r, _)| *r == res);
+                                    .is_some_and(|(r, _)| *r == BASE_RESOLUTION);
 
                             let input = preview::PathOverlayInput {
                                 layer: layer.clone(),
                                 layer_index: selected,
                                 layer_count: self.state.project.layers.len(),
                                 seed,
-                                resolution: res,
+                                resolution: BASE_RESOLUTION,
                                 color_data: self.state.cached_texture_colors.clone(),
                                 color_w: self
                                     .state
@@ -405,6 +404,7 @@ impl eframe::App for PainterApp {
                                     None
                                 },
                             };
+                            self.state.path_overlay.set_pending(selected, layer, seed, hash);
                             self.state.path_worker.start(input);
                         }
                     }

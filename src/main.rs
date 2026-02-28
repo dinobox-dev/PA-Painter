@@ -158,15 +158,14 @@ fn main() {
 
     // Generate (with path cache)
     eprintln!("Generating...");
-    if project.cached_paths_if_valid(resolution).is_none() {
+    if project.cached_paths_if_valid().is_none() {
         let paths = generate_all_paths(
             &layers,
-            resolution,
             &base_color,
             normal_data.as_ref(),
             &mask_refs,
         );
-        project.set_cached_paths(paths, resolution);
+        project.set_cached_paths(paths);
     }
 
     let global = composite_all_with_paths(

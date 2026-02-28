@@ -769,14 +769,124 @@ fn draw_path_overlay(painter: &egui::Painter, state: &AppState, rect: Rect) {
 
     let path_stroke = egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(r, g, b, 80));
 
-    if let Some((_layer_idx, paths)) = state.path_overlay.selected_paths(state.selected_layer) {
+    let mut badge_info: Option<(usize, Option<u32>)> = None;
+    if let Some((_layer_idx, paths, orig_segs)) = state.path_overlay.selected_paths(state.selected_layer) {
+        // Safety cap: prevent wgpu buffer overflow if worker budget wasn't enough.
+        const MAX_SEGMENTS: usize = 100_000;
+        let total_segs: usize = paths.iter().map(|p| p.len().saturating_sub(1)).sum();
+        let stride = if total_segs > MAX_SEGMENTS {
+            (total_segs + MAX_SEGMENTS - 1) / MAX_SEGMENTS
+        } else {
+            1
+        };
+
         for path in paths {
-            for w in path.windows(2) {
-                let a = uv_to_screen(glam::Vec2::new(w[0][0], w[0][1]), state, rect);
-                let b = uv_to_screen(glam::Vec2::new(w[1][0], w[1][1]), state, rect);
+            if path.len() < 2 {
+                continue;
+            }
+            let mut i = 0;
+            while i + stride < path.len() {
+                let a = uv_to_screen(glam::Vec2::new(path[i][0], path[i][1]), state, rect);
+                let b = uv_to_screen(
+                    glam::Vec2::new(path[i + stride][0], path[i + stride][1]),
+                    state,
+                    rect,
+                );
+                painter.line_segment([a, b], path_stroke);
+                i += stride;
+            }
+            if i < path.len() - 1 {
+                let last = path.len() - 1;
+                let a = uv_to_screen(glam::Vec2::new(path[i][0], path[i][1]), state, rect);
+                let b = uv_to_screen(glam::Vec2::new(path[last][0], path[last][1]), state, rect);
                 painter.line_segment([a, b], path_stroke);
             }
         }
+
+        // Remember path info for badge (drawn after, to avoid overlap with spinner)
+        let simplify_pct = if orig_segs > 0 && total_segs < orig_segs {
+            Some((total_segs as f64 / orig_segs as f64 * 100.0).round() as u32)
+        } else {
+            None
+        };
+        badge_info = Some((paths.len(), simplify_pct));
+    }
+
+    // Badge: spinner when computing, path count when done (mutually exclusive, top-right)
+    let badge_right = rect.right() - 8.0;
+    let badge_top = rect.top() + 8.0;
+    if state.path_worker.is_running() {
+        // Measure text to size the background
+        let text = "Computing paths…";
+        let font = egui::FontId::proportional(11.0);
+        let galley = painter.layout_no_wrap(text.to_string(), font.clone(), Color32::WHITE);
+        let spinner_r = 5.0;
+        let pad = 6.0;
+        let badge_w = spinner_r * 2.0 + 8.0 + galley.size().x + pad * 2.0;
+        let badge_h = galley.size().y + pad;
+        let badge_rect = Rect::from_min_size(
+            Pos2::new(badge_right - badge_w, badge_top),
+            Vec2::new(badge_w, badge_h),
+        );
+        painter.rect_filled(
+            badge_rect,
+            4.0,
+            Color32::from_rgba_unmultiplied(180, 100, 30, 200),
+        );
+
+        // Spinning arc inside badge
+        let time = painter.ctx().input(|i| i.time) as f32;
+        let center = Pos2::new(
+            badge_rect.left() + pad + spinner_r,
+            badge_rect.center().y,
+        );
+        let start_angle = time * 5.0;
+        let arc_len = std::f32::consts::PI * 1.5;
+        let steps = 16;
+        let arc_pts: Vec<Pos2> = (0..=steps)
+            .map(|i| {
+                let a = start_angle + (i as f32 / steps as f32) * arc_len;
+                Pos2::new(center.x + spinner_r * a.cos(), center.y + spinner_r * a.sin())
+            })
+            .collect();
+        painter.add(egui::Shape::line(
+            arc_pts,
+            egui::Stroke::new(1.5, Color32::WHITE),
+        ));
+        painter.text(
+            Pos2::new(center.x + spinner_r + 6.0, badge_rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            text,
+            font,
+            Color32::WHITE,
+        );
+    } else if let Some((count, simplify_pct)) = badge_info {
+        let label = if let Some(pct) = simplify_pct {
+            format!("{count} paths (simplified, ~{pct}% shown)")
+        } else {
+            format!("{count} paths")
+        };
+        let font = egui::FontId::proportional(11.0);
+        let galley = painter.layout_no_wrap(label.clone(), font.clone(), Color32::WHITE);
+        let badge_w = galley.size().x + 12.0;
+        let badge_h = galley.size().y + 6.0;
+        let badge_rect = Rect::from_min_size(
+            Pos2::new(badge_right - badge_w, badge_top),
+            Vec2::new(badge_w, badge_h),
+        );
+        let bg = if simplify_pct.is_some() {
+            Color32::from_rgba_unmultiplied(180, 100, 30, 200)
+        } else {
+            Color32::from_rgba_unmultiplied(80, 80, 80, 160)
+        };
+        painter.rect_filled(badge_rect, 4.0, bg);
+        painter.text(
+            badge_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            font,
+            Color32::WHITE,
+        );
     }
 }
 
@@ -792,17 +902,13 @@ fn draw_arrowhead(painter: &egui::Painter, tip: Pos2, dir: glam::Vec2, color: Co
     painter.line_segment([tip, right], egui::Stroke::new(2.0, color));
 }
 
-/// Draw a stale/not-generated badge in the top-right corner of the viewport.
+/// Draw a stale/not-generated badge in the top-left corner of the viewport.
 fn draw_stale_badge(painter: &egui::Painter, state: &AppState, rect: Rect) {
     if let Some(reason) = state.stale_reason() {
         let font = egui::FontId::proportional(11.0);
-        let badge_pos = Pos2::new(rect.right() - 8.0, rect.top() + 8.0);
         let galley = painter.layout_no_wrap(reason.to_string(), font.clone(), Color32::WHITE);
         let badge_rect = Rect::from_min_size(
-            Pos2::new(
-                badge_pos.x - galley.size().x - 12.0,
-                badge_pos.y,
-            ),
+            Pos2::new(rect.left() + 8.0, rect.top() + 8.0),
             Vec2::new(galley.size().x + 12.0, galley.size().y + 6.0),
         );
         painter.rect_filled(badge_rect, 4.0, Color32::from_rgba_unmultiplied(180, 140, 30, 200));
