@@ -306,6 +306,15 @@ impl AppState {
                 self.selected_guide = None;
             }
         }
+        // Fix selected_guide if the layer now has fewer guides
+        if let Some(gi) = self.selected_guide {
+            let valid = self.selected_layer
+                .and_then(|li| self.project.layers.get(li))
+                .is_some_and(|layer| gi < layer.guides.len());
+            if !valid {
+                self.selected_guide = None;
+            }
+        }
     }
 
     /// Whether current results don't reflect current settings.
