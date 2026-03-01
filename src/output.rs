@@ -869,7 +869,6 @@ mod tests {
 
     // ── Visual Integration Test ──
 
-    #[test]
     // ── UDN Blending Tests ──
 
     #[test]

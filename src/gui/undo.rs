@@ -89,18 +89,6 @@ impl UndoHistory {
         }
     }
 
-    /// Push an explicit undo snapshot (for discrete actions like add/delete layer).
-    /// This also flushes any pending continuous edit.
-    #[allow(dead_code)]
-    pub fn push(&mut self, snapshot: UndoSnapshot) {
-        self.commit_pending();
-        self.undo_stack.push(snapshot);
-        if self.undo_stack.len() > self.max_depth {
-            self.undo_stack.remove(0);
-        }
-        self.redo_stack.clear();
-    }
-
     /// Undo: pop from undo stack, push current state to redo, return the restored snapshot.
     pub fn undo(&mut self, current: UndoSnapshot) -> Option<UndoSnapshot> {
         self.flush();
