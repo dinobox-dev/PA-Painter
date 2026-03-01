@@ -1,6 +1,10 @@
 # Practical Arcana Painter
 
+<!-- ![CI](https://github.com/user/practical-arcana-painter/actions/workflows/ci.yml/badge.svg) -->
+
 Procedural paint stroke generator for 3D assets. Turn any mesh into a hand-painted look with full control over stroke direction, density, and layering.
+
+Practical Arcana Painter provides both a **GUI editor** for interactive work and a **CLI renderer** for headless batch processing. The core rendering engine is available as a Rust library crate.
 
 <!-- ![Screenshot](docs/screenshot.png) -->
 
@@ -31,10 +35,54 @@ cargo run --release --bin practical-arcana-painter-gui
 cargo run --release --bin practical-arcana-painter -- <input.pap> -o output/
 ```
 
-## Supported Mesh Formats
+### CLI Options
 
-- **Import**: OBJ, GLB/GLTF
-- **Export**: GLB (with generated textures baked in)
+```
+Usage: practical-arcana-painter <project.pap> [options]
+
+Options:
+  -o, --output <dir>       Output directory (default: ./output)
+  -r, --resolution <px>    Override output resolution (1–16384)
+  -f, --format <fmt>       Export format: png (default) or exr
+  -h, --help               Show this help
+```
+
+## Supported Formats
+
+- **Mesh import**: OBJ, GLB/GLTF
+- **Texture export**: PNG, OpenEXR
+- **3D export**: GLB (with generated textures baked in)
+- **Project files**: `.pap` (ZIP-based, contains JSON + asset references)
+
+## Architecture
+
+The rendering engine is a 5-stage pipeline, each implemented as a standalone module:
+
+| Stage | Module | Description |
+|-------|--------|-------------|
+| 1 | `direction_field` | Compute per-texel stroke flow from user-placed guides |
+| 2 | `path_placement` | Poisson-disk seeding + streamline tracing along the flow |
+| 3 | `stroke_height` | Pressure curves and brush profiles → height values |
+| 4 | `compositing` | Blend all visible layers into unified global maps |
+| 5 | `output` | Generate final color, normal, height, and AO textures |
+
+See [`docs/practical_arcana_painter_spec.md`](docs/practical_arcana_painter_spec.md) for the full specification.
+
+## Output Maps
+
+Each render produces up to four texture maps:
+
+- **Color map** — base color with per-stroke HSV variation
+- **Normal map** — tangent-space or depicted-form normals from stroke height gradients
+- **Height map** — grayscale displacement from accumulated stroke heights
+- **AO map** — ambient occlusion derived from height field curvature
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-change`)
+3. Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before committing
+4. Open a pull request
 
 ## License
 
