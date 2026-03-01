@@ -228,7 +228,7 @@ impl eframe::App for PainterApp {
 
         // ── Number keys 1-4: context-dependent (no text focus) ──
         {
-            let has_text_focus = ctx.memory(|m| m.focused().is_some());
+            let has_text_focus = ctx.wants_keyboard_input();
             if !has_text_focus {
                 match self.state.viewport_tab {
                     ViewportTab::Guide => {
