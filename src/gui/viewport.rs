@@ -119,7 +119,7 @@ pub fn show(
     state: &mut AppState,
     render_state: Option<&egui_wgpu::RenderState>,
 ) {
-    // ── Top tab bar ──
+    // ── Top tab bar (order must match ViewportTab::next() in state.rs) ──
     ui.horizontal(|ui: &mut egui::Ui| {
         let tabs = [
             (ViewportTab::Guide, "Guide"),

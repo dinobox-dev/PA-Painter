@@ -40,11 +40,12 @@ pub enum ViewportTab {
 }
 
 impl ViewportTab {
+    /// Cycle order must match tab-bar order in `viewport.rs:show_viewport()`.
     pub fn next(self) -> Self {
         match self {
-            Self::UvView => Self::Guide,
-            Self::Guide => Self::Mesh3D,
-            Self::Mesh3D => Self::UvView,
+            Self::Guide => Self::UvView,
+            Self::UvView => Self::Mesh3D,
+            Self::Mesh3D => Self::Guide,
         }
     }
 }
