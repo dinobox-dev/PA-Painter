@@ -1,8 +1,6 @@
 use glam::Vec2;
 
-use crate::types::{
-    Guide, GuideType, Layer, PaintLayer, PaintValues, StrokeParams,
-};
+use crate::types::{Guide, GuideType, Layer, PaintLayer, PaintValues, StrokeParams};
 
 pub fn make_layer_with_order(order: i32) -> PaintLayer {
     PaintLayer {

@@ -18,7 +18,9 @@ pub const DISABLED_OPACITY: f32 = 0.4;
 /// - `enabled = true, hovered = true` → `text_color`
 pub fn icon_color(ui: &egui::Ui, enabled: bool, hovered: bool) -> egui::Color32 {
     if !enabled {
-        ui.visuals().weak_text_color().gamma_multiply(DISABLED_OPACITY)
+        ui.visuals()
+            .weak_text_color()
+            .gamma_multiply(DISABLED_OPACITY)
     } else if hovered {
         ui.visuals().text_color()
     } else {
@@ -178,13 +180,12 @@ pub fn slider_row(
                 ui.visuals().widgets.inactive.bg_fill
             };
             let cr = ui.visuals().widgets.inactive.corner_radius;
-            ui.painter().set(bg_idx, egui::Shape::rect_filled(te_resp.rect, cr, bg));
+            ui.painter()
+                .set(bg_idx, egui::Shape::rect_filled(te_resp.rect, cr, bg));
         }
 
         // Release focus on any press outside this field (click or drag start).
-        if te_resp.has_focus() && !te_resp.hovered()
-            && ui.input(|i| i.pointer.any_pressed())
-        {
+        if te_resp.has_focus() && !te_resp.hovered() && ui.input(|i| i.pointer.any_pressed()) {
             te_resp.surrender_focus();
         }
 
@@ -232,11 +233,7 @@ pub fn paint_truncated_text(
         painter
             .with_clip_rect(clip)
             .galley(egui::Pos2::new(x, text_y), galley, color);
-        painter.galley(
-            egui::Pos2::new(x + max_width - ell_w, text_y),
-            ell,
-            color,
-        );
+        painter.galley(egui::Pos2::new(x + max_width - ell_w, text_y), ell, color);
     } else {
         painter.galley(egui::Pos2::new(x, text_y), galley, color);
     }

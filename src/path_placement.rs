@@ -8,7 +8,7 @@ use crate::math::rotate_vec2;
 use crate::object_normal::{sample_object_normal, MeshNormalData};
 use crate::rng::SeededRng;
 use crate::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
-use crate::types::{PaintLayer, StrokePath, StrokeParams, BASE_RESOLUTION};
+use crate::types::{PaintLayer, StrokeParams, StrokePath, BASE_RESOLUTION};
 use crate::uv_mask::UvMask;
 
 /// Check cancellation token, returning early if set.
@@ -68,8 +68,7 @@ fn generate_seeds_poisson_in(
             let dist = min_dist + rng.next_f32() * min_dist;
             let candidate = center + Vec2::new(angle.cos(), angle.sin()) * dist;
 
-            if candidate.x < lo.x || candidate.x > hi.x
-                || candidate.y < lo.y || candidate.y > hi.y
+            if candidate.x < lo.x || candidate.x > hi.x || candidate.y < lo.y || candidate.y > hi.y
             {
                 continue;
             }
@@ -181,7 +180,11 @@ pub fn trace_streamline(
 
         // UV boundary check
         let (uv_lo, uv_hi) = uv_bounds;
-        if next_pos.x < uv_lo.x || next_pos.x > uv_hi.x || next_pos.y < uv_lo.y || next_pos.y > uv_hi.y {
+        if next_pos.x < uv_lo.x
+            || next_pos.x > uv_hi.x
+            || next_pos.y < uv_lo.y
+            || next_pos.y > uv_hi.y
+        {
             break;
         }
 
@@ -329,7 +332,10 @@ pub fn generate_paths_cancellable(
         let (mlo, mhi) = m.aabb();
         (
             Vec2::new((mlo.x - margin).max(-margin), (mlo.y - margin).max(-margin)),
-            Vec2::new((mhi.x + margin).min(1.0 + margin), (mhi.y + margin).min(1.0 + margin)),
+            Vec2::new(
+                (mhi.x + margin).min(1.0 + margin),
+                (mhi.y + margin).min(1.0 + margin),
+            ),
         )
     } else {
         (Vec2::splat(-margin), Vec2::splat(1.0 + margin))
@@ -366,10 +372,7 @@ pub fn generate_paths_cancellable(
             mask,
         ) {
             if let Some(clipped) = clip_path_to_uv(path) {
-                let length: f32 = clipped
-                    .windows(2)
-                    .map(|w| (w[1] - w[0]).length())
-                    .sum();
+                let length: f32 = clipped.windows(2).map(|w| (w[1] - w[0]).length()).sum();
                 if length >= min_length {
                     raw_paths.push(clipped);
                 }
@@ -377,7 +380,12 @@ pub fn generate_paths_cancellable(
         }
     }
 
-    filter_overlapping_paths(&mut raw_paths, brush_width_uv, overlap_ratio, overlap_dist_factor);
+    filter_overlapping_paths(
+        &mut raw_paths,
+        brush_width_uv,
+        overlap_ratio,
+        overlap_dist_factor,
+    );
 
     // Sort paths by seed point y-coordinate (top-to-bottom row order).
     // Critical for correct wet-on-wet compositing order in Phase 08.
@@ -408,7 +416,6 @@ fn clip_path_to_uv(path: Vec<Vec2>) -> Option<Vec<Vec2>> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,9 +441,7 @@ mod tests {
     #[test]
     fn seed_poisson_coverage() {
         let layer = make_layer();
-        let seeds = generate_seeds_poisson_in(
-            &layer.params, 512, Vec2::ZERO, Vec2::ONE, None,
-        );
+        let seeds = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None);
         // Poisson disk should produce a reasonable number of seeds
         assert!(
             seeds.len() > 50 && seeds.len() < 1000,
@@ -448,9 +453,7 @@ mod tests {
     #[test]
     fn seeds_poisson_within_bounds() {
         let layer = make_layer();
-        let seeds = generate_seeds_poisson_in(
-            &layer.params, 512, Vec2::ZERO, Vec2::ONE, None,
-        );
+        let seeds = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None);
         assert!(!seeds.is_empty());
         for seed in &seeds {
             assert!(
@@ -465,12 +468,8 @@ mod tests {
     #[test]
     fn seed_poisson_determinism() {
         let layer = make_layer();
-        let seeds1 = generate_seeds_poisson_in(
-            &layer.params, 512, Vec2::ZERO, Vec2::ONE, None,
-        );
-        let seeds2 = generate_seeds_poisson_in(
-            &layer.params, 512, Vec2::ZERO, Vec2::ONE, None,
-        );
+        let seeds1 = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None);
+        let seeds2 = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None);
         assert_eq!(seeds1.len(), seeds2.len());
         for (a, b) in seeds1.iter().zip(seeds2.iter()) {
             assert_eq!(a.x, b.x);
@@ -483,9 +482,8 @@ mod tests {
         let layer = make_layer();
         let resolution = 512u32;
         let min_dist = layer.params.brush_width / resolution as f32 * layer.params.stroke_spacing;
-        let seeds = generate_seeds_poisson_in(
-            &layer.params, resolution, Vec2::ZERO, Vec2::ONE, None,
-        );
+        let seeds =
+            generate_seeds_poisson_in(&layer.params, resolution, Vec2::ZERO, Vec2::ONE, None);
         // Verify all pairs respect minimum distance
         for (i, a) in seeds.iter().enumerate() {
             for b in &seeds[i + 1..] {
@@ -493,7 +491,12 @@ mod tests {
                 assert!(
                     dist >= min_dist - 1e-6,
                     "seeds ({:.4},{:.4}) and ({:.4},{:.4}) are {:.6} apart, min_dist = {:.6}",
-                    a.x, a.y, b.x, b.y, dist, min_dist
+                    a.x,
+                    a.y,
+                    b.x,
+                    b.y,
+                    dist,
+                    min_dist
                 );
             }
         }
@@ -509,7 +512,17 @@ mod tests {
 
         let field = DirectionField::new(&layer.guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
+        let path = trace_streamline(
+            Vec2::new(0.5, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng,
+            None,
+            None,
+            (Vec2::ZERO, Vec2::ONE),
+            None,
+        );
 
         let path = path.expect("path should exist");
         for p in &path {
@@ -535,7 +548,17 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
+        let path = trace_streamline(
+            Vec2::new(0.5, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng,
+            None,
+            None,
+            (Vec2::ZERO, Vec2::ONE),
+            None,
+        );
 
         let path = path.expect("path should exist");
         for p in &path {
@@ -564,7 +587,17 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.9, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
+        let path = trace_streamline(
+            Vec2::new(0.9, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng,
+            None,
+            None,
+            (Vec2::ZERO, Vec2::ONE),
+            None,
+        );
 
         if let Some(path) = path {
             let last = path.last().unwrap();
@@ -594,7 +627,17 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
+        let path = trace_streamline(
+            Vec2::new(0.5, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng,
+            None,
+            None,
+            (Vec2::ZERO, Vec2::ONE),
+            None,
+        );
 
         // min_length = 100/512 ≈ 0.195 UV, but max target ≈ 0.002 UV
         assert!(path.is_none(), "short path should be filtered out");
@@ -623,15 +666,15 @@ mod tests {
                 (Vec2::ZERO, Vec2::ONE),
                 None,
             ) {
-                let len: f32 = path
-                    .windows(2)
-                    .map(|w| (w[1] - w[0]).length())
-                    .sum();
+                let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
                 lengths.push(len);
             }
         }
 
-        assert!(lengths.len() >= 20, "need enough paths to check distribution");
+        assert!(
+            lengths.len() >= 20,
+            "need enough paths to check distribution"
+        );
         let min_len = lengths.iter().cloned().fold(f32::MAX, f32::min);
         let max_len = lengths.iter().cloned().fold(f32::MIN, f32::max);
         assert!(
@@ -682,7 +725,11 @@ mod tests {
             .collect();
         let mut paths = vec![p1, p2];
         filter_overlapping_paths(&mut paths, brush_width_uv, 0.7, 0.3);
-        assert_eq!(paths.len(), 2, "partially overlapping paths should both be kept");
+        assert_eq!(
+            paths.len(),
+            2,
+            "partially overlapping paths should both be kept"
+        );
     }
 
     // ── Full Pipeline Tests ──
@@ -753,11 +800,7 @@ mod tests {
                         if dx * dx + dy * dy <= r * r {
                             let x = px + dx;
                             let y = py + dy;
-                            if x >= 0
-                                && x < resolution as i32
-                                && y >= 0
-                                && y < resolution as i32
-                            {
+                            if x >= 0 && x < resolution as i32 && y >= 0 && y < resolution as i32 {
                                 covered[(y * resolution as i32 + x) as usize] = true;
                             }
                         }
@@ -828,7 +871,17 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
+        let path = trace_streamline(
+            Vec2::new(0.2, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng,
+            None,
+            None,
+            (Vec2::ZERO, Vec2::ONE),
+            None,
+        );
 
         let path = path.expect("curved path should exist");
         assert!(path.len() > 10, "path should have enough points");
@@ -867,7 +920,17 @@ mod tests {
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);
-        let path = trace_streamline(Vec2::new(0.3, 0.5), &field, &params, 512, &mut rng, None, None, (Vec2::ZERO, Vec2::ONE), None);
+        let path = trace_streamline(
+            Vec2::new(0.3, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng,
+            None,
+            None,
+            (Vec2::ZERO, Vec2::ONE),
+            None,
+        );
 
         if let Some(path) = path {
             for w in path.windows(3) {
@@ -885,11 +948,7 @@ mod tests {
 
     // ── Visual Inspection Tests ──
 
-    fn draw_paths_to_png(
-        paths: &[StrokePath],
-        resolution: u32,
-        filename: &str,
-    ) {
+    fn draw_paths_to_png(paths: &[StrokePath], resolution: u32, filename: &str) {
         let res = resolution as usize;
         let mut img = vec![40u8; res * res * 3]; // dark gray background
 
@@ -916,14 +975,7 @@ mod tests {
         }
 
         let path = crate::test_module_output_dir("path_placement").join(filename);
-        image::save_buffer(
-            &path,
-            &img,
-            resolution,
-            resolution,
-            image::ColorType::Rgb8,
-        )
-        .unwrap();
+        image::save_buffer(&path, &img, resolution, resolution, image::ColorType::Rgb8).unwrap();
         eprintln!("Wrote visual test: {}", path.display());
     }
 
@@ -1049,8 +1101,7 @@ mod tests {
         }
 
         let path = crate::test_module_output_dir("path_placement").join(filename);
-        image::save_buffer(&path, &img, resolution, resolution, image::ColorType::Rgb8)
-            .unwrap();
+        image::save_buffer(&path, &img, resolution, resolution, image::ColorType::Rgb8).unwrap();
         eprintln!("Wrote visual test: {}", path.display());
     }
 
@@ -1067,10 +1118,10 @@ mod tests {
         let mut tex_data = Vec::with_capacity(128);
         for i in 0..128 {
             tex_data.push(match i / 32 {
-                0 => crate::types::Color::rgb(0.85, 0.2, 0.15),  // red
-                1 => crate::types::Color::rgb(0.15, 0.7, 0.2),   // green
+                0 => crate::types::Color::rgb(0.85, 0.2, 0.15), // red
+                1 => crate::types::Color::rgb(0.15, 0.7, 0.2),  // green
                 2 => crate::types::Color::rgb(0.15, 0.25, 0.85), // blue
-                _ => crate::types::Color::rgb(0.9, 0.8, 0.15),   // yellow
+                _ => crate::types::Color::rgb(0.9, 0.8, 0.15),  // yellow
             });
         }
         let tex_ref = ColorTextureRef {
@@ -1089,14 +1140,12 @@ mod tests {
                 color_break_threshold: None,
                 ..StrokeParams::default()
             },
-            guides: vec![
-                Guide {
-                    position: Vec2::new(0.5, 0.5),
-                    direction: Vec2::X,
-                    influence: 1.0,
-                    ..Guide::default()
-                },
-            ],
+            guides: vec![Guide {
+                position: Vec2::new(0.5, 0.5),
+                direction: Vec2::X,
+                influence: 1.0,
+                ..Guide::default()
+            }],
         };
         let mut layer_on = layer_off.clone();
         layer_on.params.color_break_threshold = Some(0.08);
@@ -1111,10 +1160,20 @@ mod tests {
         );
 
         draw_paths_on_texture(
-            &paths_off, &tex_data, 128, 1, resolution, "color_break_off.png",
+            &paths_off,
+            &tex_data,
+            128,
+            1,
+            resolution,
+            "color_break_off.png",
         );
         draw_paths_on_texture(
-            &paths_on, &tex_data, 128, 1, resolution, "color_break_on.png",
+            &paths_on,
+            &tex_data,
+            128,
+            1,
+            resolution,
+            "color_break_on.png",
         );
 
         assert!(!paths_off.is_empty());
@@ -1146,10 +1205,7 @@ mod tests {
                 (Vec2::ZERO, Vec2::ONE),
                 None,
             ) {
-                let len: f32 = path
-                    .windows(2)
-                    .map(|w| (w[1] - w[0]).length())
-                    .sum();
+                let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
                 lengths.push(len);
             }
         }
@@ -1188,10 +1244,7 @@ mod tests {
                 (Vec2::ZERO, Vec2::ONE),
                 None,
             ) {
-                let len: f32 = path
-                    .windows(2)
-                    .map(|w| (w[1] - w[0]).length())
-                    .sum();
+                let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
                 assert!(
                     len <= max_length_uv + 0.005,
                     "path {i} length {len:.4} exceeds max {max_length_uv:.4}"
@@ -1212,8 +1265,28 @@ mod tests {
 
         let mut rng1 = SeededRng::new(99);
         let mut rng2 = SeededRng::new(99);
-        let path1 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE), None);
-        let path2 = trace_streamline(Vec2::new(0.5, 0.5), &field, &params, 512, &mut rng2, None, None, (Vec2::ZERO, Vec2::ONE), None);
+        let path1 = trace_streamline(
+            Vec2::new(0.5, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng1,
+            None,
+            None,
+            (Vec2::ZERO, Vec2::ONE),
+            None,
+        );
+        let path2 = trace_streamline(
+            Vec2::new(0.5, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng2,
+            None,
+            None,
+            (Vec2::ZERO, Vec2::ONE),
+            None,
+        );
 
         match (path1, path2) {
             (Some(p1), Some(p2)) => {
@@ -1254,10 +1327,7 @@ mod tests {
                     (Vec2::ZERO, Vec2::ONE),
                     None,
                 ) {
-                    let len: f32 = path
-                        .windows(2)
-                        .map(|w| (w[1] - w[0]).length())
-                        .sum();
+                    let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
                     lengths.push(len);
                 }
             }
@@ -1307,8 +1377,17 @@ mod tests {
 
         let mut rng1 = SeededRng::new(42);
         let mut rng2 = SeededRng::new(42);
-        let path_no_tex =
-            trace_streamline(Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE), None);
+        let path_no_tex = trace_streamline(
+            Vec2::new(0.1, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng1,
+            None,
+            None,
+            (Vec2::ZERO, Vec2::ONE),
+            None,
+        );
         let path_with_tex = trace_streamline(
             Vec2::new(0.1, 0.5),
             &field,
@@ -1323,7 +1402,11 @@ mod tests {
 
         match (path_no_tex, path_with_tex) {
             (Some(a), Some(b)) => {
-                assert_eq!(a.len(), b.len(), "threshold=None should not affect path length");
+                assert_eq!(
+                    a.len(),
+                    b.len(),
+                    "threshold=None should not affect path length"
+                );
             }
             (None, None) => {}
             _ => panic!("threshold=None should not affect path existence"),
@@ -1648,11 +1731,25 @@ mod tests {
         let mut rng1 = SeededRng::new(42);
         let mut rng2 = SeededRng::new(42);
         let p1 = trace_streamline(
-            Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng1, None, Some(&nd), (Vec2::ZERO, Vec2::ONE),
+            Vec2::new(0.2, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng1,
+            None,
+            Some(&nd),
+            (Vec2::ZERO, Vec2::ONE),
             None,
         );
         let p2 = trace_streamline(
-            Vec2::new(0.2, 0.5), &field, &params, 512, &mut rng2, None, Some(&nd), (Vec2::ZERO, Vec2::ONE),
+            Vec2::new(0.2, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng2,
+            None,
+            Some(&nd),
+            (Vec2::ZERO, Vec2::ONE),
             None,
         );
 
@@ -1689,18 +1786,33 @@ mod tests {
         let mut rng1 = SeededRng::new(42);
         let mut rng2 = SeededRng::new(42);
         let path_no_nd = trace_streamline(
-            Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng1, None, None, (Vec2::ZERO, Vec2::ONE),
+            Vec2::new(0.1, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng1,
+            None,
+            None,
+            (Vec2::ZERO, Vec2::ONE),
             None,
         );
         let path_with_nd = trace_streamline(
-            Vec2::new(0.1, 0.5), &field, &params, 512, &mut rng2, None, Some(&nd), (Vec2::ZERO, Vec2::ONE),
+            Vec2::new(0.1, 0.5),
+            &field,
+            &params,
+            512,
+            &mut rng2,
+            None,
+            Some(&nd),
+            (Vec2::ZERO, Vec2::ONE),
             None,
         );
 
         match (path_no_nd, path_with_nd) {
             (Some(a), Some(b)) => {
                 assert_eq!(
-                    a.len(), b.len(),
+                    a.len(),
+                    b.len(),
                     "threshold=None should not affect path length"
                 );
             }
@@ -1789,8 +1901,7 @@ mod tests {
         }
 
         let path = crate::test_module_output_dir("path_placement").join(filename);
-        image::save_buffer(&path, &img, resolution, resolution, image::ColorType::Rgb8)
-            .unwrap();
+        image::save_buffer(&path, &img, resolution, resolution, image::ColorType::Rgb8).unwrap();
         eprintln!("Wrote visual test: {}", path.display());
     }
 
@@ -1959,7 +2070,11 @@ mod tests {
         eprintln!("  A+B (relaxed): {} paths", paths_ab.len());
 
         let cases: &[(&[StrokePath], &str, &str)] = &[
-            (&paths_base, "density_1_baseline.png", "BASELINE (Poisson+overscan)"),
+            (
+                &paths_base,
+                "density_1_baseline.png",
+                "BASELINE (Poisson+overscan)",
+            ),
             (&paths_a, "density_2_A_tight_spacing.png", "A: spacing=0.5"),
             (&paths_ab, "density_3_AB_relaxed.png", "A+B: spacing+filter"),
         ];

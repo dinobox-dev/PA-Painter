@@ -139,7 +139,9 @@ impl GenerationManager {
         let cancel = Arc::clone(&self.cancel);
         let progress = Arc::clone(&self.progress);
         let stage = Arc::clone(&self.stage);
-        self.handle = Some(thread::spawn(move || run_pipeline(input, &cancel, &progress, &stage)));
+        self.handle = Some(thread::spawn(move || {
+            run_pipeline(input, &cancel, &progress, &stage)
+        }));
     }
 }
 
@@ -148,7 +150,12 @@ fn set_progress(progress: &AtomicU32, value: f32) {
     progress.store(value.to_bits(), Ordering::Relaxed);
 }
 
-fn run_pipeline(input: GenInput, cancel: &AtomicBool, progress: &AtomicU32, stage: &AtomicU8) -> Option<GenResult> {
+fn run_pipeline(
+    input: GenInput,
+    cancel: &AtomicBool,
+    progress: &AtomicU32,
+    stage: &AtomicU8,
+) -> Option<GenResult> {
     let start = Instant::now();
 
     // ── Progress weight model ──
@@ -158,14 +165,14 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool, progress: &AtomicU32, stag
     // while fixed stages get meaningful weight when n is small.
     let n = input.layers.len().max(1) as f32;
     let total = 4.0 + 4.0 * n;
-    let p_normals   = 0.0;                        // start of normals
-    let p_masks     = 1.0 / total;                 // start of masks
-    let p_paths     = 2.0 / total;                 // start of paths
-    let p_composite = (2.0 + 2.0 * n) / total;    // start of compositing
-    let p_normal_map = (2.0 + 4.0 * n) / total;   // start of normal map
-    let p_blending  = (3.0 + 4.0 * n) / total;    // start of blending
-    let path_span = p_composite - p_paths;         // width of paths stage
-    let comp_span = p_normal_map - p_composite;    // width of compositing stage
+    let p_normals = 0.0; // start of normals
+    let p_masks = 1.0 / total; // start of masks
+    let p_paths = 2.0 / total; // start of paths
+    let p_composite = (2.0 + 2.0 * n) / total; // start of compositing
+    let p_normal_map = (2.0 + 4.0 * n) / total; // start of normal map
+    let p_blending = (3.0 + 4.0 * n) / total; // start of blending
+    let path_span = p_composite - p_paths; // width of paths stage
+    let comp_span = p_normal_map - p_composite; // width of compositing stage
 
     // ── Stage 1: Mesh normals ──
 
@@ -185,14 +192,13 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool, progress: &AtomicU32, stag
             None
         };
 
-    let normal_data: Option<&MeshNormalData> =
-        if let Some(ref nd) = fresh_normals {
-            Some(nd)
-        } else if input.settings.normal_mode == NormalMode::DepictedForm {
-            input.cached_normals.as_ref().map(|(_, nd)| nd.as_ref())
-        } else {
-            None
-        };
+    let normal_data: Option<&MeshNormalData> = if let Some(ref nd) = fresh_normals {
+        Some(nd)
+    } else if input.settings.normal_mode == NormalMode::DepictedForm {
+        input.cached_normals.as_ref().map(|(_, nd)| nd.as_ref())
+    } else {
+        None
+    };
 
     if cancel.load(Ordering::Relaxed) {
         return None;
@@ -215,8 +221,7 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool, progress: &AtomicU32, stag
                         .iter()
                         .find(|g| g.name == *group_name)
                         .map(|group| {
-                            let mut mask =
-                                UvMask::from_mesh_group(mesh, group, input.resolution);
+                            let mut mask = UvMask::from_mesh_group(mesh, group, input.resolution);
                             mask.dilate(2);
                             mask
                         })
@@ -259,8 +264,14 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool, progress: &AtomicU32, stag
                 height: base_color.tex_height,
             });
             let mask = mask_refs.get(layer_index).and_then(|m| *m);
-            let result =
-                generate_paths_cancellable(layer, layer_index as u32, tex_ref.as_ref(), normal_data, mask, Some(cancel));
+            let result = generate_paths_cancellable(
+                layer,
+                layer_index as u32,
+                tex_ref.as_ref(),
+                normal_data,
+                mask,
+                Some(cancel),
+            );
             let done = completed_paths.fetch_add(1, Ordering::Relaxed) + 1;
             set_progress(progress, p_paths + path_span * done as f32 / n);
             result
@@ -304,7 +315,10 @@ fn run_pipeline(input: GenInput, cancel: &AtomicBool, progress: &AtomicU32, stag
             normal_data,
             mask,
         );
-        set_progress(progress, p_composite + comp_span * (sorted_idx + 1) as f32 / n);
+        set_progress(
+            progress,
+            p_composite + comp_span * (sorted_idx + 1) as f32 / n,
+        );
 
         if cancel.load(Ordering::Relaxed) {
             return None;

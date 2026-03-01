@@ -17,18 +17,18 @@ pub mod error;
 pub mod test_util;
 
 pub mod asset_io; // Phase 00
-pub mod math; // Phase 01
-pub mod pressure; // Phase 01
-pub mod rng; // Phase 01
-pub mod types; // Phase 01
 pub mod brush_profile; // Phase 02
-pub mod stroke_height; // Phase 02
-pub mod direction_field; // Phase 03
-pub mod path_placement; // Phase 05
-pub mod stroke_color; // Phase 07
-pub mod object_normal; // Phase 04 (object-space normals)
-pub mod uv_mask; // UV mask for vertex group painting
 pub mod compositing; // Phase 08
-pub mod output; // Phase 09
+pub mod direction_field; // Phase 03
 pub mod glb_export; // Phase 09 (3D preview)
-pub mod project; // Phase 10
+pub mod math; // Phase 01
+pub mod object_normal; // Phase 04 (object-space normals)
+pub mod output; // Phase 09
+pub mod path_placement; // Phase 05
+pub mod pressure; // Phase 01
+pub mod project;
+pub mod rng; // Phase 01
+pub mod stroke_color; // Phase 07
+pub mod stroke_height; // Phase 02
+pub mod types; // Phase 01
+pub mod uv_mask; // UV mask for vertex group painting // Phase 10

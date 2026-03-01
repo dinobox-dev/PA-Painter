@@ -84,8 +84,7 @@ pub fn sample_bilinear_f32(data: &[f32], width: u32, height: u32, uv: Vec2) -> f
     let v01 = data[(y1c * width + x0c) as usize];
     let v11 = data[(y1c * width + x1c) as usize];
 
-    v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy)
-        + v01 * (1.0 - fx) * fy + v11 * fx * fy
+    v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy) + v01 * (1.0 - fx) * fy + v11 * fx * fy
 }
 
 /// Linearly interpolate a 1D array at fractional index.

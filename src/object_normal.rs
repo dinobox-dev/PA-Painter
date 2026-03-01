@@ -46,8 +46,16 @@ pub fn compute_mesh_normal_data(mesh: &LoadedMesh, resolution: u32) -> MeshNorma
             uv1,
             uv2,
             [vertex_normals[i0], vertex_normals[i1], vertex_normals[i2]],
-            [vertex_tangents[i0], vertex_tangents[i1], vertex_tangents[i2]],
-            [vertex_bitangents[i0], vertex_bitangents[i1], vertex_bitangents[i2]],
+            [
+                vertex_tangents[i0],
+                vertex_tangents[i1],
+                vertex_tangents[i2],
+            ],
+            [
+                vertex_bitangents[i0],
+                vertex_bitangents[i1],
+                vertex_bitangents[i2],
+            ],
             resolution,
             &mut object_normals,
             &mut tangents,
@@ -67,7 +75,8 @@ pub fn compute_mesh_normal_data(mesh: &LoadedMesh, resolution: u32) -> MeshNorma
                 tangents[i] = (t - n.dot(t) * object_normals[i]).normalize_or_zero();
             }
             if b.length_squared() > 1e-12 {
-                bitangents[i] = (b - object_normals[i].dot(b) * object_normals[i]
+                bitangents[i] = (b
+                    - object_normals[i].dot(b) * object_normals[i]
                     - tangents[i].dot(b) * tangents[i])
                     .normalize_or_zero();
             }
@@ -222,10 +231,7 @@ fn compute_triangle_tbn(
     let t = (e1 * duv2.y - e2 * duv1.y) * inv_det;
     let b = (e2 * duv1.x - e1 * duv2.x) * inv_det;
 
-    (
-        t.normalize_or_zero(),
-        b.normalize_or_zero(),
-    )
+    (t.normalize_or_zero(), b.normalize_or_zero())
 }
 
 /// Barycentric coordinates for point p in triangle (a, b, c).
@@ -286,10 +292,7 @@ fn rasterize_triangle_uv(
 
     for py in py_min..=py_max {
         for px in px_min..=px_max {
-            let uv = Vec2::new(
-                (px as f32 + 0.5) / res_f,
-                (py as f32 + 0.5) / res_f,
-            );
+            let uv = Vec2::new((px as f32 + 0.5) / res_f, (py as f32 + 0.5) / res_f);
 
             let (u, v, w) = barycentric(uv, uv0, uv1, uv2);
 
@@ -367,7 +370,9 @@ mod tests {
             assert!(
                 (n.x).abs() < EPS && (n.y).abs() < EPS && (n.z - 1.0).abs() < EPS,
                 "expected +Z normal, got ({:.4}, {:.4}, {:.4})",
-                n.x, n.y, n.z
+                n.x,
+                n.y,
+                n.z
             );
         }
     }
@@ -382,7 +387,9 @@ mod tests {
             assert!(
                 (n.z - 1.0).abs() < EPS,
                 "flat quad: all normals should be +Z, got ({:.4}, {:.4}, {:.4})",
-                n.x, n.y, n.z
+                n.x,
+                n.y,
+                n.z
             );
         }
     }
@@ -404,12 +411,16 @@ mod tests {
         assert!(
             (t.x - 1.0).abs() < EPS && t.y.abs() < EPS && t.z.abs() < EPS,
             "expected T=X, got ({:.4}, {:.4}, {:.4})",
-            t.x, t.y, t.z
+            t.x,
+            t.y,
+            t.z
         );
         assert!(
             b.x.abs() < EPS && (b.y - 1.0).abs() < EPS && b.z.abs() < EPS,
             "expected B=Y, got ({:.4}, {:.4}, {:.4})",
-            b.x, b.y, b.z
+            b.x,
+            b.y,
+            b.z
         );
     }
 
@@ -550,7 +561,9 @@ mod tests {
         assert!(
             (n.z - 1.0).abs() < 0.1,
             "center of flat quad should have +Z normal, got ({:.4}, {:.4}, {:.4})",
-            n.x, n.y, n.z
+            n.x,
+            n.y,
+            n.z
         );
     }
 
@@ -570,7 +583,8 @@ mod tests {
             assert!(
                 n.length_squared() > 0.5,
                 "boundary sample at ({:.2},{:.2}) should have valid normal",
-                uv.x, uv.y
+                uv.x,
+                uv.y
             );
         }
     }
@@ -722,8 +736,12 @@ mod tests {
     #[test]
     fn visual_depicted_form_normal_map() {
         use crate::compositing::composite_all;
-        use crate::output::{export_normal_png, generate_normal_map, generate_normal_map_depicted_form};
-        use crate::types::{BaseColorSource, Guide, NormalMode, OutputSettings, PaintLayer, StrokeParams};
+        use crate::output::{
+            export_normal_png, generate_normal_map, generate_normal_map_depicted_form,
+        };
+        use crate::types::{
+            BaseColorSource, Guide, NormalMode, OutputSettings, PaintLayer, StrokeParams,
+        };
 
         let fixtures = crate::test_fixtures_dir();
         let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
@@ -751,26 +769,49 @@ mod tests {
 
         let solid = crate::types::Color::rgb(0.5, 0.4, 0.3);
         let maps = composite_all(
-            &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, Some(&nd), &[],
+            &[layer.clone()],
+            res,
+            &BaseColorSource::solid(solid),
+            &settings,
+            Some(&nd),
+            &[],
         );
 
         let out_dir = crate::test_module_output_dir("object_normal");
 
         // SurfacePaint normal map (tangent-space, for comparison)
-        let normals_surface = generate_normal_map(&maps.gradient_x, &maps.gradient_y, res, settings.normal_strength);
-        export_normal_png(&normals_surface, res, &out_dir.join("surface_paint_normal.png"))
-            .expect("save surface_paint_normal.png");
+        let normals_surface = generate_normal_map(
+            &maps.gradient_x,
+            &maps.gradient_y,
+            res,
+            settings.normal_strength,
+        );
+        export_normal_png(
+            &normals_surface,
+            res,
+            &out_dir.join("surface_paint_normal.png"),
+        )
+        .expect("save surface_paint_normal.png");
 
         // DepictedForm normal map (tangent-space)
         let normals_depicted = generate_normal_map_depicted_form(
-            &maps.gradient_x, &maps.gradient_y, &nd, &maps.object_normal, res, settings.normal_strength,
+            &maps.gradient_x,
+            &maps.gradient_y,
+            &nd,
+            &maps.object_normal,
+            res,
+            settings.normal_strength,
         );
-        export_normal_png(&normals_depicted, res, &out_dir.join("depicted_form_normal.png"))
-            .expect("save depicted_form_normal.png");
+        export_normal_png(
+            &normals_depicted,
+            res,
+            &out_dir.join("depicted_form_normal.png"),
+        )
+        .expect("save depicted_form_normal.png");
 
         // Three-point lighting: key + fill + rim covers all 6 cube faces.
         let lights: [(Vec3, f32); 3] = [
-            (Vec3::new(1.0, 1.0, 1.0).normalize(),  0.45), // key  (+X,+Y,+Z faces)
+            (Vec3::new(1.0, 1.0, 1.0).normalize(), 0.45), // key  (+X,+Y,+Z faces)
             (Vec3::new(-1.0, 0.0, 0.5).normalize(), 0.30), // fill (-X faces)
             (Vec3::new(0.0, -1.0, 0.3).normalize(), 0.25), // rim  (-Y faces)
         ];
@@ -787,7 +828,8 @@ mod tests {
 
         // Shared Lambert helper: multi-light + ambient
         let lambert = |obj_n: Vec3| -> f32 {
-            let diffuse: f32 = lights.iter()
+            let diffuse: f32 = lights
+                .iter()
                 .map(|(dir, intensity)| obj_n.dot(*dir).max(0.0) * intensity)
                 .sum();
             (ambient + diffuse).clamp(0.0, 1.0)
@@ -810,33 +852,41 @@ mod tests {
         let depicted_lambert_pixels: Vec<u8> = normals_depicted
             .iter()
             .enumerate()
-            .map(|(i, n)| {
-                match reconstruct(i, n) {
-                    Some(obj_n) => (lambert(obj_n) * 255.0) as u8,
-                    None => 0u8,
-                }
+            .map(|(i, n)| match reconstruct(i, n) {
+                Some(obj_n) => (lambert(obj_n) * 255.0) as u8,
+                None => 0u8,
             })
             .collect();
 
         let path = out_dir.join("depicted_form_lambert.png");
-        image::save_buffer(&path, &depicted_lambert_pixels, res, res, image::ColorType::L8)
-            .expect("save depicted_form_lambert.png");
+        image::save_buffer(
+            &path,
+            &depicted_lambert_pixels,
+            res,
+            res,
+            image::ColorType::L8,
+        )
+        .expect("save depicted_form_lambert.png");
 
         // === SurfacePaint Lambert (for A/B comparison) ===
         let surface_lambert_pixels: Vec<u8> = normals_surface
             .iter()
             .enumerate()
-            .map(|(i, n)| {
-                match reconstruct(i, n) {
-                    Some(obj_n) => (lambert(obj_n) * 255.0) as u8,
-                    None => 0u8,
-                }
+            .map(|(i, n)| match reconstruct(i, n) {
+                Some(obj_n) => (lambert(obj_n) * 255.0) as u8,
+                None => 0u8,
             })
             .collect();
 
         let path = out_dir.join("surface_paint_lambert.png");
-        image::save_buffer(&path, &surface_lambert_pixels, res, res, image::ColorType::L8)
-            .expect("save surface_paint_lambert.png");
+        image::save_buffer(
+            &path,
+            &surface_lambert_pixels,
+            res,
+            res,
+            image::ColorType::L8,
+        )
+        .expect("save surface_paint_lambert.png");
 
         // === Raw composited object-space normal RGB (diagnostic) ===
         let obj_normal_pixels: Vec<u8> = (0..(res * res) as usize)
@@ -861,11 +911,26 @@ mod tests {
             .expect("save depicted_obj_normal_rgb.png");
 
         eprintln!("=== Phase 4 Visual Outputs ===");
-        eprintln!("  {}/depicted_form_lambert.png    — DepictedForm: form + texture (KEY)", out_dir.display());
-        eprintln!("  {}/surface_paint_lambert.png    — SurfacePaint: texture only (compare)", out_dir.display());
-        eprintln!("  {}/depicted_form_normal.png     — DepictedForm tangent-space normal", out_dir.display());
-        eprintln!("  {}/surface_paint_normal.png     — SurfacePaint tangent-space normal", out_dir.display());
-        eprintln!("  {}/depicted_obj_normal_rgb.png  — raw composited stroke normals", out_dir.display());
+        eprintln!(
+            "  {}/depicted_form_lambert.png    — DepictedForm: form + texture (KEY)",
+            out_dir.display()
+        );
+        eprintln!(
+            "  {}/surface_paint_lambert.png    — SurfacePaint: texture only (compare)",
+            out_dir.display()
+        );
+        eprintln!(
+            "  {}/depicted_form_normal.png     — DepictedForm tangent-space normal",
+            out_dir.display()
+        );
+        eprintln!(
+            "  {}/surface_paint_normal.png     — SurfacePaint tangent-space normal",
+            out_dir.display()
+        );
+        eprintln!(
+            "  {}/depicted_obj_normal_rgb.png  — raw composited stroke normals",
+            out_dir.display()
+        );
     }
 
     /// INSPECT: Normal break threshold ON vs OFF on a real cube mesh.
@@ -874,8 +939,12 @@ mod tests {
     #[test]
     fn visual_normal_break_comparison() {
         use crate::compositing::composite_all;
-        use crate::output::{generate_normal_map_depicted_form, normalize_height_map, export_normal_png};
-        use crate::types::{BaseColorSource, Guide, NormalMode, OutputSettings, PaintLayer, StrokeParams};
+        use crate::output::{
+            export_normal_png, generate_normal_map_depicted_form, normalize_height_map,
+        };
+        use crate::types::{
+            BaseColorSource, Guide, NormalMode, OutputSettings, PaintLayer, StrokeParams,
+        };
 
         let fixtures = crate::test_fixtures_dir();
         let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
@@ -910,17 +979,27 @@ mod tests {
 
         let base_color = BaseColorSource::solid(solid);
         let maps_off = composite_all(
-            &[base_layer.clone()], res, &base_color, &settings, Some(&nd), &[],
+            &[base_layer.clone()],
+            res,
+            &base_color,
+            &settings,
+            Some(&nd),
+            &[],
         );
         let maps_on = composite_all(
-            &[layer_on.clone()], res, &base_color, &settings, Some(&nd), &[],
+            &[layer_on.clone()],
+            res,
+            &base_color,
+            &settings,
+            Some(&nd),
+            &[],
         );
 
         let out_dir = crate::test_module_output_dir("object_normal");
 
         // Three-point lighting (same as depicted_form test)
         let lights: [(Vec3, f32); 3] = [
-            (Vec3::new(1.0, 1.0, 1.0).normalize(),  0.45),
+            (Vec3::new(1.0, 1.0, 1.0).normalize(), 0.45),
             (Vec3::new(-1.0, 0.0, 0.5).normalize(), 0.30),
             (Vec3::new(0.0, -1.0, 0.3).normalize(), 0.25),
         ];
@@ -935,7 +1014,8 @@ mod tests {
         };
 
         let lambert = |obj_n: Vec3| -> f32 {
-            let diffuse: f32 = lights.iter()
+            let diffuse: f32 = lights
+                .iter()
                 .map(|(dir, intensity)| obj_n.dot(*dir).max(0.0) * intensity)
                 .sum();
             (ambient + diffuse).clamp(0.0, 1.0)
@@ -960,16 +1040,23 @@ mod tests {
         ] {
             let normalized_height = normalize_height_map(&maps.height);
             let normals = generate_normal_map_depicted_form(
-                &maps.gradient_x, &maps.gradient_y, &nd, &maps.object_normal, res, settings.normal_strength,
+                &maps.gradient_x,
+                &maps.gradient_y,
+                &nd,
+                &maps.object_normal,
+                res,
+                settings.normal_strength,
             );
 
             // Lambert shading
-            let lambert_pixels: Vec<u8> = normals.iter().enumerate().map(|(i, n)| {
-                match reconstruct(i, n) {
+            let lambert_pixels: Vec<u8> = normals
+                .iter()
+                .enumerate()
+                .map(|(i, n)| match reconstruct(i, n) {
                     Some(obj_n) => (lambert(obj_n) * 255.0) as u8,
                     None => 0u8,
-                }
-            }).collect();
+                })
+                .collect();
 
             let path = out_dir.join(format!("{label}_lambert.png"));
             image::save_buffer(&path, &lambert_pixels, res, res, image::ColorType::L8)
@@ -980,20 +1067,22 @@ mod tests {
             export_normal_png(&normals, res, &path).expect("save normal");
 
             // Raw object-space stroke normals (diagnostic)
-            let obj_pixels: Vec<u8> = (0..(res * res) as usize).flat_map(|i| {
-                let sn = maps.object_normal[i];
-                let n = Vec3::new(sn[0], sn[1], sn[2]);
-                if n.length_squared() > 0.5 {
-                    let nn = n.normalize();
-                    [
-                        ((nn.x * 0.5 + 0.5) * 255.0) as u8,
-                        ((nn.y * 0.5 + 0.5) * 255.0) as u8,
-                        ((nn.z * 0.5 + 0.5) * 255.0) as u8,
-                    ]
-                } else {
-                    [0, 0, 0]
-                }
-            }).collect();
+            let obj_pixels: Vec<u8> = (0..(res * res) as usize)
+                .flat_map(|i| {
+                    let sn = maps.object_normal[i];
+                    let n = Vec3::new(sn[0], sn[1], sn[2]);
+                    if n.length_squared() > 0.5 {
+                        let nn = n.normalize();
+                        [
+                            ((nn.x * 0.5 + 0.5) * 255.0) as u8,
+                            ((nn.y * 0.5 + 0.5) * 255.0) as u8,
+                            ((nn.z * 0.5 + 0.5) * 255.0) as u8,
+                        ]
+                    } else {
+                        [0, 0, 0]
+                    }
+                })
+                .collect();
 
             let path = out_dir.join(format!("{label}_obj_normal_rgb.png"));
             image::save_buffer(&path, &obj_pixels, res, res, image::ColorType::Rgb8)
@@ -1001,13 +1090,25 @@ mod tests {
 
             // GLB 3D preview
             crate::glb_export::export_preview_glb(
-                &mesh, &maps.color, &normalized_height, &normals,
-                res, 0.05, &out_dir.join(format!("{label}.glb")),
-            ).expect("save GLB preview");
+                &mesh,
+                &maps.color,
+                &normalized_height,
+                &normals,
+                res,
+                0.05,
+                &out_dir.join(format!("{label}.glb")),
+            )
+            .expect("save GLB preview");
         }
 
         eprintln!("=== Normal Break Comparison ===");
-        eprintln!("  {}/normal_break_off_lambert.png  — no threshold (strokes cross faces)", out_dir.display());
-        eprintln!("  {}/normal_break_on_lambert.png   — threshold=0.5 (strokes stop at edges)", out_dir.display());
+        eprintln!(
+            "  {}/normal_break_off_lambert.png  — no threshold (strokes cross faces)",
+            out_dir.display()
+        );
+        eprintln!(
+            "  {}/normal_break_on_lambert.png   — threshold=0.5 (strokes stop at edges)",
+            out_dir.display()
+        );
     }
 }

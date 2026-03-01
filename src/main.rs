@@ -149,7 +149,9 @@ fn main() {
     let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = loaded_mesh {
         project.build_masks(mesh, resolution)
     } else {
-        (0..project.layers.iter().filter(|l| l.visible).count()).map(|_| None).collect()
+        (0..project.layers.iter().filter(|l| l.visible).count())
+            .map(|_| None)
+            .collect()
     };
     let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 
@@ -159,12 +161,7 @@ fn main() {
     // Generate (with path cache)
     eprintln!("Generating...");
     if project.cached_paths_if_valid().is_none() {
-        let paths = generate_all_paths(
-            &layers,
-            &base_color,
-            normal_data.as_ref(),
-            &mask_refs,
-        );
+        let paths = generate_all_paths(&layers, &base_color, normal_data.as_ref(), &mask_refs);
         project.set_cached_paths(paths);
     }
 
@@ -180,11 +177,17 @@ fn main() {
 
     // Export
     eprintln!("Exporting to: {}", output_dir.display());
-    export_all(&global, &project.settings, &output_dir, format, normal_data.as_ref())
-        .unwrap_or_else(|e| {
-            eprintln!("Error exporting: {e:?}");
-            process::exit(1);
-        });
+    export_all(
+        &global,
+        &project.settings,
+        &output_dir,
+        format,
+        normal_data.as_ref(),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("Error exporting: {e:?}");
+        process::exit(1);
+    });
 
     eprintln!("Done.");
 }

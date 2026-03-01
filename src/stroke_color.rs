@@ -380,7 +380,10 @@ mod tests {
                         bi as f32 / (steps - 1) as f32,
                     );
                     let rt = hsv_to_rgb(rgb_to_hsv(c));
-                    let err = (rt.r - c.r).abs().max((rt.g - c.g).abs()).max((rt.b - c.b).abs());
+                    let err = (rt.r - c.r)
+                        .abs()
+                        .max((rt.g - c.g).abs())
+                        .max((rt.b - c.b).abs());
                     if err > max_err {
                         max_err = err;
                         worst = c;
@@ -406,15 +409,18 @@ mod tests {
     fn hsv_near_hue_boundaries() {
         // Test colors near hue=0/1 boundary (red/magenta range)
         let boundary_colors = [
-            Color::rgb(1.0, 0.0, 0.01),  // just past red toward yellow... actually magenta
-            Color::rgb(1.0, 0.01, 0.0),  // just past red toward yellow
-            Color::rgb(0.99, 0.0, 1.0),  // near magenta
-            Color::rgb(1.0, 0.0, 0.99),  // near magenta
+            Color::rgb(1.0, 0.0, 0.01), // just past red toward yellow... actually magenta
+            Color::rgb(1.0, 0.01, 0.0), // just past red toward yellow
+            Color::rgb(0.99, 0.0, 1.0), // near magenta
+            Color::rgb(1.0, 0.0, 0.99), // near magenta
         ];
         for c in &boundary_colors {
             let hsv = rgb_to_hsv(*c);
             let rt = hsv_to_rgb(hsv);
-            let err = (rt.r - c.r).abs().max((rt.g - c.g).abs()).max((rt.b - c.b).abs());
+            let err = (rt.r - c.r)
+                .abs()
+                .max((rt.g - c.g).abs())
+                .max((rt.b - c.b).abs());
             assert!(
                 err < 1e-5,
                 "Hue boundary error: {:.8} for RGB({:.3}, {:.3}, {:.3}), HSV(h={:.5}, s={:.5}, v={:.5})",
@@ -430,12 +436,11 @@ mod tests {
             let v = i as f32 / 99.0;
             let c = Color::rgb(v, v + 0.001, v); // tiny green tint
             let rt = hsv_to_rgb(rgb_to_hsv(c));
-            let err = (rt.r - c.r).abs().max((rt.g - c.g).abs()).max((rt.b - c.b).abs());
-            assert!(
-                err < 1e-4,
-                "Low-sat error: {:.8} at v={:.3}",
-                err, v
-            );
+            let err = (rt.r - c.r)
+                .abs()
+                .max((rt.g - c.g).abs())
+                .max((rt.b - c.b).abs());
+            assert!(err < 1e-4, "Low-sat error: {:.8} at v={:.3}", err, v);
         }
     }
 
@@ -448,17 +453,25 @@ mod tests {
         // No blocky artifacts, no banding at texel boundaries.
         let tex = vec![
             // Row 0
-            Color::rgb(1.0, 0.0, 0.0), Color::rgb(1.0, 0.5, 0.0),
-            Color::rgb(1.0, 1.0, 0.0), Color::rgb(0.5, 1.0, 0.0),
+            Color::rgb(1.0, 0.0, 0.0),
+            Color::rgb(1.0, 0.5, 0.0),
+            Color::rgb(1.0, 1.0, 0.0),
+            Color::rgb(0.5, 1.0, 0.0),
             // Row 1
-            Color::rgb(0.0, 1.0, 0.0), Color::rgb(0.0, 1.0, 0.5),
-            Color::rgb(0.0, 1.0, 1.0), Color::rgb(0.0, 0.5, 1.0),
+            Color::rgb(0.0, 1.0, 0.0),
+            Color::rgb(0.0, 1.0, 0.5),
+            Color::rgb(0.0, 1.0, 1.0),
+            Color::rgb(0.0, 0.5, 1.0),
             // Row 2
-            Color::rgb(0.0, 0.0, 1.0), Color::rgb(0.5, 0.0, 1.0),
-            Color::rgb(1.0, 0.0, 1.0), Color::rgb(1.0, 0.0, 0.5),
+            Color::rgb(0.0, 0.0, 1.0),
+            Color::rgb(0.5, 0.0, 1.0),
+            Color::rgb(1.0, 0.0, 1.0),
+            Color::rgb(1.0, 0.0, 0.5),
             // Row 3
-            Color::rgb(0.2, 0.2, 0.2), Color::rgb(0.4, 0.4, 0.4),
-            Color::rgb(0.6, 0.6, 0.6), Color::rgb(1.0, 1.0, 1.0),
+            Color::rgb(0.2, 0.2, 0.2),
+            Color::rgb(0.4, 0.4, 0.4),
+            Color::rgb(0.6, 0.6, 0.6),
+            Color::rgb(1.0, 1.0, 1.0),
         ];
 
         let out_size = 256usize;
@@ -596,10 +609,7 @@ mod tests {
     fn bilinear_horizontal_gradient() {
         // 1D gradient: black→white across 4 pixels.
         // Sampled values should match linear interpolation exactly.
-        let tex = vec![
-            Color::rgb(0.0, 0.0, 0.0),
-            Color::rgb(1.0, 1.0, 1.0),
-        ];
+        let tex = vec![Color::rgb(0.0, 0.0, 0.0), Color::rgb(1.0, 1.0, 1.0)];
         for i in 0..=100 {
             let u = i as f32 / 100.0;
             let c = sample_bilinear(&tex, 2, 1, Vec2::new(u, 0.5));
@@ -618,13 +628,21 @@ mod tests {
     fn bilinear_symmetry() {
         // Symmetric texture → sampling at symmetric UVs should give same result
         let tex = vec![
-            Color::rgb(1.0, 0.0, 0.0), Color::rgb(1.0, 0.0, 0.0),
-            Color::rgb(0.0, 0.0, 1.0), Color::rgb(0.0, 0.0, 1.0),
+            Color::rgb(1.0, 0.0, 0.0),
+            Color::rgb(1.0, 0.0, 0.0),
+            Color::rgb(0.0, 0.0, 1.0),
+            Color::rgb(0.0, 0.0, 1.0),
         ];
         let left = sample_bilinear(&tex, 2, 2, Vec2::new(0.25, 0.5));
         let right = sample_bilinear(&tex, 2, 2, Vec2::new(0.75, 0.5));
-        assert!(approx_eq(left.r, right.r), "Symmetric texture not symmetric");
-        assert!(approx_eq(left.b, right.b), "Symmetric texture not symmetric");
+        assert!(
+            approx_eq(left.r, right.r),
+            "Symmetric texture not symmetric"
+        );
+        assert!(
+            approx_eq(left.b, right.b),
+            "Symmetric texture not symmetric"
+        );
     }
 
     // ── Float Comparison in HSV ──
@@ -673,11 +691,17 @@ mod tests {
         ];
         for c in &tricky {
             let rt = hsv_to_rgb(rgb_to_hsv(*c));
-            let err = (rt.r - c.r).abs().max((rt.g - c.g).abs()).max((rt.b - c.b).abs());
+            let err = (rt.r - c.r)
+                .abs()
+                .max((rt.g - c.g).abs())
+                .max((rt.b - c.b).abs());
             assert!(
                 err < 1e-3,
                 "Float comparison issue: err={:.8} for ({:.7}, {:.7}, {:.7})",
-                err, c.r, c.g, c.b
+                err,
+                c.r,
+                c.g,
+                c.b
             );
         }
     }

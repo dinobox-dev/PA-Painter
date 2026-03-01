@@ -39,10 +39,7 @@ impl UvMask {
 
             for py in py_min..=py_max {
                 for px in px_min..=px_max {
-                    let uv = Vec2::new(
-                        (px as f32 + 0.5) / res_f,
-                        (py as f32 + 0.5) / res_f,
-                    );
+                    let uv = Vec2::new((px as f32 + 0.5) / res_f, (py as f32 + 0.5) / res_f);
 
                     if point_in_triangle(uv, uv0, uv1, uv2) {
                         data[(py * resolution + px) as usize] = true;
@@ -76,11 +73,15 @@ impl UvMask {
                         }
                         let nx = px as i32 + dx;
                         let ny = py as i32 + dy;
-                        if nx >= 0 && nx < res as i32 && ny >= 0 && ny < res as i32
-                            && original[(ny as u32 * res + nx as u32) as usize] {
-                                self.data[(py * res + px) as usize] = true;
-                                break 'search;
-                            }
+                        if nx >= 0
+                            && nx < res as i32
+                            && ny >= 0
+                            && ny < res as i32
+                            && original[(ny as u32 * res + nx as u32) as usize]
+                        {
+                            self.data[(py * res + px) as usize] = true;
+                            break 'search;
+                        }
                     }
                 }
             }
@@ -235,7 +236,7 @@ mod tests {
 
         // On the hypotenuse (u + 2v ≈ 0.5 scaled), points near the edge
         assert!(mask.sample(Vec2::new(0.05, 0.05))); // clearly inside
-        assert!(!mask.sample(Vec2::new(0.9, 0.9)));   // clearly outside
+        assert!(!mask.sample(Vec2::new(0.9, 0.9))); // clearly outside
     }
 
     #[test]

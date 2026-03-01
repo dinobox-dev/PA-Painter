@@ -7,9 +7,7 @@ use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::asset_io::{linear_to_srgb, LoadedMesh};
-use crate::types::{
-    Layer, OutputSettings, PaintLayer, PresetLibrary, StrokePath,
-};
+use crate::types::{Layer, OutputSettings, PaintLayer, PresetLibrary, StrokePath};
 use crate::uv_mask::UvMask;
 
 /// Return the current UTC time as an ISO 8601 string (e.g. `"2026-02-27T14:30:00Z"`).
@@ -24,16 +22,37 @@ pub fn utc_now_iso8601() -> String {
 
     let mut year = 1970i32;
     loop {
-        let len = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
-        if days < len { break; }
+        let len = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if days < len {
+            break;
+        }
         days -= len;
         year += 1;
     }
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let mdays = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mdays = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u32;
     for &m in &mdays {
-        if days < m { break; }
+        if days < m {
+            break;
+        }
         days -= m;
         month += 1;
     }
@@ -192,8 +211,7 @@ impl Project {
     pub fn cached_paths_if_valid(&self) -> Option<&[Vec<StrokePath>]> {
         let key = self.path_cache_key.as_ref()?;
         let paths = self.cached_paths.as_ref()?;
-        if key.layers == self.layers
-            && key.base_color_key == base_color_cache_key(&self.base_color)
+        if key.layers == self.layers && key.base_color_key == base_color_cache_key(&self.base_color)
         {
             Some(paths.as_slice())
         } else {
@@ -267,11 +285,15 @@ fn generate_thumbnail(project: &Project) -> Option<Vec<u8>> {
 
     let mut png_bytes = Vec::new();
     {
-        let encoder =
-            image::codecs::png::PngEncoder::new(std::io::Cursor::new(&mut png_bytes));
+        let encoder = image::codecs::png::PngEncoder::new(std::io::Cursor::new(&mut png_bytes));
         use image::ImageEncoder;
         encoder
-            .write_image(&pixels, thumb_size, thumb_size, image::ColorType::Rgb8.into())
+            .write_image(
+                &pixels,
+                thumb_size,
+                thumb_size,
+                image::ColorType::Rgb8.into(),
+            )
             .ok()?;
     }
     Some(png_bytes)
@@ -283,8 +305,7 @@ fn generate_thumbnail(project: &Project) -> Option<Vec<u8>> {
 pub fn save_project(project: &Project, path: &Path) -> Result<(), ProjectError> {
     let file = std::fs::File::create(path)?;
     let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     // manifest.json
     let manifest_json = serde_json::to_string_pretty(&project.manifest)?;
@@ -356,8 +377,8 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     let mut archive = ZipArchive::new(file)?;
 
     // manifest.json (required)
-    let manifest: Manifest = read_json_entry(&mut archive, "manifest.json")
-        .map_err(|e| match e {
+    let manifest: Manifest =
+        read_json_entry(&mut archive, "manifest.json").map_err(|e| match e {
             ProjectError::Zip(_) => {
                 ProjectError::InvalidFormat("missing manifest.json".to_string())
             }
@@ -380,8 +401,7 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     let layers: Vec<Layer> = read_json_entry(&mut archive, "layer_stack.json")?;
 
     // presets.json
-    let presets: PresetLibrary =
-        read_json_entry(&mut archive, "presets.json").unwrap_or_default();
+    let presets: PresetLibrary = read_json_entry(&mut archive, "presets.json").unwrap_or_default();
 
     // settings.json (required)
     let settings: OutputSettings = read_json_entry(&mut archive, "settings.json")?;
@@ -442,8 +462,8 @@ fn read_bincode_entry_optional<T: serde::de::DeserializeOwned>(
 mod tests {
     use super::*;
     use crate::types::{
-        Guide, GuideType, Layer, OutputSettings, PaintValues,
-        PressureCurve, PressurePreset, ResolutionPreset,
+        Guide, GuideType, Layer, OutputSettings, PaintValues, PressureCurve, PressurePreset,
+        ResolutionPreset,
     };
     use glam::Vec2;
 
@@ -586,7 +606,9 @@ mod tests {
         let res = 16u32;
         let pixel_count = (res * res) as usize;
 
-        let height: Vec<f32> = (0..pixel_count).map(|i| i as f32 / pixel_count as f32).collect();
+        let height: Vec<f32> = (0..pixel_count)
+            .map(|i| i as f32 / pixel_count as f32)
+            .collect();
         let color: Vec<[f32; 4]> = (0..pixel_count)
             .map(|i| {
                 let v = i as f32 / pixel_count as f32;
@@ -664,8 +686,14 @@ mod tests {
         let names: Vec<&str> = archive.file_names().collect();
         assert!(names.contains(&"manifest.json"), "missing manifest.json");
         assert!(names.contains(&"mesh_ref.json"), "missing mesh_ref.json");
-        assert!(names.contains(&"base_sources.json"), "missing base_sources.json");
-        assert!(names.contains(&"layer_stack.json"), "missing layer_stack.json");
+        assert!(
+            names.contains(&"base_sources.json"),
+            "missing base_sources.json"
+        );
+        assert!(
+            names.contains(&"layer_stack.json"),
+            "missing layer_stack.json"
+        );
         assert!(names.contains(&"presets.json"), "missing presets.json");
         assert!(names.contains(&"settings.json"), "missing settings.json");
     }
@@ -702,10 +730,7 @@ mod tests {
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
-        assert_eq!(
-            loaded.settings.resolution_preset,
-            ResolutionPreset::Ultra
-        );
+        assert_eq!(loaded.settings.resolution_preset, ResolutionPreset::Ultra);
         assert_eq!(loaded.settings.resolution_preset.resolution(), 4096);
         assert_eq!(loaded.settings.normal_strength, 3.0);
     }
@@ -831,7 +856,10 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             ProjectError::InvalidFormat(msg) => {
-                assert!(msg.contains("manifest"), "error should mention manifest: {msg}");
+                assert!(
+                    msg.contains("manifest"),
+                    "error should mention manifest: {msg}"
+                );
             }
             e => panic!("expected InvalidFormat error, got: {e:?}"),
         }
@@ -900,7 +928,12 @@ mod tests {
 
         assert_eq!(loaded.presets.presets.len(), project.presets.presets.len());
 
-        for (a, b) in project.presets.presets.iter().zip(loaded.presets.presets.iter()) {
+        for (a, b) in project
+            .presets
+            .presets
+            .iter()
+            .zip(loaded.presets.presets.iter())
+        {
             assert_eq!(a.name, b.name);
             assert_eq!(a.values, b.values);
         }

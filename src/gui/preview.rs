@@ -20,7 +20,6 @@ pub struct StrokePreviewCache {
     entry: Option<(PaintValues, u32, egui::TextureHandle)>,
 }
 
-
 impl StrokePreviewCache {
     /// Access the cached texture handle (if any).
     pub fn texture(&self) -> Option<&egui::TextureHandle> {
@@ -88,8 +87,6 @@ pub fn update_stroke_cache(
     }
 }
 
-
-
 // ── Per-Layer Path Overlay Cache ────────────────────────────────
 
 /// Key for invalidation: paint values + seed + guides + color texture hash.
@@ -112,7 +109,6 @@ pub struct LayerPathCache {
     pub original_total_segments: usize,
 }
 
-
 impl LayerPathCache {
     /// Check if cache is stale for the given layer state, seed, and color texture hash.
     pub fn is_stale(&self, layer: &Layer, seed: u32, color_tex_hash: u64) -> bool {
@@ -126,7 +122,6 @@ impl LayerPathCache {
             None => true,
         }
     }
-
 }
 
 /// Per-layer path preview caches for viewport overlay.
@@ -138,7 +133,6 @@ pub struct PathOverlayCache {
     /// Prevents restarting the worker every frame while a correct computation is running.
     pending: Option<(usize, LayerPathKey)>,
 }
-
 
 impl PathOverlayCache {
     /// Sync cache vec length to match layer count.
@@ -154,9 +148,14 @@ impl PathOverlayCache {
     /// Get cached paths for the selected layer (if any).
     /// Returns (layer_index, paths, original_total_segments).
     #[allow(clippy::type_complexity)]
-    pub fn selected_paths(&self, selected: Option<usize>) -> Option<(usize, &Vec<Vec<[f32; 2]>>, usize)> {
+    pub fn selected_paths(
+        &self,
+        selected: Option<usize>,
+    ) -> Option<(usize, &Vec<Vec<[f32; 2]>>, usize)> {
         let i = selected?;
-        self.caches.get(i).map(|c| (i, &c.paths, c.original_total_segments))
+        self.caches
+            .get(i)
+            .map(|c| (i, &c.paths, c.original_total_segments))
     }
 
     /// Check if the cache for the given layer index is stale.
@@ -193,13 +192,22 @@ impl PathOverlayCache {
     }
 
     /// Record that a worker has been started for the given layer params.
-    pub fn set_pending(&mut self, layer_index: usize, layer: &Layer, seed: u32, color_tex_hash: u64) {
-        self.pending = Some((layer_index, LayerPathKey {
-            paint: layer.paint.clone(),
-            seed,
-            guides: layer.guides.clone(),
-            color_tex_hash,
-        }));
+    pub fn set_pending(
+        &mut self,
+        layer_index: usize,
+        layer: &Layer,
+        seed: u32,
+        color_tex_hash: u64,
+    ) {
+        self.pending = Some((
+            layer_index,
+            LayerPathKey {
+                paint: layer.paint.clone(),
+                seed,
+                guides: layer.guides.clone(),
+                color_tex_hash,
+            },
+        ));
     }
 
     /// Write a completed worker result into the cache slot.
@@ -424,7 +432,6 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
 pub struct PresetThumbnailCache {
     entries: Vec<(PaintValues, egui::TextureHandle)>,
 }
-
 
 impl PresetThumbnailCache {
     /// Get or generate a thumbnail for the given PaintValues.

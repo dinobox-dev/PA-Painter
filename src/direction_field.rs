@@ -56,7 +56,11 @@ fn guide_contribution(guide: &Guide, query_uv: Vec2) -> Vec2 {
             } else {
                 // 90° rotation of radial; direction.x < 0 → clockwise
                 let tangent = Vec2::new(-radial.y, radial.x).normalize();
-                if guide.direction.x < 0.0 { -tangent } else { tangent }
+                if guide.direction.x < 0.0 {
+                    -tangent
+                } else {
+                    tangent
+                }
             }
         }
     }
@@ -78,7 +82,11 @@ pub fn direction_at(uv: Vec2, guides: &[Guide]) -> Vec2 {
 
     if guides.len() == 1 {
         let dir = guide_contribution(&guides[0], uv);
-        return if dir.length_squared() > 0.0 { dir } else { Vec2::X };
+        return if dir.length_squared() > 0.0 {
+            dir
+        } else {
+            Vec2::X
+        };
     }
 
     // Collect (weight, direction, headless?) for guides within influence
@@ -104,7 +112,11 @@ pub fn direction_at(uv: Vec2, guides: &[Guide]) -> Vec2 {
 
         let headless = is_headless(g.guide_type);
         let dir = if headless { canonicalize(dir) } else { dir };
-        weighted.push(WeightedDir { weight: w, dir, headless });
+        weighted.push(WeightedDir {
+            weight: w,
+            dir,
+            headless,
+        });
     }
 
     // If no guide has influence, use nearest-neighbor fallback
@@ -118,13 +130,21 @@ pub fn direction_at(uv: Vec2, guides: &[Guide]) -> Vec2 {
             })
             .unwrap();
         let dir = guide_contribution(nearest, uv);
-        return if dir.length_squared() > 0.0 { dir } else { Vec2::X };
+        return if dir.length_squared() > 0.0 {
+            dir
+        } else {
+            Vec2::X
+        };
     }
 
     // Use the highest-weight direction as reference for sign alignment
     let ref_dir = weighted
         .iter()
-        .max_by(|a, b| a.weight.partial_cmp(&b.weight).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|a, b| {
+            a.weight
+                .partial_cmp(&b.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .unwrap()
         .dir;
 
@@ -231,8 +251,16 @@ impl DirectionField {
             // High variance — guide boundary. Use nearest texel to preserve
             // each guide region's direction without cross-boundary blending.
             let nearest = if fx < 0.5 {
-                if fy < 0.5 { d00 } else { d01 }
-            } else if fy < 0.5 { d10 } else { d11 };
+                if fy < 0.5 {
+                    d00
+                } else {
+                    d01
+                }
+            } else if fy < 0.5 {
+                d10
+            } else {
+                d11
+            };
             return if nearest.length_squared() < 1e-12 {
                 d00
             } else {
@@ -264,10 +292,18 @@ impl DirectionField {
         let mut a10 = d10;
         let mut a01 = d01;
         let mut a11 = d11;
-        if a00.dot(ref_dir) < 0.0 { a00 = -a00; }
-        if a10.dot(ref_dir) < 0.0 { a10 = -a10; }
-        if a01.dot(ref_dir) < 0.0 { a01 = -a01; }
-        if a11.dot(ref_dir) < 0.0 { a11 = -a11; }
+        if a00.dot(ref_dir) < 0.0 {
+            a00 = -a00;
+        }
+        if a10.dot(ref_dir) < 0.0 {
+            a10 = -a10;
+        }
+        if a01.dot(ref_dir) < 0.0 {
+            a01 = -a01;
+        }
+        if a11.dot(ref_dir) < 0.0 {
+            a11 = -a11;
+        }
 
         let top = a00.lerp(a10, fx);
         let bottom = a01.lerp(a11, fx);
@@ -618,10 +654,7 @@ mod tests {
             let uv = Vec2::new(x, 0.5);
             let a = direction_at(uv, &guides_pos);
             let b = direction_at(uv, &guides_neg);
-            assert!(
-                approx_vec2(a, b),
-                "mismatch at x={x}: pos={a:?} neg={b:?}"
-            );
+            assert!(approx_vec2(a, b), "mismatch at x={x}: pos={a:?} neg={b:?}");
         }
     }
 
@@ -678,10 +711,7 @@ mod tests {
             },
             Guide {
                 position: Vec2::new(0.9, 0.5),
-                direction: Vec2::new(
-                    150.0_f32.to_radians().cos(),
-                    150.0_f32.to_radians().sin(),
-                ),
+                direction: Vec2::new(150.0_f32.to_radians().cos(), 150.0_f32.to_radians().sin()),
                 influence: 0.5,
                 ..Guide::default()
             },

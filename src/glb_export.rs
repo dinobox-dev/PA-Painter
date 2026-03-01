@@ -32,7 +32,16 @@ pub fn export_preview_glb(
     displacement_scale: f32,
     path: &Path,
 ) -> Result<(), crate::output::OutputError> {
-    export_preview_glb_inner(mesh, color_map, height_map, normal_map, resolution, displacement_scale, false, path)
+    export_preview_glb_inner(
+        mesh,
+        color_map,
+        height_map,
+        normal_map,
+        resolution,
+        displacement_scale,
+        false,
+        path,
+    )
 }
 
 /// Export a 3D preview GLB with alpha-blended paint (transparent background).
@@ -45,7 +54,16 @@ pub fn export_preview_glb_transparent(
     displacement_scale: f32,
     path: &Path,
 ) -> Result<(), crate::output::OutputError> {
-    export_preview_glb_inner(mesh, color_map, height_map, normal_map, resolution, displacement_scale, true, path)
+    export_preview_glb_inner(
+        mesh,
+        color_map,
+        height_map,
+        normal_map,
+        resolution,
+        displacement_scale,
+        true,
+        path,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -65,7 +83,13 @@ fn export_preview_glb_inner(
 
     // 2. Subdivide mesh (only if displacement is active) and displace by height
     let subdiv_level = if displacement_scale > 0.0 { 8 } else { 1 };
-    let subdiv = subdivide_and_displace(mesh, height_map, resolution, subdiv_level, displacement_scale);
+    let subdiv = subdivide_and_displace(
+        mesh,
+        height_map,
+        resolution,
+        subdiv_level,
+        displacement_scale,
+    );
 
     // 3. Build BIN buffer (vertex data + index data + images)
     let bin = build_bin_buffer(&subdiv, &color_png, &normal_png);
@@ -195,7 +219,10 @@ fn sample_map_bilinear(map: &[f32], resolution: u32, uv: Vec2) -> f32 {
 
 // ── Texture Encoding ────────────────────────────────────────────────────────
 
-fn encode_color_png(color_map: &[Color], resolution: u32) -> Result<Vec<u8>, crate::output::OutputError> {
+fn encode_color_png(
+    color_map: &[Color],
+    resolution: u32,
+) -> Result<Vec<u8>, crate::output::OutputError> {
     let pixels: Vec<u8> = color_map
         .iter()
         .flat_map(|c| {
@@ -220,7 +247,10 @@ fn encode_color_png(color_map: &[Color], resolution: u32) -> Result<Vec<u8>, cra
     Ok(buf)
 }
 
-fn encode_normal_png(normal_map: &[[f32; 3]], resolution: u32) -> Result<Vec<u8>, crate::output::OutputError> {
+fn encode_normal_png(
+    normal_map: &[[f32; 3]],
+    resolution: u32,
+) -> Result<Vec<u8>, crate::output::OutputError> {
     let pixels: Vec<u8> = normal_map
         .iter()
         .flat_map(|n| {
@@ -342,7 +372,11 @@ fn pad_to_4(buf: &mut Vec<u8>) {
 
 // ── glTF JSON ───────────────────────────────────────────────────────────────
 
-fn build_gltf_json(mesh: &SubdividedMesh, bin: &BinLayout, alpha_blend: bool) -> Result<Vec<u8>, serde_json::Error> {
+fn build_gltf_json(
+    mesh: &SubdividedMesh,
+    bin: &BinLayout,
+    alpha_blend: bool,
+) -> Result<Vec<u8>, serde_json::Error> {
     let vertex_count = mesh.positions.len();
     let index_count = mesh.indices.len();
 
@@ -553,8 +587,16 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("test_roundtrip.glb");
 
-        export_preview_glb(&mesh, &color_map, &height_map, &normal_map, res, 0.05, &path)
-            .expect("GLB export should succeed");
+        export_preview_glb(
+            &mesh,
+            &color_map,
+            &height_map,
+            &normal_map,
+            res,
+            0.05,
+            &path,
+        )
+        .expect("GLB export should succeed");
 
         // Verify file exists and starts with glTF magic
         let data = std::fs::read(&path).unwrap();
@@ -577,11 +619,11 @@ mod tests {
         // 6 faces: +X, -X, +Y, -Y, +Z, -Z
         // Each face is a grid in a local (right, up) basis, with forward = face normal.
         let faces: [(Vec3, Vec3, Vec3); 6] = [
-            (Vec3::X,  Vec3::Z,  Vec3::Y),   // +X: right=+Z, up=+Y
+            (Vec3::X, Vec3::Z, Vec3::Y),         // +X: right=+Z, up=+Y
             (Vec3::NEG_X, Vec3::NEG_Z, Vec3::Y), // -X: right=-Z, up=+Y
-            (Vec3::Y,  Vec3::X,  Vec3::Z),       // +Y: right=+X, up=+Z
+            (Vec3::Y, Vec3::X, Vec3::Z),         // +Y: right=+X, up=+Z
             (Vec3::NEG_Y, Vec3::X, Vec3::NEG_Z), // -Y: right=+X, up=-Z
-            (Vec3::Z,  Vec3::NEG_X, Vec3::Y),    // +Z: right=-X, up=+Y
+            (Vec3::Z, Vec3::NEG_X, Vec3::Y),     // +Z: right=-X, up=+Y
             (Vec3::NEG_Z, Vec3::X, Vec3::Y),     // -Z: right=+X, up=+Y
         ];
 
@@ -641,7 +683,12 @@ mod tests {
             }
         }
 
-        LoadedMesh { positions, uvs, indices, groups: vec![] }
+        LoadedMesh {
+            positions,
+            uvs,
+            indices,
+            groups: vec![],
+        }
     }
 
     #[test]
@@ -695,22 +742,43 @@ mod tests {
             };
 
             let maps = composite_all(
-                &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, mesh_nd, &[],
+                &[layer.clone()],
+                res,
+                &BaseColorSource::solid(solid),
+                &settings,
+                mesh_nd,
+                &[],
             );
 
             let normalized_height = normalize_height_map(&maps.height);
             let normals = match normal_mode {
                 NormalMode::DepictedForm => generate_normal_map_depicted_form(
-                    &maps.gradient_x, &maps.gradient_y, &nd, &maps.object_normal, res, settings.normal_strength,
+                    &maps.gradient_x,
+                    &maps.gradient_y,
+                    &nd,
+                    &maps.object_normal,
+                    res,
+                    settings.normal_strength,
                 ),
                 NormalMode::SurfacePaint => generate_normal_map(
-                    &maps.gradient_x, &maps.gradient_y, res, settings.normal_strength,
+                    &maps.gradient_x,
+                    &maps.gradient_y,
+                    res,
+                    settings.normal_strength,
                 ),
             };
 
             let path = out_dir.join(format!("{label}.glb"));
-            export_preview_glb(&mesh, &maps.color, &normalized_height, &normals, res, 0.0, &path)
-                .expect("sphere GLB export");
+            export_preview_glb(
+                &mesh,
+                &maps.color,
+                &normalized_height,
+                &normals,
+                res,
+                0.0,
+                &path,
+            )
+            .expect("sphere GLB export");
 
             // Dump normal map PNG for comparison
             let normal_png_path = out_dir.join(format!("{label}_normal.png"));
@@ -744,18 +812,33 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("test_gltf_load.glb");
 
-        export_preview_glb(&mesh, &color_map, &height_map, &normal_map, res, 0.05, &path)
-            .unwrap();
+        export_preview_glb(
+            &mesh,
+            &color_map,
+            &height_map,
+            &normal_map,
+            res,
+            0.05,
+            &path,
+        )
+        .unwrap();
 
         // Validate with the gltf crate
         let (document, _buffers, _images) = gltf::import(&path).expect("gltf should parse our GLB");
         let gltf_mesh = document.meshes().next().expect("should have a mesh");
-        let prim = gltf_mesh.primitives().next().expect("should have a primitive");
+        let prim = gltf_mesh
+            .primitives()
+            .next()
+            .expect("should have a primitive");
         assert!(prim.get(&gltf::Semantic::Positions).is_some());
         assert!(prim.get(&gltf::Semantic::Normals).is_some());
         assert!(prim.get(&gltf::Semantic::TexCoords(0)).is_some());
         assert!(prim.indices().is_some());
-        assert!(prim.material().pbr_metallic_roughness().base_color_texture().is_some());
+        assert!(prim
+            .material()
+            .pbr_metallic_roughness()
+            .base_color_texture()
+            .is_some());
         assert!(prim.material().normal_texture().is_some());
     }
 
@@ -797,18 +880,34 @@ mod tests {
         settings.background_mode = BackgroundMode::Transparent;
 
         let maps = composite_all(
-            &[layer.clone()], res, &BaseColorSource::solid(solid), &settings, Some(&nd), &[],
+            &[layer.clone()],
+            res,
+            &BaseColorSource::solid(solid),
+            &settings,
+            Some(&nd),
+            &[],
         );
 
         let normalized_height = normalize_height_map(&maps.height);
         let normals = generate_normal_map_depicted_form(
-            &maps.gradient_x, &maps.gradient_y, &nd, &maps.object_normal, res, settings.normal_strength,
+            &maps.gradient_x,
+            &maps.gradient_y,
+            &nd,
+            &maps.object_normal,
+            res,
+            settings.normal_strength,
         );
 
         let out_dir = crate::test_module_output_dir("glb_export");
         let path = out_dir.join("sphere_transparent.glb");
         export_preview_glb_transparent(
-            &mesh, &maps.color, &normalized_height, &normals, res, 0.0, &path,
+            &mesh,
+            &maps.color,
+            &normalized_height,
+            &normals,
+            res,
+            0.0,
+            &path,
         )
         .expect("transparent GLB export");
 
@@ -831,9 +930,7 @@ mod tests {
     fn visual_sphere_overscan_poisson() {
         use crate::compositing::composite_all_with_paths;
         use crate::object_normal::compute_mesh_normal_data;
-        use crate::output::{
-            generate_normal_map_depicted_form, normalize_height_map,
-        };
+        use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::path_placement::generate_paths;
         use crate::types::{
             BackgroundMode, BaseColorSource, Color as C, Guide, NormalMode, OutputSettings,
@@ -867,27 +964,41 @@ mod tests {
         settings.background_mode = BackgroundMode::Transparent;
 
         // Generate paths with overscan + Poisson + 3 passes
-        let paths = generate_paths(
-            &layer, 0, None, Some(&nd), None,
-        );
+        let paths = generate_paths(&layer, 0, None, Some(&nd), None);
         eprintln!("Overscan+Poisson: {} paths generated", paths.len());
 
         let cached_paths = vec![paths];
         let maps = composite_all_with_paths(
-            &[layer.clone()], res, &BaseColorSource::solid(solid), &settings,
-            Some(&cached_paths), Some(&nd), &[],
+            &[layer.clone()],
+            res,
+            &BaseColorSource::solid(solid),
+            &settings,
+            Some(&cached_paths),
+            Some(&nd),
+            &[],
         );
 
         let normalized_height = normalize_height_map(&maps.height);
         let normals = generate_normal_map_depicted_form(
-            &maps.gradient_x, &maps.gradient_y, &nd, &maps.object_normal, res, settings.normal_strength,
+            &maps.gradient_x,
+            &maps.gradient_y,
+            &nd,
+            &maps.object_normal,
+            res,
+            settings.normal_strength,
         );
 
         let out_dir = crate::test_module_output_dir("glb_export");
 
         let glb_path = out_dir.join("sphere_overscan_poisson.glb");
         export_preview_glb_transparent(
-            &mesh, &maps.color, &normalized_height, &normals, res, 0.0, &glb_path,
+            &mesh,
+            &maps.color,
+            &normalized_height,
+            &normals,
+            res,
+            0.0,
+            &glb_path,
         )
         .expect("overscan GLB export");
 
@@ -896,8 +1007,7 @@ mod tests {
             .expect("save color PNG");
 
         let normal_path = out_dir.join("sphere_overscan_poisson_normal.png");
-        crate::output::export_normal_png(&normals, res, &normal_path)
-            .expect("save normal PNG");
+        crate::output::export_normal_png(&normals, res, &normal_path).expect("save normal PNG");
 
         assert!(glb_path.exists());
         let (doc, _, _) = gltf::import(&glb_path).expect("gltf should parse overscan GLB");

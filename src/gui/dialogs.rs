@@ -8,7 +8,9 @@ use practical_arcana_painter::output::{
     export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
     normalize_height_map,
 };
-use practical_arcana_painter::project::{load_project, save_project, utc_now_iso8601, BaseColor, Project};
+use practical_arcana_painter::project::{
+    load_project, save_project, utc_now_iso8601, BaseColor, Project,
+};
 use practical_arcana_painter::types::{pixels_to_colors, BackgroundMode, Layer, PaintValues};
 
 use super::state::ReloadSummary;
@@ -350,7 +352,12 @@ pub fn load_texture_dialog(state: &mut AppState, ctx: &eframe::egui::Context) {
 
 /// Reload the base color texture from its current path.
 pub fn reload_texture(state: &mut AppState, ctx: &eframe::egui::Context) {
-    let Some(tex_path) = state.project.base_color.texture_path().map(|s| s.to_string()) else {
+    let Some(tex_path) = state
+        .project
+        .base_color
+        .texture_path()
+        .map(|s| s.to_string())
+    else {
         state.status_message = "No texture to reload.".to_string();
         return;
     };

@@ -880,7 +880,15 @@ f 1/1 2/2 3/3 4/4
         // EXR values should pass through unchanged (already linear)
         let p0 = tex.pixels[0];
         assert!((p0[0] - 0.5).abs() < 1e-5, "R: expected 0.5, got {}", p0[0]);
-        assert!((p0[1] - 0.25).abs() < 1e-5, "G: expected 0.25, got {}", p0[1]);
-        assert!((p0[2] - 0.125).abs() < 1e-5, "B: expected 0.125, got {}", p0[2]);
+        assert!(
+            (p0[1] - 0.25).abs() < 1e-5,
+            "G: expected 0.25, got {}",
+            p0[1]
+        );
+        assert!(
+            (p0[2] - 0.125).abs() < 1e-5,
+            "B: expected 0.125, got {}",
+            p0[2]
+        );
     }
 }

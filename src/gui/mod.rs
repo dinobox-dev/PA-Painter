@@ -117,8 +117,12 @@ impl PainterApp {
             r,
             "gen_color",
         ));
-        self.state.textures.height =
-            Some(textures::height_buffer_to_handle(ctx, &result.height, r, "gen_height"));
+        self.state.textures.height = Some(textures::height_buffer_to_handle(
+            ctx,
+            &result.height,
+            r,
+            "gen_height",
+        ));
         self.state.textures.normal = Some(textures::normal_map_to_handle(
             ctx,
             &result.normal_map,
@@ -141,8 +145,7 @@ impl PainterApp {
 
         // Cache mesh normals computed on the worker thread
         if let Some(normals) = &result.computed_normals {
-            self.state.cached_mesh_normals =
-                Some((normals.0, std::sync::Arc::clone(&normals.1)));
+            self.state.cached_mesh_normals = Some((normals.0, std::sync::Arc::clone(&normals.1)));
         }
         self.state.status_message = format!("Generated in {:.1}s", result.elapsed.as_secs_f32());
         self.state.generated = Some(result);
@@ -195,8 +198,15 @@ impl eframe::App for PainterApp {
 
         // ── Undo/Redo keyboard shortcuts ──
         // Check redo first (more specific modifier combo) to prevent Cmd+Z from consuming it.
-        let redo_mods = egui::Modifiers { command: true, shift: true, ..Default::default() };
-        let undo_mods = egui::Modifiers { command: true, ..Default::default() };
+        let redo_mods = egui::Modifiers {
+            command: true,
+            shift: true,
+            ..Default::default()
+        };
+        let undo_mods = egui::Modifiers {
+            command: true,
+            ..Default::default()
+        };
         if ctx.input_mut(|i| i.consume_key(redo_mods, egui::Key::Z)) {
             let current = self.state.take_snapshot();
             if let Some(snap) = self.state.undo.redo(current) {
@@ -216,9 +226,10 @@ impl eframe::App for PainterApp {
 
         // ── Cmd+G: Generate ──
         if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::G))
-            && !self.state.generation.is_running() {
-                self.state.pending_generate = true;
-            }
+            && !self.state.generation.is_running()
+        {
+            self.state.pending_generate = true;
+        }
 
         // ── Backtick key: cycle viewport tabs ──
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Backtick)) {
@@ -364,7 +375,12 @@ impl eframe::App for PainterApp {
                 if selected < self.state.project.layers.len() {
                     let layer = &self.state.project.layers[selected];
                     if layer.visible {
-                        let seed = self.state.project.settings.seed.wrapping_add(selected as u32);
+                        let seed = self
+                            .state
+                            .project
+                            .settings
+                            .seed
+                            .wrapping_add(selected as u32);
                         let hash = self.state.texture_colors_hash;
 
                         let stale = self
@@ -378,7 +394,8 @@ impl eframe::App for PainterApp {
                                 && self
                                     .state
                                     .cached_mesh_normals
-                                    .as_ref().is_none_or(|(r, _)| *r != BASE_RESOLUTION);
+                                    .as_ref()
+                                    .is_none_or(|(r, _)| *r != BASE_RESOLUTION);
 
                             let input = preview::PathOverlayInput {
                                 layer: layer.clone(),
@@ -411,7 +428,9 @@ impl eframe::App for PainterApp {
                                     None
                                 },
                             };
-                            self.state.path_overlay.set_pending(selected, layer, seed, hash);
+                            self.state
+                                .path_overlay
+                                .set_pending(selected, layer, seed, hash);
                             self.state.path_worker.start(input);
                         }
                     }
@@ -462,7 +481,10 @@ impl eframe::App for PainterApp {
                         Some(reason) if has_gen => format!("Export Maps... ({reason})"),
                         _ => "Export Maps...".to_string(),
                     };
-                    if ui.add_enabled(has_gen, egui::Button::new(maps_label)).clicked() {
+                    if ui
+                        .add_enabled(has_gen, egui::Button::new(maps_label))
+                        .clicked()
+                    {
                         ui.close();
                         self.state.pending_export = true;
                     }
@@ -470,20 +492,29 @@ impl eframe::App for PainterApp {
                         Some(reason) if has_gen => format!("Export GLB... ({reason})"),
                         _ => "Export GLB...".to_string(),
                     };
-                    if ui.add_enabled(has_gen, egui::Button::new(glb_label)).clicked() {
+                    if ui
+                        .add_enabled(has_gen, egui::Button::new(glb_label))
+                        .clicked()
+                    {
                         ui.close();
                         self.state.pending_export_glb = true;
                     }
                     ui.separator();
                     let can_gen = !self.state.generation.is_running();
-                    if ui.add_enabled(can_gen, egui::Button::new("Generate & Export Maps...")).clicked() {
+                    if ui
+                        .add_enabled(can_gen, egui::Button::new("Generate & Export Maps..."))
+                        .clicked()
+                    {
                         ui.close();
                         if let Some(dir) = rfd::FileDialog::new().pick_folder() {
                             self.state.post_gen_export_maps = Some(dir);
                             self.state.pending_generate = true;
                         }
                     }
-                    if ui.add_enabled(can_gen, egui::Button::new("Generate & Export GLB...")).clicked() {
+                    if ui
+                        .add_enabled(can_gen, egui::Button::new("Generate & Export GLB..."))
+                        .clicked()
+                    {
                         ui.close();
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("glTF Binary", &["glb"])
@@ -498,14 +529,20 @@ impl eframe::App for PainterApp {
                 ui.menu_button("Edit", |ui: &mut egui::Ui| {
                     let can_undo = self.state.undo.can_undo();
                     let can_redo = self.state.undo.can_redo();
-                    if ui.add_enabled(can_undo, egui::Button::new("Undo  ⌘Z")).clicked() {
+                    if ui
+                        .add_enabled(can_undo, egui::Button::new("Undo  ⌘Z"))
+                        .clicked()
+                    {
                         ui.close();
                         let current = self.state.take_snapshot();
                         if let Some(snap) = self.state.undo.undo(current) {
                             self.state.apply_snapshot(snap);
                         }
                     }
-                    if ui.add_enabled(can_redo, egui::Button::new("Redo  ⌘⇧Z")).clicked() {
+                    if ui
+                        .add_enabled(can_redo, egui::Button::new("Redo  ⌘⇧Z"))
+                        .clicked()
+                    {
                         ui.close();
                         let current = self.state.take_snapshot();
                         if let Some(snap) = self.state.undo.redo(current) {
@@ -521,7 +558,6 @@ impl eframe::App for PainterApp {
                             if paths_on { Some(0) } else { None };
                     }
                 });
-
             });
         });
 
@@ -546,10 +582,9 @@ impl eframe::App for PainterApp {
             .max_width(400.0)
             .show(ctx, |ui: &mut egui::Ui| {
                 // Bottom-pinned: Seed + Generate
-                egui::TopBottomPanel::bottom("left_bottom")
-                    .show_inside(ui, |ui: &mut egui::Ui| {
-                        sidebar::show_bottom(ui, &mut self.state);
-                    });
+                egui::TopBottomPanel::bottom("left_bottom").show_inside(ui, |ui: &mut egui::Ui| {
+                    sidebar::show_bottom(ui, &mut self.state);
+                });
                 // Fixed top: Base + Project Settings + Layers header
                 sidebar::show_top(ui, &mut self.state);
                 sidebar::show_layers_header(ui, &mut self.state);
@@ -588,8 +623,7 @@ impl eframe::App for PainterApp {
         // ── Central viewport (or welcome screen) ──
         let render_state = self.render_state.clone();
         egui::CentralPanel::default().show(ctx, |ui: &mut egui::Ui| {
-            let has_project =
-                self.state.loaded_mesh.is_some() || self.state.project_path.is_some();
+            let has_project = self.state.loaded_mesh.is_some() || self.state.project_path.is_some();
 
             if has_project {
                 viewport::show(ui, &mut self.state, render_state.as_ref());
@@ -613,8 +647,7 @@ impl eframe::App for PainterApp {
                     ui.add_space(8.0);
                     if ui
                         .add(
-                            egui::Button::new("New Project")
-                                .min_size(egui::Vec2::new(200.0, 36.0)),
+                            egui::Button::new("New Project").min_size(egui::Vec2::new(200.0, 36.0)),
                         )
                         .clicked()
                     {
@@ -670,6 +703,8 @@ impl eframe::App for PainterApp {
             self.state.dirty = true;
         }
         let pointer_down = ctx.input(|i| i.pointer.any_down());
-        self.state.undo.track_frame(&pre_frame, &post_frame, pointer_down);
+        self.state
+            .undo
+            .track_frame(&pre_frame, &post_frame, pointer_down);
     }
 }

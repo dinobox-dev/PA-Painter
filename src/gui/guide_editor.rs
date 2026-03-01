@@ -23,15 +23,30 @@ pub fn handle_guides(
 
     match state.guide_tool {
         GuideTool::Select => handle_select(response, ui, state, layer_idx, viewport_rect),
-        GuideTool::AddDirectional => {
-            handle_add(response, ui, state, layer_idx, viewport_rect, GuideType::Directional)
-        }
-        GuideTool::AddRadial => {
-            handle_add(response, ui, state, layer_idx, viewport_rect, GuideType::Source)
-        }
-        GuideTool::AddVortex => {
-            handle_add(response, ui, state, layer_idx, viewport_rect, GuideType::Vortex)
-        }
+        GuideTool::AddDirectional => handle_add(
+            response,
+            ui,
+            state,
+            layer_idx,
+            viewport_rect,
+            GuideType::Directional,
+        ),
+        GuideTool::AddRadial => handle_add(
+            response,
+            ui,
+            state,
+            layer_idx,
+            viewport_rect,
+            GuideType::Source,
+        ),
+        GuideTool::AddVortex => handle_add(
+            response,
+            ui,
+            state,
+            layer_idx,
+            viewport_rect,
+            GuideType::Vortex,
+        ),
     }
 }
 

@@ -157,7 +157,11 @@ impl CurveKnot {
         match (prev, next) {
             (Some(p), Some(n)) => {
                 let dx = n[0] - p[0];
-                let slope = if dx.abs() > 1e-6 { (n[1] - p[1]) / dx } else { 0.0 };
+                let slope = if dx.abs() > 1e-6 {
+                    (n[1] - p[1]) / dx
+                } else {
+                    0.0
+                };
                 let in_dx = (pos[0] - p[0]) / 3.0;
                 let out_dx = (n[0] - pos[0]) / 3.0;
                 CurveKnot {
@@ -758,10 +762,10 @@ impl StrokePath {
     /// Find segment index and local fraction for a given distance along the path.
     fn find_segment(&self, distance: f32) -> (usize, f32) {
         let last_seg = self.points.len() - 2;
-        let idx = match self
-            .cumulative_lengths
-            .binary_search_by(|v| v.partial_cmp(&distance).unwrap_or(std::cmp::Ordering::Equal))
-        {
+        let idx = match self.cumulative_lengths.binary_search_by(|v| {
+            v.partial_cmp(&distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }) {
             Ok(i) => i.min(last_seg),
             Err(i) => i.saturating_sub(1).min(last_seg),
         };

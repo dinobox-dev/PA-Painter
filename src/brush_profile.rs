@@ -55,8 +55,7 @@ pub fn generate_brush_profile(width: usize, seed: u32) -> Vec<f32> {
 
         for k in (center - gap_width)..=(center + gap_width) {
             if k >= 0 && (k as usize) < width {
-                let falloff =
-                    1.0 - (k - center).unsigned_abs() as f32 / (gap_width as f32 + 1.0);
+                let falloff = 1.0 - (k - center).unsigned_abs() as f32 / (gap_width as f32 + 1.0);
                 density[k as usize] *= 1.0 - depth * falloff;
             }
         }

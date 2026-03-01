@@ -181,7 +181,9 @@ fn create_placeholder_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgp
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    let data = [128u8, 128, 128, 255, 128, 128, 128, 255, 128, 128, 128, 255, 128, 128, 128, 255];
+    let data = [
+        128u8, 128, 128, 255, 128, 128, 128, 255, 128, 128, 128, 255, 128, 128, 128, 255,
+    ];
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &texture,
@@ -569,8 +571,7 @@ pub fn show(
         let scroll = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll.abs() > 0.0 {
             let factor = (-scroll * 0.005).exp();
-            state.mesh_preview.distance =
-                (state.mesh_preview.distance * factor).clamp(0.1, 100.0);
+            state.mesh_preview.distance = (state.mesh_preview.distance * factor).clamp(0.1, 100.0);
         }
     }
 
@@ -669,11 +670,16 @@ pub fn show(
     // Split from render block to avoid double-borrowing renderer.
     if needs_register {
         let mut renderer = render_state.renderer.write();
-        let res = renderer.callback_resources.get::<MeshGpuResources>().unwrap();
-        let unorm_view = res.render_texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(wgpu::TextureFormat::Rgba8Unorm),
-            ..Default::default()
-        });
+        let res = renderer
+            .callback_resources
+            .get::<MeshGpuResources>()
+            .unwrap();
+        let unorm_view = res
+            .render_texture
+            .create_view(&wgpu::TextureViewDescriptor {
+                format: Some(wgpu::TextureFormat::Rgba8Unorm),
+                ..Default::default()
+            });
 
         match state.mesh_preview.rendered_texture_id {
             Some(id) => {
@@ -685,11 +691,8 @@ pub fn show(
                 );
             }
             None => {
-                let id = renderer.register_native_texture(
-                    device,
-                    &unorm_view,
-                    wgpu::FilterMode::Linear,
-                );
+                let id =
+                    renderer.register_native_texture(device, &unorm_view, wgpu::FilterMode::Linear);
                 state.mesh_preview.rendered_texture_id = Some(id);
             }
         }
@@ -726,7 +729,10 @@ fn draw_lighting_panel(
     // Toggle button: top-right, styled like a view mode tab
     let btn_w = 56.0;
     let btn_h = 24.0;
-    let btn_pos = Pos2::new(viewport_rect.right() - btn_w - 8.0, viewport_rect.top() + 8.0);
+    let btn_pos = Pos2::new(
+        viewport_rect.right() - btn_w - 8.0,
+        viewport_rect.top() + 8.0,
+    );
     let btn_rect = Rect::from_min_size(btn_pos, Vec2::new(btn_w, btn_h));
 
     let painter = ui.painter_at(viewport_rect);
@@ -820,14 +826,10 @@ fn draw_lighting_panel(
                         });
 
                         ui.add(
-                            egui::Slider::new(
-                                &mut state.mesh_preview.light_elevation,
-                                0.0..=1.5,
-                            )
-                            .show_value(false),
+                            egui::Slider::new(&mut state.mesh_preview.light_elevation, 0.0..=1.5)
+                                .show_value(false),
                         );
                     });
             });
     }
 }
-

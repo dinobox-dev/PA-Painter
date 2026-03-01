@@ -38,10 +38,7 @@ pub enum ExportFormat {
 ///
 /// Returns a new Vec<f32> with values in [0, 1].
 pub fn normalize_height_map(height: &[f32]) -> Vec<f32> {
-    height
-        .iter()
-        .map(|&h| h.clamp(0.0, 1.0))
-        .collect()
+    height.iter().map(|&h| h.clamp(0.0, 1.0)).collect()
 }
 
 // ── Normal Map Generation ──
@@ -123,7 +120,11 @@ pub fn generate_normal_map_depicted_form(
                 let ny = -gy * normal_strength;
                 let nz = 1.0f32;
                 let len = (nx * nx + ny * ny + nz * nz).sqrt();
-                normals[pixel_idx] = [nx / len * 0.5 + 0.5, ny / len * 0.5 + 0.5, nz / len * 0.5 + 0.5];
+                normals[pixel_idx] = [
+                    nx / len * 0.5 + 0.5,
+                    ny / len * 0.5 + 0.5,
+                    nz / len * 0.5 + 0.5,
+                ];
                 continue;
             }
 
@@ -131,7 +132,11 @@ pub fn generate_normal_map_depicted_form(
             let n_obj = if !global_object_normals.is_empty() {
                 let sn = global_object_normals[pixel_idx];
                 let v = glam::Vec3::new(sn[0], sn[1], sn[2]);
-                if v.length_squared() > 0.5 { v } else { n_geom }
+                if v.length_squared() > 0.5 {
+                    v
+                } else {
+                    n_geom
+                }
             } else {
                 n_geom
             };
@@ -222,11 +227,7 @@ pub fn blend_normals_udn(
 // ── PNG Export Functions ──
 
 /// Export a height map as a grayscale PNG (linear, no gamma).
-pub fn export_height_png(
-    height: &[f32],
-    resolution: u32,
-    path: &Path,
-) -> Result<(), OutputError> {
+pub fn export_height_png(height: &[f32], resolution: u32, path: &Path) -> Result<(), OutputError> {
     let pixels: Vec<u8> = height
         .iter()
         .map(|&h| (h.clamp(0.0, 1.0) * 255.0).round() as u8)
@@ -258,7 +259,13 @@ pub fn export_color_png(
             })
             .collect();
 
-        image::save_buffer(path, &pixels, resolution, resolution, image::ColorType::Rgba8)?;
+        image::save_buffer(
+            path,
+            &pixels,
+            resolution,
+            resolution,
+            image::ColorType::Rgba8,
+        )?;
     } else {
         let pixels: Vec<u8> = color
             .iter()
@@ -271,7 +278,13 @@ pub fn export_color_png(
             })
             .collect();
 
-        image::save_buffer(path, &pixels, resolution, resolution, image::ColorType::Rgb8)?;
+        image::save_buffer(
+            path,
+            &pixels,
+            resolution,
+            resolution,
+            image::ColorType::Rgb8,
+        )?;
     }
     Ok(())
 }
@@ -306,11 +319,7 @@ pub fn export_normal_png(
 /// Export a stroke ID map as an RGB PNG where each unique stroke gets a distinct color.
 /// Uses golden-angle hue spacing so adjacent stroke IDs receive visually dissimilar colors.
 /// ID 0 (unpainted) is black.
-pub fn export_stroke_id_png(
-    ids: &[u32],
-    resolution: u32,
-    path: &Path,
-) -> Result<(), OutputError> {
+pub fn export_stroke_id_png(ids: &[u32], resolution: u32, path: &Path) -> Result<(), OutputError> {
     let mut unique: Vec<u32> = ids.iter().copied().filter(|&id| id != 0).collect();
     unique.sort_unstable();
     unique.dedup();
@@ -326,12 +335,19 @@ pub fn export_stroke_id_png(
             // Alternate saturation/value to further separate neighbors
             let sat = if i % 2 == 0 { 0.9 } else { 0.65 };
             let val = if (i / 2) % 2 == 0 { 1.0 } else { 0.75 };
-            let c = hsv_to_rgb(HsvColor { h: hue / 360.0, s: sat, v: val });
-            (id, [
-                (c.r * 255.0).round() as u8,
-                (c.g * 255.0).round() as u8,
-                (c.b * 255.0).round() as u8,
-            ])
+            let c = hsv_to_rgb(HsvColor {
+                h: hue / 360.0,
+                s: sat,
+                v: val,
+            });
+            (
+                id,
+                [
+                    (c.r * 255.0).round() as u8,
+                    (c.g * 255.0).round() as u8,
+                    (c.b * 255.0).round() as u8,
+                ],
+            )
         })
         .collect();
 
@@ -344,31 +360,28 @@ pub fn export_stroke_id_png(
         }
     }
 
-    image::save_buffer(path, &pixels, resolution, resolution, image::ColorType::Rgb8)?;
+    image::save_buffer(
+        path,
+        &pixels,
+        resolution,
+        resolution,
+        image::ColorType::Rgb8,
+    )?;
     Ok(())
 }
 
 // ── EXR Export Functions ──
 
 /// Export a height map as a single-channel float32 EXR (linear).
-pub fn export_height_exr(
-    height: &[f32],
-    resolution: u32,
-    path: &Path,
-) -> Result<(), OutputError> {
+pub fn export_height_exr(height: &[f32], resolution: u32, path: &Path) -> Result<(), OutputError> {
     use exr::prelude::*;
 
     let res = resolution as usize;
 
-    write_rgb_file(
-        path,
-        res,
-        res,
-        |x, y| {
-            let h = height[y * res + x];
-            (h, h, h)
-        },
-    )
+    write_rgb_file(path, res, res, |x, y| {
+        let h = height[y * res + x];
+        (h, h, h)
+    })
     .map_err(|e| OutputError::ExrError(e.to_string()))?;
 
     Ok(())
@@ -387,26 +400,16 @@ pub fn export_color_exr(
     let res = resolution as usize;
 
     if with_alpha {
-        write_rgba_file(
-            path,
-            res,
-            res,
-            |x, y| {
-                let c = &color[y * res + x];
-                (c.r, c.g, c.b, c.a)
-            },
-        )
+        write_rgba_file(path, res, res, |x, y| {
+            let c = &color[y * res + x];
+            (c.r, c.g, c.b, c.a)
+        })
         .map_err(|e| OutputError::ExrError(e.to_string()))?;
     } else {
-        write_rgb_file(
-            path,
-            res,
-            res,
-            |x, y| {
-                let c = &color[y * res + x];
-                (c.r, c.g, c.b)
-            },
-        )
+        write_rgb_file(path, res, res, |x, y| {
+            let c = &color[y * res + x];
+            (c.r, c.g, c.b)
+        })
         .map_err(|e| OutputError::ExrError(e.to_string()))?;
     }
 
@@ -523,7 +526,9 @@ mod tests {
 
     // ── Normal Map Tests ──
 
-    fn zeros(n: usize) -> Vec<f32> { vec![0.0f32; n] }
+    fn zeros(n: usize) -> Vec<f32> {
+        vec![0.0f32; n]
+    }
 
     #[test]
     fn normal_flat_surface() {
@@ -536,7 +541,9 @@ mod tests {
             assert!(
                 (n[0] - 0.5).abs() < EPS && (n[1] - 0.5).abs() < EPS && (n[2] - 1.0).abs() < EPS,
                 "flat at {i}: expected (0.5, 0.5, 1.0), got ({:.4}, {:.4}, {:.4})",
-                n[0], n[1], n[2]
+                n[0],
+                n[1],
+                n[2]
             );
         }
     }
@@ -583,7 +590,9 @@ mod tests {
             assert!(
                 (n[0] - 0.5).abs() < EPS && (n[1] - 0.5).abs() < EPS,
                 "strength=0 at {i}: expected flat, got ({:.4}, {:.4}, {:.4})",
-                n[0], n[1], n[2]
+                n[0],
+                n[1],
+                n[2]
             );
         }
     }
@@ -704,9 +713,21 @@ mod tests {
 
         let img = image::open(&path).unwrap().to_rgb8();
         let pixel = img.get_pixel(0, 0);
-        assert_eq!(pixel[0], 128, "flat normal R should be 128, got {}", pixel[0]);
-        assert_eq!(pixel[1], 128, "flat normal G should be 128, got {}", pixel[1]);
-        assert_eq!(pixel[2], 255, "flat normal B should be 255, got {}", pixel[2]);
+        assert_eq!(
+            pixel[0], 128,
+            "flat normal R should be 128, got {}",
+            pixel[0]
+        );
+        assert_eq!(
+            pixel[1], 128,
+            "flat normal G should be 128, got {}",
+            pixel[1]
+        );
+        assert_eq!(
+            pixel[2], 255,
+            "flat normal B should be 255, got {}",
+            pixel[2]
+        );
     }
 
     #[test]
@@ -732,9 +753,19 @@ mod tests {
         // ID 5 and ID 10 should be different non-black colors
         let p1 = img.get_pixel(1, 0);
         let p2 = img.get_pixel(2, 0);
-        assert!(p1[0] > 0 || p1[1] > 0 || p1[2] > 0, "ID 5 should not be black");
-        assert!(p2[0] > 0 || p2[1] > 0 || p2[2] > 0, "ID 10 should not be black");
-        assert_ne!([p1[0], p1[1], p1[2]], [p2[0], p2[1], p2[2]], "different IDs should have different colors");
+        assert!(
+            p1[0] > 0 || p1[1] > 0 || p1[2] > 0,
+            "ID 5 should not be black"
+        );
+        assert!(
+            p2[0] > 0 || p2[1] > 0 || p2[2] > 0,
+            "ID 10 should not be black"
+        );
+        assert_ne!(
+            [p1[0], p1[1], p1[2]],
+            [p2[0], p2[1], p2[2]],
+            "different IDs should have different colors"
+        );
     }
 
     // ── EXR Export Tests ──
@@ -795,21 +826,9 @@ mod tests {
 
         // Values should be written as-is (no sRGB conversion)
         let p = tex.pixels[0];
-        assert!(
-            (p[0] - 0.3).abs() < EPS,
-            "R: expected 0.3, got {}",
-            p[0]
-        );
-        assert!(
-            (p[1] - 0.6).abs() < EPS,
-            "G: expected 0.6, got {}",
-            p[1]
-        );
-        assert!(
-            (p[2] - 0.9).abs() < EPS,
-            "B: expected 0.9, got {}",
-            p[2]
-        );
+        assert!((p[0] - 0.3).abs() < EPS, "R: expected 0.3, got {}", p[0]);
+        assert!((p[1] - 0.6).abs() < EPS, "G: expected 0.6, got {}", p[1]);
+        assert!((p[2] - 0.9).abs() < EPS, "B: expected 0.9, got {}", p[2]);
     }
 
     // ── Export All Test ──
@@ -831,14 +850,28 @@ mod tests {
             &[],
         );
 
-        let dir = std::env::temp_dir().join("pap_test_output").join("export_all_png");
+        let dir = std::env::temp_dir()
+            .join("pap_test_output")
+            .join("export_all_png");
         export_all(&maps, &settings, &dir, ExportFormat::Png, None).unwrap();
 
         // Verify files exist
-        assert!(dir.join("color_map.png").exists(), "color_map.png should exist");
-        assert!(dir.join("height_map.png").exists(), "height_map.png should exist");
-        assert!(dir.join("normal_map.png").exists(), "normal_map.png should exist");
-        assert!(dir.join("stroke_id_map.png").exists(), "stroke_id_map.png should exist");
+        assert!(
+            dir.join("color_map.png").exists(),
+            "color_map.png should exist"
+        );
+        assert!(
+            dir.join("height_map.png").exists(),
+            "height_map.png should exist"
+        );
+        assert!(
+            dir.join("normal_map.png").exists(),
+            "normal_map.png should exist"
+        );
+        assert!(
+            dir.join("stroke_id_map.png").exists(),
+            "stroke_id_map.png should exist"
+        );
     }
 
     #[test]
@@ -858,13 +891,27 @@ mod tests {
             &[],
         );
 
-        let dir = std::env::temp_dir().join("pap_test_output").join("export_all_exr");
+        let dir = std::env::temp_dir()
+            .join("pap_test_output")
+            .join("export_all_exr");
         export_all(&maps, &settings, &dir, ExportFormat::Exr, None).unwrap();
 
-        assert!(dir.join("color_map.exr").exists(), "color_map.exr should exist");
-        assert!(dir.join("height_map.exr").exists(), "height_map.exr should exist");
-        assert!(dir.join("normal_map.png").exists(), "normal_map.png should exist");
-        assert!(dir.join("stroke_id_map.png").exists(), "stroke_id_map.png should exist");
+        assert!(
+            dir.join("color_map.exr").exists(),
+            "color_map.exr should exist"
+        );
+        assert!(
+            dir.join("height_map.exr").exists(),
+            "height_map.exr should exist"
+        );
+        assert!(
+            dir.join("normal_map.png").exists(),
+            "normal_map.png should exist"
+        );
+        assert!(
+            dir.join("stroke_id_map.png").exists(),
+            "stroke_id_map.png should exist"
+        );
     }
 
     // ── Visual Integration Test ──
@@ -914,10 +961,7 @@ mod tests {
             let dy = n[1] * 2.0 - 1.0;
             let dz = n[2] * 2.0 - 1.0;
             let len = (dx * dx + dy * dy + dz * dz).sqrt();
-            assert!(
-                (len - 1.0).abs() < 0.01,
-                "not unit length: {len:.4}"
-            );
+            assert!((len - 1.0).abs() < 0.01, "not unit length: {len:.4}");
         }
     }
 

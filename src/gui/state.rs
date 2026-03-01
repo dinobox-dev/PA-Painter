@@ -50,16 +50,14 @@ impl ViewportTab {
 }
 
 /// Guide editing tool (active only in the Guide tab).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GuideTool {
     #[default]
-    Select,         // 1 — click=select, drag center=move, drag handle=direction
+    Select, // 1 — click=select, drag center=move, drag handle=direction
     AddDirectional, // 2
     AddRadial,      // 3 — creates Source; toggle Inward in popup for Sink
     AddVortex,      // 4
 }
-
 
 /// Viewport pan/zoom state.
 pub struct ViewportState {
@@ -124,7 +122,6 @@ pub struct GroupDimCache {
     pub texture: Option<egui::TextureHandle>,
 }
 
-
 impl GroupDimCache {
     pub fn invalidate(&mut self) {
         self.key = None;
@@ -172,7 +169,10 @@ pub struct AppState {
     pub preset_thumbnails: preview::PresetThumbnailCache,
     /// Cached mesh normal data for path overlay normal-break preview.
     /// Tuple of (resolution, data); invalidated on mesh reload or resolution change.
-    pub cached_mesh_normals: Option<(u32, Arc<practical_arcana_painter::object_normal::MeshNormalData>)>,
+    pub cached_mesh_normals: Option<(
+        u32,
+        Arc<practical_arcana_painter::object_normal::MeshNormalData>,
+    )>,
 
     // ── Generation ──
     pub generation: GenerationManager,
@@ -209,7 +209,12 @@ pub struct AppState {
 
     /// Snapshot of layers + settings + asset hashes at last generation — used to detect outdated results.
     /// Tuple: (layers, output_settings, texture_colors_hash, normal_tex_hash).
-    pub generation_snapshot: Option<(Vec<Layer>, practical_arcana_painter::types::OutputSettings, u64, u64)>,
+    pub generation_snapshot: Option<(
+        Vec<Layer>,
+        practical_arcana_painter::types::OutputSettings,
+        u64,
+        u64,
+    )>,
 
     // ── Undo/Redo ──
     pub undo: UndoHistory,
@@ -299,7 +304,8 @@ impl AppState {
         }
         // Fix selected_guide if the layer now has fewer guides
         if let Some(gi) = self.selected_guide {
-            let valid = self.selected_layer
+            let valid = self
+                .selected_layer
                 .and_then(|li| self.project.layers.get(li))
                 .is_some_and(|layer| gi < layer.guides.len());
             if !valid {

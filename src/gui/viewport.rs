@@ -155,11 +155,9 @@ fn strip_overlay_controls(ui: &mut egui::Ui, state: &mut AppState) {
 /// 32px-tall text toggle button. Active = tinted background, inactive = plain.
 fn overlay_text_button(ui: &mut egui::Ui, label: &str, active: bool, on_click: impl FnOnce()) {
     let font = egui::FontId::proportional(14.0);
-    let galley = ui.painter().layout_no_wrap(
-        label.to_string(),
-        font.clone(),
-        ui.visuals().text_color(),
-    );
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_string(), font.clone(), ui.visuals().text_color());
     let text_size = galley.size();
     let pad_x = 8.0;
     let desired = Vec2::new(text_size.x + pad_x * 2.0, 32.0);
@@ -192,11 +190,9 @@ fn path_overlay_button(ui: &mut egui::Ui, selected: &mut Option<usize>) {
 
     let dot_r = 6.0;
     let font = egui::FontId::proportional(14.0);
-    let galley = ui.painter().layout_no_wrap(
-        "Paths".to_string(),
-        font.clone(),
-        ui.visuals().text_color(),
-    );
+    let galley =
+        ui.painter()
+            .layout_no_wrap("Paths".to_string(), font.clone(), ui.visuals().text_color());
     let text_size = galley.size();
 
     // Layout: [pad] text [gap] dot [pad]
@@ -218,10 +214,7 @@ fn path_overlay_button(ui: &mut egui::Ui, selected: &mut Option<usize>) {
         p.galley(text_pos, galley, ui.visuals().text_color());
 
         // Color dot
-        let dot_center = Pos2::new(
-            rect.right() - pad_x - dot_r,
-            rect.center().y,
-        );
+        let dot_center = Pos2::new(rect.right() - pad_x - dot_r, rect.center().y);
         match *selected {
             Some(idx) => {
                 let &[rc, gc, bc] = PATH_PALETTE.get(idx).unwrap_or(&PATH_PALETTE[0]);
@@ -270,10 +263,18 @@ fn path_overlay_button(ui: &mut egui::Ui, selected: &mut Option<usize>) {
                     let c = rect.center();
                     let p = ui.painter();
                     if is_off {
-                        p.circle_stroke(c, popup_dot_r + 2.0, egui::Stroke::new(1.5, Color32::WHITE));
+                        p.circle_stroke(
+                            c,
+                            popup_dot_r + 2.0,
+                            egui::Stroke::new(1.5, Color32::WHITE),
+                        );
                     }
                     let gray = if resp.hovered() { 160 } else { 100 };
-                    p.circle_stroke(c, popup_dot_r, egui::Stroke::new(1.0, Color32::from_gray(gray)));
+                    p.circle_stroke(
+                        c,
+                        popup_dot_r,
+                        egui::Stroke::new(1.0, Color32::from_gray(gray)),
+                    );
                     let d = popup_dot_r * 0.55;
                     p.line_segment(
                         [Pos2::new(c.x - d, c.y + d), Pos2::new(c.x + d, c.y - d)],
@@ -317,10 +318,10 @@ fn strip_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 4.0;
     use egui_phosphor::fill::*;
     let maps = [
-        (MapMode::Color,    "1", PALETTE,   "Color"),
-        (MapMode::Height,   "2", MOUNTAINS, "Height"),
-        (MapMode::Normal,   "3", SPHERE,    "Normal"),
-        (MapMode::StrokeId, "4", HASH,      "Stroke ID"),
+        (MapMode::Color, "1", PALETTE, "Color"),
+        (MapMode::Height, "2", MOUNTAINS, "Height"),
+        (MapMode::Normal, "3", SPHERE, "Normal"),
+        (MapMode::StrokeId, "4", HASH, "Stroke ID"),
     ];
     for (mode, num, icon, tooltip) in &maps {
         if toolbar_icon_button(ui, state.map_mode == *mode, icon, num, tooltip) {
@@ -337,19 +338,20 @@ fn strip_guide(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 4.0;
     use egui_phosphor::fill::*;
     let tools = [
-        (GuideTool::Select,         "1", CURSOR,  "Select"),
+        (GuideTool::Select, "1", CURSOR, "Select"),
         (GuideTool::AddDirectional, "2", COMPASS, "Directional"),
-        (GuideTool::AddRadial,      "3", TARGET,  "Radial"),
-        (GuideTool::AddVortex,      "4", SPIRAL,  "Vortex"),
+        (GuideTool::AddRadial, "3", TARGET, "Radial"),
+        (GuideTool::AddVortex, "4", SPIRAL, "Vortex"),
     ];
     for (tool, num, icon, tooltip) in &tools {
         if toolbar_icon_button(ui, state.guide_tool == *tool, icon, num, tooltip)
-            && state.guide_tool != *tool {
-                if *tool != GuideTool::Select {
-                    state.selected_guide = None;
-                }
-                state.guide_tool = *tool;
+            && state.guide_tool != *tool
+        {
+            if *tool != GuideTool::Select {
+                state.selected_guide = None;
             }
+            state.guide_tool = *tool;
+        }
     }
     ui.separator();
     strip_overlay_controls(ui, state);
@@ -366,8 +368,7 @@ fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
 // ── UV View tab ─────────────────────────────────────────────────────
 
 fn show_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
-    let (response, painter) =
-        ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+    let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let rect = response.rect;
 
     painter.rect_filled(rect, 0.0, Color32::from_gray(48));
@@ -408,8 +409,7 @@ fn show_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
 // ── Guide tab ───────────────────────────────────────────────────────
 
 fn show_guide_view(ui: &mut egui::Ui, state: &mut AppState) {
-    let (response, painter) =
-        ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+    let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let rect = response.rect;
 
     painter.rect_filled(rect, 0.0, Color32::from_gray(48));
@@ -436,11 +436,7 @@ fn show_guide_view(ui: &mut egui::Ui, state: &mut AppState) {
             Color32::WHITE,
         );
     } else {
-        painter.rect_filled(
-            uv_rect,
-            0.0,
-            Color32::from_rgba_unmultiplied(0, 0, 0, 80),
-        );
+        painter.rect_filled(uv_rect, 0.0, Color32::from_rgba_unmultiplied(0, 0, 0, 80));
     }
 
     draw_path_overlay(&painter, state, rect);
@@ -545,8 +541,7 @@ fn draw_wireframe(painter: &egui::Painter, state: &AppState, rect: Rect) {
         return;
     }
     if let Some(ref edges) = state.uv_edges {
-        let halo_stroke =
-            egui::Stroke::new(2.0, Color32::from_rgba_unmultiplied(0, 0, 0, 100));
+        let halo_stroke = egui::Stroke::new(2.0, Color32::from_rgba_unmultiplied(0, 0, 0, 100));
         let wire_stroke =
             egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 150));
         for &(a, b) in edges {
@@ -721,7 +716,9 @@ fn draw_path_overlay(painter: &egui::Painter, state: &AppState, rect: Rect) {
     let path_stroke = egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(r, g, b, 80));
 
     let mut badge_info: Option<(usize, Option<u32>)> = None;
-    if let Some((_layer_idx, paths, orig_segs)) = state.path_overlay.selected_paths(state.selected_layer) {
+    if let Some((_layer_idx, paths, orig_segs)) =
+        state.path_overlay.selected_paths(state.selected_layer)
+    {
         // Safety cap: prevent wgpu buffer overflow if worker budget wasn't enough.
         const MAX_SEGMENTS: usize = 100_000;
         let total_segs: usize = paths.iter().map(|p| p.len().saturating_sub(1)).sum();
@@ -787,17 +784,17 @@ fn draw_path_overlay(painter: &egui::Painter, state: &AppState, rect: Rect) {
 
         // Spinning arc inside badge
         let time = painter.ctx().input(|i| i.time) as f32;
-        let center = Pos2::new(
-            badge_rect.left() + pad + spinner_r,
-            badge_rect.center().y,
-        );
+        let center = Pos2::new(badge_rect.left() + pad + spinner_r, badge_rect.center().y);
         let start_angle = time * 5.0;
         let arc_len = std::f32::consts::PI * 1.5;
         let steps = 16;
         let arc_pts: Vec<Pos2> = (0..=steps)
             .map(|i| {
                 let a = start_angle + (i as f32 / steps as f32) * arc_len;
-                Pos2::new(center.x + spinner_r * a.cos(), center.y + spinner_r * a.sin())
+                Pos2::new(
+                    center.x + spinner_r * a.cos(),
+                    center.y + spinner_r * a.sin(),
+                )
             })
             .collect();
         painter.add(egui::Shape::line(
@@ -862,7 +859,11 @@ fn draw_stale_badge(painter: &egui::Painter, state: &AppState, rect: Rect) {
             Pos2::new(rect.left() + 8.0, rect.top() + 8.0),
             Vec2::new(galley.size().x + 12.0, galley.size().y + 6.0),
         );
-        painter.rect_filled(badge_rect, 4.0, Color32::from_rgba_unmultiplied(180, 140, 30, 200));
+        painter.rect_filled(
+            badge_rect,
+            4.0,
+            Color32::from_rgba_unmultiplied(180, 140, 30, 200),
+        );
         painter.text(
             badge_rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -884,8 +885,7 @@ fn handle_pan_zoom(
     // Pan (middle-drag or alt+left-drag, not during guide drag)
     if !guide_dragging
         && (response.dragged_by(egui::PointerButton::Middle)
-            || (response.dragged_by(egui::PointerButton::Primary)
-                && ui.input(|i| i.modifiers.alt)))
+            || (response.dragged_by(egui::PointerButton::Primary) && ui.input(|i| i.modifiers.alt)))
     {
         let delta = response.drag_delta();
         state.viewport.offset.x -= delta.x / state.viewport.zoom;
@@ -984,10 +984,8 @@ fn draw_guide_popup(ui: &mut egui::Ui, state: &mut AppState, viewport_rect: Rect
                 ui.scope(|ui: &mut egui::Ui| {
                     ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
                     ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
-                    let btn = egui::Button::new(
-                        egui::RichText::new(TRASH_SIMPLE).size(15.0),
-                    )
-                    .min_size(egui::Vec2::splat(button_size));
+                    let btn = egui::Button::new(egui::RichText::new(TRASH_SIMPLE).size(15.0))
+                        .min_size(egui::Vec2::splat(button_size));
                     if ui.add(btn).on_hover_text("Delete").clicked() {
                         deleted = true;
                     }
@@ -1020,11 +1018,10 @@ fn draw_guide_popup(ui: &mut egui::Ui, state: &mut AppState, viewport_rect: Rect
                             GuideType::Directional,
                             "Directional",
                         );
-                        if ui.selectable_value(
-                            &mut guide.guide_type,
-                            GuideType::Source,
-                            "Radial",
-                        ).changed() {
+                        if ui
+                            .selectable_value(&mut guide.guide_type, GuideType::Source, "Radial")
+                            .changed()
+                        {
                             guide.direction.x = 1.0;
                         }
                         ui.selectable_value(&mut guide.guide_type, GuideType::Vortex, "Vortex");
@@ -1052,10 +1049,25 @@ fn draw_guide_popup(ui: &mut egui::Ui, state: &mut AppState, viewport_rect: Rect
             });
 
             // Influence
-            slider_row(ui, "guide_influence", &mut guide.influence, 0.02..=1.0, "Influence", None, 2);
+            slider_row(
+                ui,
+                "guide_influence",
+                &mut guide.influence,
+                0.02..=1.0,
+                "Influence",
+                None,
+                2,
+            );
 
             // Strength
-            slider_row(ui, "guide_strength", &mut guide.strength, 0.0..=2.0, "Strength", None, 2);
-
+            slider_row(
+                ui,
+                "guide_strength",
+                &mut guide.strength,
+                0.0..=2.0,
+                "Strength",
+                None,
+                2,
+            );
         });
 }

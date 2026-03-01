@@ -49,11 +49,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     .width(combo_w)
                     .show_ui(ui, |ui: &mut egui::Ui| {
                         for name in &group_names {
-                            ui.selectable_value(
-                                &mut layer.group_name,
-                                name.clone(),
-                                name.as_str(),
-                            );
+                            ui.selectable_value(&mut layer.group_name, name.clone(), name.as_str());
                         }
                     });
             });
@@ -88,17 +84,81 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(4.0);
 
         ui.label(egui::RichText::new("Brush").weak());
-        slider_row(ui, "brush_width", &mut layer.paint.brush_width, 5.0..=100.0, "Brush Width", None, 1);
-        slider_row(ui, "load", &mut layer.paint.load, 0.0..=2.0, "Load", Some(0.01), 2);
-        slider_row(ui, "body_wiggle", &mut layer.paint.body_wiggle, 0.0..=0.5, "Body Wiggle", Some(0.01), 2);
+        slider_row(
+            ui,
+            "brush_width",
+            &mut layer.paint.brush_width,
+            5.0..=100.0,
+            "Brush Width",
+            None,
+            1,
+        );
+        slider_row(
+            ui,
+            "load",
+            &mut layer.paint.load,
+            0.0..=2.0,
+            "Load",
+            Some(0.01),
+            2,
+        );
+        slider_row(
+            ui,
+            "body_wiggle",
+            &mut layer.paint.body_wiggle,
+            0.0..=0.5,
+            "Body Wiggle",
+            Some(0.01),
+            2,
+        );
 
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Layout").weak());
-        slider_row(ui, "stroke_spacing", &mut layer.paint.stroke_spacing, 0.1..=3.0, "Spacing", Some(0.1), 1);
-        slider_row(ui, "max_stroke_length", &mut layer.paint.max_stroke_length, 10.0..=500.0, "Max Length", None, 0);
-        slider_row(ui, "angle_variation", &mut layer.paint.angle_variation, 0.0..=45.0, "Angle Var", None, 1);
-        slider_row(ui, "max_turn_angle", &mut layer.paint.max_turn_angle, 0.0..=90.0, "Max Turn", None, 1);
-        slider_row(ui, "color_variation", &mut layer.paint.color_variation, 0.0..=0.5, "Color Var", Some(0.01), 2);
+        slider_row(
+            ui,
+            "stroke_spacing",
+            &mut layer.paint.stroke_spacing,
+            0.1..=3.0,
+            "Spacing",
+            Some(0.1),
+            1,
+        );
+        slider_row(
+            ui,
+            "max_stroke_length",
+            &mut layer.paint.max_stroke_length,
+            10.0..=500.0,
+            "Max Length",
+            None,
+            0,
+        );
+        slider_row(
+            ui,
+            "angle_variation",
+            &mut layer.paint.angle_variation,
+            0.0..=45.0,
+            "Angle Var",
+            None,
+            1,
+        );
+        slider_row(
+            ui,
+            "max_turn_angle",
+            &mut layer.paint.max_turn_angle,
+            0.0..=90.0,
+            "Max Turn",
+            None,
+            1,
+        );
+        slider_row(
+            ui,
+            "color_variation",
+            &mut layer.paint.color_variation,
+            0.0..=0.5,
+            "Color Var",
+            Some(0.01),
+            2,
+        );
 
         let mut color_break_enabled = layer.paint.color_break_threshold.is_some();
         ui.checkbox(&mut color_break_enabled, "Color Break");
@@ -117,7 +177,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         } else {
             layer.paint.normal_break_threshold = None;
         }
-
     });
 
     ui.separator();
@@ -129,10 +188,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     );
     ui.indent("guides_content", |ui: &mut egui::Ui| {
         if state.project.layers[idx].guides.is_empty() {
-            ui.label(
-                egui::RichText::new("No guides")
-                    .color(egui::Color32::from_gray(120)),
-            );
+            ui.label(egui::RichText::new("No guides").color(egui::Color32::from_gray(120)));
         }
         for i in 0..state.project.layers[idx].guides.len() {
             let guide = &state.project.layers[idx].guides[i];
@@ -155,7 +211,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
 /// Preset combo box only (no label, no save button).
 /// Width is caller-specified. Applies selection immediately.
-fn show_preset_combo_sized(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize, combo_w: f32) {
+fn show_preset_combo_sized(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    layer_idx: usize,
+    combo_w: f32,
+) {
     let layer_seed = state.project.settings.seed.wrapping_add(layer_idx as u32);
     let current_paint = state.project.layers[layer_idx].paint.clone();
 
@@ -181,133 +242,164 @@ fn show_preset_combo_sized(ui: &mut egui::Ui, state: &mut AppState, layer_idx: u
         egui::Vec2::new(combo_w, ui.available_height()),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui: &mut egui::Ui| {
+            egui::ComboBox::from_id_salt("preset_combo")
+                .selected_text(&current_name)
+                .width(combo_w)
+                .truncate()
+                .show_ui(ui, |ui: &mut egui::Ui| {
+                    // Fix popup content width to match combo button
+                    ui.set_max_width(combo_w);
 
-    egui::ComboBox::from_id_salt("preset_combo")
-        .selected_text(&current_name)
-        .width(combo_w)
-        .truncate()
-        .show_ui(ui, |ui: &mut egui::Ui| {
-            // Fix popup content width to match combo button
-            ui.set_max_width(combo_w);
+                    let delete_btn_w = 18.0;
+                    let thumb_w = 60.0;
+                    let spacing = ui.spacing().item_spacing.x;
+                    let scrollbar_margin =
+                        ui.spacing().scroll.bar_width + ui.spacing().scroll.bar_outer_margin;
 
-            let delete_btn_w = 18.0;
-            let thumb_w = 60.0;
-            let spacing = ui.spacing().item_spacing.x;
-            let scrollbar_margin = ui.spacing().scroll.bar_width + ui.spacing().scroll.bar_outer_margin;
+                    // User presets first (if any)
+                    if !user_presets.is_empty() {
+                        ui.label(egui::RichText::new("Custom").weak().size(11.0));
+                        for (i, preset) in user_presets.iter().enumerate() {
+                            let thumb_id =
+                                thumbs.get_or_create(ui.ctx(), &preset.values, layer_seed);
+                            let selected = current_name == preset.name;
+                            let row_w = ui.available_width() - scrollbar_margin;
 
-            // User presets first (if any)
-            if !user_presets.is_empty() {
-                ui.label(egui::RichText::new("Custom").weak().size(11.0));
-                for (i, preset) in user_presets.iter().enumerate() {
-                    let thumb_id = thumbs.get_or_create(ui.ctx(), &preset.values, layer_seed);
-                    let selected = current_name == preset.name;
-                    let row_w = ui.available_width() - scrollbar_margin;
+                            // Row: [thumb] [name...] [delete]
+                            let row_h = 20.0;
+                            let (rect, resp) = ui.allocate_exact_size(
+                                egui::Vec2::new(row_w, row_h),
+                                egui::Sense::click(),
+                            );
+                            if ui.is_rect_visible(rect) {
+                                let p = ui.painter();
+                                if selected {
+                                    p.rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
+                                } else if resp.hovered() {
+                                    p.rect_filled(rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                                }
+                                // Thumbnail (vertically centered)
+                                let img_y = rect.center().y - 8.0;
+                                let img_rect = egui::Rect::from_min_size(
+                                    egui::Pos2::new(rect.min.x + 2.0, img_y),
+                                    egui::Vec2::new(thumb_w, 16.0),
+                                );
+                                p.image(
+                                    thumb_id,
+                                    img_rect,
+                                    egui::Rect::from_min_max(
+                                        egui::Pos2::ZERO,
+                                        egui::Pos2::new(1.0, 1.0),
+                                    ),
+                                    egui::Color32::WHITE,
+                                );
+                                // Name text (truncated)
+                                let text_left = rect.min.x + thumb_w + spacing + 2.0;
+                                let text_right = rect.max.x - delete_btn_w - spacing;
+                                let text_color = if selected {
+                                    ui.visuals().selection.stroke.color
+                                } else {
+                                    ui.visuals().text_color()
+                                };
+                                let max_text_w = (text_right - text_left).max(10.0);
+                                let font_id = egui::TextStyle::Body.resolve(ui.style());
+                                paint_truncated_text(
+                                    p,
+                                    &preset.name,
+                                    font_id,
+                                    text_color,
+                                    text_left,
+                                    rect,
+                                    max_text_w,
+                                );
+                            }
+                            if resp.clicked() {
+                                selected_values = Some(preset.values.clone());
+                            }
 
-                    // Row: [thumb] [name...] [delete]
-                    let row_h = 20.0;
-                    let (rect, resp) = ui.allocate_exact_size(
-                        egui::Vec2::new(row_w, row_h),
-                        egui::Sense::click(),
-                    );
-                    if ui.is_rect_visible(rect) {
-                        let p = ui.painter();
-                        if selected {
-                            p.rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
-                        } else if resp.hovered() {
-                            p.rect_filled(rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                            // Delete button (overlaid on the row, right side)
+                            let del_rect = egui::Rect::from_min_size(
+                                egui::Pos2::new(rect.max.x - delete_btn_w, rect.min.y),
+                                egui::Vec2::new(delete_btn_w, row_h),
+                            );
+                            let del_id = ui.id().with(("del_preset", i));
+                            let del_resp = ui.interact(del_rect, del_id, egui::Sense::click());
+                            if ui.is_rect_visible(del_rect) {
+                                use egui_phosphor::fill::TRASH_SIMPLE;
+                                paint_icon(
+                                    ui.painter(),
+                                    ui,
+                                    del_rect,
+                                    TRASH_SIMPLE,
+                                    13.0,
+                                    true,
+                                    del_resp.hovered(),
+                                );
+                            }
+                            if del_resp.on_hover_text("Delete").clicked() {
+                                delete_user_idx = Some(i);
+                            }
                         }
-                        // Thumbnail (vertically centered)
-                        let img_y = rect.center().y - 8.0;
-                        let img_rect = egui::Rect::from_min_size(
-                            egui::Pos2::new(rect.min.x + 2.0, img_y),
-                            egui::Vec2::new(thumb_w, 16.0),
+                        ui.separator();
+                    }
+
+                    // Built-in presets
+                    ui.label(egui::RichText::new("Built-in").weak().size(11.0));
+                    for preset in &builtin_presets {
+                        let thumb_id = thumbs.get_or_create(ui.ctx(), &preset.values, layer_seed);
+                        let selected = current_name == preset.name;
+                        let row_w = ui.available_width() - scrollbar_margin;
+                        let row_h = 20.0;
+                        let (rect, resp) = ui.allocate_exact_size(
+                            egui::Vec2::new(row_w, row_h),
+                            egui::Sense::click(),
                         );
-                        p.image(
-                            thumb_id,
-                            img_rect,
-                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                        // Name text (truncated)
-                        let text_left = rect.min.x + thumb_w + spacing + 2.0;
-                        let text_right = rect.max.x - delete_btn_w - spacing;
-                        let text_color = if selected {
-                            ui.visuals().selection.stroke.color
-                        } else {
-                            ui.visuals().text_color()
-                        };
-                        let max_text_w = (text_right - text_left).max(10.0);
-                        let font_id = egui::TextStyle::Body.resolve(ui.style());
-                        paint_truncated_text(p, &preset.name, font_id, text_color, text_left, rect, max_text_w);
+                        if ui.is_rect_visible(rect) {
+                            let p = ui.painter();
+                            if selected {
+                                p.rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
+                            } else if resp.hovered() {
+                                p.rect_filled(rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                            }
+                            let img_y = rect.center().y - 8.0;
+                            let img_rect = egui::Rect::from_min_size(
+                                egui::Pos2::new(rect.min.x + 2.0, img_y),
+                                egui::Vec2::new(thumb_w, 16.0),
+                            );
+                            p.image(
+                                thumb_id,
+                                img_rect,
+                                egui::Rect::from_min_max(
+                                    egui::Pos2::ZERO,
+                                    egui::Pos2::new(1.0, 1.0),
+                                ),
+                                egui::Color32::WHITE,
+                            );
+                            let text_left = rect.min.x + thumb_w + spacing + 2.0;
+                            let text_color = if selected {
+                                ui.visuals().selection.stroke.color
+                            } else {
+                                ui.visuals().text_color()
+                            };
+                            let max_text_w = (rect.max.x - text_left).max(10.0);
+                            let font_id = egui::TextStyle::Body.resolve(ui.style());
+                            paint_truncated_text(
+                                p,
+                                &preset.name,
+                                font_id,
+                                text_color,
+                                text_left,
+                                rect,
+                                max_text_w,
+                            );
+                        }
+                        if resp.clicked() {
+                            selected_values = Some(preset.values.clone());
+                        }
                     }
-                    if resp.clicked() {
-                        selected_values = Some(preset.values.clone());
-                    }
-
-                    // Delete button (overlaid on the row, right side)
-                    let del_rect = egui::Rect::from_min_size(
-                        egui::Pos2::new(rect.max.x - delete_btn_w, rect.min.y),
-                        egui::Vec2::new(delete_btn_w, row_h),
-                    );
-                    let del_id = ui.id().with(("del_preset", i));
-                    let del_resp = ui.interact(del_rect, del_id, egui::Sense::click());
-                    if ui.is_rect_visible(del_rect) {
-                        use egui_phosphor::fill::TRASH_SIMPLE;
-                        paint_icon(ui.painter(), ui, del_rect, TRASH_SIMPLE, 13.0, true, del_resp.hovered());
-                    }
-                    if del_resp.on_hover_text("Delete").clicked() {
-                        delete_user_idx = Some(i);
-                    }
-                }
-                ui.separator();
-            }
-
-            // Built-in presets
-            ui.label(egui::RichText::new("Built-in").weak().size(11.0));
-            for preset in &builtin_presets {
-                let thumb_id = thumbs.get_or_create(ui.ctx(), &preset.values, layer_seed);
-                let selected = current_name == preset.name;
-                let row_w = ui.available_width() - scrollbar_margin;
-                let row_h = 20.0;
-                let (rect, resp) = ui.allocate_exact_size(
-                    egui::Vec2::new(row_w, row_h),
-                    egui::Sense::click(),
-                );
-                if ui.is_rect_visible(rect) {
-                    let p = ui.painter();
-                    if selected {
-                        p.rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
-                    } else if resp.hovered() {
-                        p.rect_filled(rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
-                    }
-                    let img_y = rect.center().y - 8.0;
-                    let img_rect = egui::Rect::from_min_size(
-                        egui::Pos2::new(rect.min.x + 2.0, img_y),
-                        egui::Vec2::new(thumb_w, 16.0),
-                    );
-                    p.image(
-                        thumb_id,
-                        img_rect,
-                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                    let text_left = rect.min.x + thumb_w + spacing + 2.0;
-                    let text_color = if selected {
-                        ui.visuals().selection.stroke.color
-                    } else {
-                        ui.visuals().text_color()
-                    };
-                    let max_text_w = (rect.max.x - text_left).max(10.0);
-                    let font_id = egui::TextStyle::Body.resolve(ui.style());
-                    paint_truncated_text(p, &preset.name, font_id, text_color, text_left, rect, max_text_w);
-                }
-                if resp.clicked() {
-                    selected_values = Some(preset.values.clone());
-                }
-            }
-        });
-
-    }); // allocate_ui_with_layout
+                });
+        },
+    ); // allocate_ui_with_layout
 
     if let Some(values) = selected_values {
         state.project.layers[layer_idx].paint = values;
@@ -372,7 +464,10 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
 
         let area_resp = egui::Area::new(egui::Id::new("save_preset_popup"))
             .order(egui::Order::Foreground)
-            .fixed_pos(egui::Pos2::new(btn_resp.rect.left(), btn_resp.rect.bottom() + 4.0))
+            .fixed_pos(egui::Pos2::new(
+                btn_resp.rect.left(),
+                btn_resp.rect.bottom() + 4.0,
+            ))
             .show(ui.ctx(), |ui: &mut egui::Ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui: &mut egui::Ui| {
                     use egui_phosphor::fill::{CHECK, X};
@@ -403,8 +498,7 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
                             };
                             match state.project.presets.try_add_preset(preset) {
                                 Ok(()) => {
-                                    state.status_message =
-                                        format!("Saved preset: {}", name.trim());
+                                    state.status_message = format!("Saved preset: {}", name.trim());
                                     state.dirty = true;
                                 }
                                 Err(existing) => {
@@ -502,8 +596,10 @@ fn show_combined_stroke_curve(
     preview::update_stroke_cache(ui.ctx(), paint, seed, cache);
 
     let canvas_w = ui.available_width().min(256.0);
-    let (response, painter) =
-        ui.allocate_painter(egui::Vec2::new(canvas_w, CANVAS_H), egui::Sense::click_and_drag());
+    let (response, painter) = ui.allocate_painter(
+        egui::Vec2::new(canvas_w, CANVAS_H),
+        egui::Sense::click_and_drag(),
+    );
     let canvas = CurveCanvas::new(response.rect);
     let rect = response.rect;
 
@@ -531,18 +627,25 @@ fn show_combined_stroke_curve(
     }
 
     // 3. Grid lines (semi-transparent so stroke texture shows through)
-    let grid_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(80, 80, 80, 100));
+    let grid_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(80, 80, 80, 100));
     for i in 1..4 {
         let x = rect.left() + canvas_w * i as f32 / 4.0;
         painter.line_segment(
-            [egui::Pos2::new(x, rect.top()), egui::Pos2::new(x, rect.bottom())],
+            [
+                egui::Pos2::new(x, rect.top()),
+                egui::Pos2::new(x, rect.bottom()),
+            ],
             grid_stroke,
         );
     }
     for i in 1..4 {
         let y = rect.top() + CANVAS_H * i as f32 / 4.0;
         painter.line_segment(
-            [egui::Pos2::new(rect.left(), y), egui::Pos2::new(rect.right(), y)],
+            [
+                egui::Pos2::new(rect.left(), y),
+                egui::Pos2::new(rect.right(), y),
+            ],
             grid_stroke,
         );
     }
@@ -553,7 +656,10 @@ fn show_combined_stroke_curve(
             egui::Pos2::new(rect.left(), y1_screen),
             egui::Pos2::new(rect.right(), y1_screen),
         ],
-        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(100, 100, 100, 120)),
+        egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(100, 100, 100, 120),
+        ),
     );
 
     // 4. Pressure curve on top
@@ -608,7 +714,11 @@ fn draw_curve_knots_and_handles(
 
         for (i, knot) in knots.iter().enumerate() {
             let is_endpoint = i == 0 || i == n - 1;
-            let color = if is_endpoint { endpoint_color } else { midpoint_color };
+            let color = if is_endpoint {
+                endpoint_color
+            } else {
+                midpoint_color
+            };
             let center = canvas.to_screen(knot.pos[0], knot.pos[1]);
             painter.circle_filled(center, KNOT_RADIUS, color);
         }

@@ -5,12 +5,16 @@ use crate::brush_profile::generate_brush_profile;
 use crate::math::{lerp, lerp_color, perpendicular, smoothstep};
 use crate::object_normal::{try_sample_object_normal, MeshNormalData};
 use crate::path_placement::generate_paths;
-use crate::stroke_color::ColorTextureRef;
-use crate::uv_mask::UvMask;
 use crate::rng::SeededRng;
+use crate::stroke_color::ColorTextureRef;
 use crate::stroke_color::{compute_stroke_color, sample_bilinear};
-use crate::stroke_height::{compute_stroke_gradients, generate_stroke_height, StrokeGradientResult, StrokeHeightResult};
-use crate::types::{BackgroundMode, BaseColorSource, Color, NormalMode, OutputSettings, PaintLayer, StrokePath};
+use crate::stroke_height::{
+    compute_stroke_gradients, generate_stroke_height, StrokeGradientResult, StrokeHeightResult,
+};
+use crate::types::{
+    BackgroundMode, BaseColorSource, Color, NormalMode, OutputSettings, PaintLayer, StrokePath,
+};
+use crate::uv_mask::UvMask;
 
 /// Density threshold at which a stroke pixel becomes fully opaque.
 /// Below this, opacity ramps smoothly from 0 (via smoothstep).
@@ -66,7 +70,12 @@ impl GlobalMaps {
                         (px as f32 + 0.5) / resolution as f32,
                         (py as f32 + 0.5) / resolution as f32,
                     );
-                    colors.push(sample_bilinear(tex, base_color.tex_width, base_color.tex_height, uv));
+                    colors.push(sample_bilinear(
+                        tex,
+                        base_color.tex_width,
+                        base_color.tex_height,
+                        uv,
+                    ));
                 }
             }
             colors
@@ -103,10 +112,7 @@ fn bilinear_sample(data: &[f32], width: usize, height: usize, x: f32, y: f32) ->
     let h01 = data[y1 * width + x0];
     let h11 = data[y1 * width + x1];
 
-    h00 * (1.0 - sx) * (1.0 - sy)
-        + h10 * sx * (1.0 - sy)
-        + h01 * (1.0 - sx) * sy
-        + h11 * sx * sy
+    h00 * (1.0 - sx) * (1.0 - sy) + h10 * sx * (1.0 - sy) + h01 * (1.0 - sx) * sy + h11 * sx * sy
 }
 
 /// Per-stroke appearance parameters for compositing.
@@ -188,10 +194,7 @@ pub fn composite_stroke(
 
         for gy in gy_min..=gy_max {
             for gx in gx_min..=gx_max {
-                let uv = Vec2::new(
-                    (gx as f32 + 0.5) / res_f,
-                    (gy as f32 + 0.5) / res_f,
-                );
+                let uv = Vec2::new((gx as f32 + 0.5) / res_f, (gy as f32 + 0.5) / res_f);
 
                 let to_uv = uv - a;
                 let proj = to_uv.dot(seg_dir);
@@ -217,13 +220,7 @@ pub fn composite_stroke(
                     continue;
                 }
 
-                let h = bilinear_sample(
-                    &local_height.data,
-                    local_w,
-                    local_h,
-                    lx_f,
-                    ly_f,
-                );
+                let h = bilinear_sample(&local_height.data, local_w, local_h, lx_f, ly_f);
                 if h <= 0.0 {
                     continue;
                 }
@@ -235,12 +232,10 @@ pub fn composite_stroke(
 
                 // Gradient compositing: winner (highest density) takes gradient
                 if h >= prev_h {
-                    let local_gx = bilinear_sample(
-                        &local_gradient.gx, local_w, local_h, lx_f, ly_f,
-                    );
-                    let local_gy = bilinear_sample(
-                        &local_gradient.gy, local_w, local_h, lx_f, ly_f,
-                    );
+                    let local_gx =
+                        bilinear_sample(&local_gradient.gx, local_w, local_h, lx_f, ly_f);
+                    let local_gy =
+                        bilinear_sample(&local_gradient.gy, local_w, local_h, lx_f, ly_f);
                     // Rotate from local frame to global UV space
                     global.gradient_x[idx] = local_gx * seg_dir.x + local_gy * normal.x;
                     global.gradient_y[idx] = local_gx * seg_dir.y + local_gy * normal.y;
@@ -250,12 +245,8 @@ pub fn composite_stroke(
                 if transparent {
                     if global.stroke_id[idx] == 0 {
                         // First paint on virgin pixel: set color directly
-                        global.color[idx] = Color::new(
-                            stroke_color.r,
-                            stroke_color.g,
-                            stroke_color.b,
-                            opacity,
-                        );
+                        global.color[idx] =
+                            Color::new(stroke_color.r, stroke_color.g, stroke_color.b, opacity);
                     } else {
                         // Over-paint: blend paint colors, alpha accumulates (Porter-Duff "over")
                         let prev = global.color[idx];
@@ -308,7 +299,13 @@ pub fn generate_all_paths(
                 height: base_color.tex_height,
             });
             let mask = masks.get(layer_index).and_then(|m| *m);
-            generate_paths(layer, layer_index as u32, tex_ref.as_ref(), normal_data, mask)
+            generate_paths(
+                layer,
+                layer_index as u32,
+                tex_ref.as_ref(),
+                normal_data,
+                mask,
+            )
         })
         .collect();
 
@@ -341,7 +338,13 @@ pub fn composite_all(
     masks: &[Option<&UvMask>],
 ) -> GlobalMaps {
     composite_all_with_paths(
-        layers, resolution, base_color, settings, None, normal_data, masks,
+        layers,
+        resolution,
+        base_color,
+        settings,
+        None,
+        normal_data,
+        masks,
     )
 }
 
@@ -360,7 +363,12 @@ pub fn composite_all_with_paths(
     normal_data: Option<&MeshNormalData>,
     masks: &[Option<&UvMask>],
 ) -> GlobalMaps {
-    let mut global = GlobalMaps::new(resolution, base_color, settings.normal_mode, settings.background_mode);
+    let mut global = GlobalMaps::new(
+        resolution,
+        base_color,
+        settings.normal_mode,
+        settings.background_mode,
+    );
 
     // Sort layers by order (ascending), preserving original index for stroke ID encoding
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
@@ -380,7 +388,13 @@ pub fn composite_all_with_paths(
                     height: base_color.tex_height,
                 });
                 let mask = masks.get(layer_index).and_then(|m| *m);
-                generate_paths(layer, layer_index as u32, tex_ref.as_ref(), normal_data, mask)
+                generate_paths(
+                    layer,
+                    layer_index as u32,
+                    tex_ref.as_ref(),
+                    normal_data,
+                    mask,
+                )
             })
             .collect::<Vec<_>>();
         assign_unique_stroke_ids(&mut generated);
@@ -444,8 +458,7 @@ pub fn composite_layer(
     let scaled = layer.params.scaled_for_resolution(resolution);
 
     // Generate brush profile once per layer (same seed for all strokes in layer)
-    let brush_profile =
-        generate_brush_profile(scaled.brush_width.round() as usize, scaled.seed);
+    let brush_profile = generate_brush_profile(scaled.brush_width.round() as usize, scaled.seed);
 
     // Step 1: Pre-compute stroke colors sequentially (preserves RNG determinism)
     let mut rng = SeededRng::new(scaled.seed);
@@ -549,13 +562,22 @@ mod tests {
 
     impl LocalFrameTransform {
         fn local_to_uv(&self, lx: usize, ly: usize) -> Option<Vec2> {
-            if lx >= self.width || ly >= self.height { return None; }
+            if lx >= self.width || ly >= self.height {
+                return None;
+            }
             let uv = self.uv_map[ly * self.width + lx];
-            if uv.x.is_nan() { None } else { Some(uv) }
+            if uv.x.is_nan() {
+                None
+            } else {
+                Some(uv)
+            }
         }
 
         fn uv_to_pixel(uv: Vec2, resolution: u32) -> (i32, i32) {
-            ((uv.x * resolution as f32) as i32, (uv.y * resolution as f32) as i32)
+            (
+                (uv.x * resolution as f32) as i32,
+                (uv.y * resolution as f32) as i32,
+            )
         }
     }
 
@@ -573,13 +595,17 @@ mod tests {
         for ly in 0..local_height.height {
             for lx in 0..local_height.width {
                 let h = local_height.data[ly * local_height.width + lx];
-                if h <= 0.0 { continue; }
+                if h <= 0.0 {
+                    continue;
+                }
                 let uv = match transform.local_to_uv(lx, ly) {
                     Some(uv) => uv,
                     None => continue,
                 };
                 let (px, py) = LocalFrameTransform::uv_to_pixel(uv, res);
-                if px < 0 || py < 0 || px >= res as i32 || py >= res as i32 { continue; }
+                if px < 0 || py < 0 || px >= res as i32 || py >= res as i32 {
+                    continue;
+                }
                 let idx = (py as u32 * res + px as u32) as usize;
                 global.height[idx] = h.max(global.height[idx]);
                 let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h);
@@ -615,7 +641,12 @@ mod tests {
 
     #[test]
     fn global_maps_dimensions() {
-        let maps = GlobalMaps::new(64, &BaseColorSource::solid(Color::WHITE), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let maps = GlobalMaps::new(
+            64,
+            &BaseColorSource::solid(Color::WHITE),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         assert_eq!(maps.height.len(), 64 * 64);
         assert_eq!(maps.color.len(), 64 * 64);
         assert_eq!(maps.stroke_id.len(), 64 * 64);
@@ -625,7 +656,12 @@ mod tests {
     #[test]
     fn global_maps_solid_color_init() {
         let color = Color::rgb(0.3, 0.6, 0.9);
-        let maps = GlobalMaps::new(16, &BaseColorSource::solid(color), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let maps = GlobalMaps::new(
+            16,
+            &BaseColorSource::solid(color),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         for c in &maps.color {
             assert!((c.r - 0.3).abs() < EPS);
             assert!((c.g - 0.6).abs() < EPS);
@@ -643,7 +679,12 @@ mod tests {
             Color::rgb(0.0, 0.0, 1.0),
             Color::rgb(1.0, 1.0, 0.0),
         ];
-        let maps = GlobalMaps::new(4, &BaseColorSource::textured(&tex, 2, 2, Color::WHITE), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let maps = GlobalMaps::new(
+            4,
+            &BaseColorSource::textured(&tex, 2, 2, Color::WHITE),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         assert_eq!(maps.color.len(), 16);
 
         let center = maps.color[1 * 4 + 1];
@@ -654,7 +695,12 @@ mod tests {
 
     #[test]
     fn no_height_stacking() {
-        let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::WHITE), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let mut global = GlobalMaps::new(
+            16,
+            &BaseColorSource::solid(Color::WHITE),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         let uv = Vec2::new(0.5, 0.5);
 
         for (i, &h) in [0.7f32, 0.3, 0.5].iter().enumerate() {
@@ -683,7 +729,12 @@ mod tests {
 
     #[test]
     fn color_full_cover() {
-        let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let mut global = GlobalMaps::new(
+            16,
+            &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         let uv = Vec2::new(0.5, 0.5);
 
         let height_map = make_simple_height(1, 1, 0.8);
@@ -703,13 +754,20 @@ mod tests {
         assert!(
             c.b > 0.9,
             "full cover: blue should dominate, got ({:.3}, {:.3}, {:.3})",
-            c.r, c.g, c.b
+            c.r,
+            c.g,
+            c.b
         );
     }
 
     #[test]
     fn color_transparent_bristle_gap() {
-        let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let mut global = GlobalMaps::new(
+            16,
+            &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         let uv = Vec2::new(0.5, 0.5);
 
         let height_map = make_simple_height(1, 1, 0.001);
@@ -729,13 +787,20 @@ mod tests {
         assert!(
             c.r > 0.9,
             "bristle gap: base red should show through, got ({:.3}, {:.3}, {:.3})",
-            c.r, c.g, c.b
+            c.r,
+            c.g,
+            c.b
         );
     }
 
     #[test]
     fn color_partial_blend() {
-        let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let mut global = GlobalMaps::new(
+            16,
+            &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         let uv = Vec2::new(0.5, 0.5);
 
         let height_map = make_simple_height(1, 1, 0.15);
@@ -757,7 +822,12 @@ mod tests {
 
     #[test]
     fn color_high_density_full_opacity() {
-        let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let mut global = GlobalMaps::new(
+            16,
+            &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         let uv = Vec2::new(0.5, 0.5);
 
         let height_map = make_simple_height(1, 1, 0.9);
@@ -777,7 +847,9 @@ mod tests {
         assert!(
             c.b > 0.95,
             "high density: should be fully covered, got ({:.3}, {:.3}, {:.3})",
-            c.r, c.g, c.b
+            c.r,
+            c.g,
+            c.b
         );
     }
 
@@ -785,7 +857,12 @@ mod tests {
 
     #[test]
     fn stroke_id_records_last() {
-        let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::WHITE), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let mut global = GlobalMaps::new(
+            16,
+            &BaseColorSource::solid(Color::WHITE),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         let uv = Vec2::new(0.5, 0.5);
 
         for sid in [10u32, 20, 30] {
@@ -823,14 +900,31 @@ mod tests {
         let solid_a = Color::rgb(1.0, 0.0, 0.0);
         let solid_b = Color::rgb(0.0, 0.0, 1.0);
 
-        let mut global = GlobalMaps::new(64, &BaseColorSource::solid(Color::WHITE), NormalMode::SurfacePaint, BackgroundMode::Opaque);
-        composite_layer(
-            &layer_a, 0, &mut global, &settings,
-            &BaseColorSource::solid(solid_a), None, None, None,
+        let mut global = GlobalMaps::new(
+            64,
+            &BaseColorSource::solid(Color::WHITE),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
         );
         composite_layer(
-            &layer_b, 1, &mut global, &settings,
-            &BaseColorSource::solid(solid_b), None, None, None,
+            &layer_a,
+            0,
+            &mut global,
+            &settings,
+            &BaseColorSource::solid(solid_a),
+            None,
+            None,
+            None,
+        );
+        composite_layer(
+            &layer_b,
+            1,
+            &mut global,
+            &settings,
+            &BaseColorSource::solid(solid_b),
+            None,
+            None,
+            None,
         );
 
         let center = 32 * 64 + 32;
@@ -869,8 +963,22 @@ mod tests {
         let settings = OutputSettings::default();
         let solid = Color::rgb(0.5, 0.5, 0.5);
 
-        let maps1 = composite_all(&[layer.clone()], 64, &BaseColorSource::solid(solid), &settings, None, &[]);
-        let maps2 = composite_all(&[layer], 64, &BaseColorSource::solid(solid), &settings, None, &[]);
+        let maps1 = composite_all(
+            &[layer.clone()],
+            64,
+            &BaseColorSource::solid(solid),
+            &settings,
+            None,
+            &[],
+        );
+        let maps2 = composite_all(
+            &[layer],
+            64,
+            &BaseColorSource::solid(solid),
+            &settings,
+            None,
+            &[],
+        );
 
         assert_eq!(maps1.height, maps2.height);
         assert_eq!(maps1.stroke_id, maps2.stroke_id);
@@ -887,25 +995,31 @@ mod tests {
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.6, 0.4, 0.3);
-        let maps = composite_all(&[layer], 256, &BaseColorSource::solid(solid), &settings, None, &[]);
+        let maps = composite_all(
+            &[layer],
+            256,
+            &BaseColorSource::solid(solid),
+            &settings,
+            None,
+            &[],
+        );
 
         let out_dir = crate::test_module_output_dir("compositing");
 
-        let max_h = maps.height.iter().cloned().fold(0.0f32, f32::max).max(1e-10);
+        let max_h = maps
+            .height
+            .iter()
+            .cloned()
+            .fold(0.0f32, f32::max)
+            .max(1e-10);
         let height_pixels: Vec<u8> = maps
             .height
             .iter()
             .map(|&h| ((h / max_h).clamp(0.0, 1.0) * 255.0) as u8)
             .collect();
         let height_path = out_dir.join("height.png");
-        image::save_buffer(
-            &height_path,
-            &height_pixels,
-            256,
-            256,
-            image::ColorType::L8,
-        )
-        .expect("Failed to save compositing_height.png");
+        image::save_buffer(&height_path, &height_pixels, 256, 256, image::ColorType::L8)
+            .expect("Failed to save compositing_height.png");
 
         let color_pixels: Vec<u8> = maps
             .color
@@ -919,14 +1033,8 @@ mod tests {
             })
             .collect();
         let color_path = out_dir.join("color.png");
-        image::save_buffer(
-            &color_path,
-            &color_pixels,
-            256,
-            256,
-            image::ColorType::Rgb8,
-        )
-        .expect("Failed to save compositing_color.png");
+        image::save_buffer(&color_path, &color_pixels, 256, 256, image::ColorType::Rgb8)
+            .expect("Failed to save compositing_color.png");
 
         eprintln!("Wrote: {}", height_path.display());
         eprintln!("Wrote: {}", color_path.display());
@@ -945,10 +1053,21 @@ mod tests {
         let stroke_tex = vec![Color::rgb(0.25, 0.12, 0.05)];
         let canvas = Color::rgb(0.95, 0.92, 0.85);
 
-        let mut global = GlobalMaps::new(256, &BaseColorSource::solid(canvas), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let mut global = GlobalMaps::new(
+            256,
+            &BaseColorSource::solid(canvas),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         composite_layer(
-            &layer, 0, &mut global, &settings,
-            &BaseColorSource::textured(&stroke_tex, 1, 1, canvas), None, None, None,
+            &layer,
+            0,
+            &mut global,
+            &settings,
+            &BaseColorSource::textured(&stroke_tex, 1, 1, canvas),
+            None,
+            None,
+            None,
         );
         let maps = global;
 
@@ -965,14 +1084,8 @@ mod tests {
             .collect();
 
         let out_path = crate::test_module_output_dir("compositing").join("dry_brush.png");
-        image::save_buffer(
-            &out_path,
-            &color_pixels,
-            256,
-            256,
-            image::ColorType::Rgb8,
-        )
-        .expect("Failed to save");
+        image::save_buffer(&out_path, &color_pixels, 256, 256, image::ColorType::Rgb8)
+            .expect("Failed to save");
         eprintln!("Wrote: {}", out_path.display());
     }
 
@@ -987,11 +1100,7 @@ mod tests {
         let mut tex = Vec::new();
         for y in 0..4 {
             for x in 0..4 {
-                tex.push(Color::rgb(
-                    x as f32 / 3.0,
-                    y as f32 / 3.0,
-                    0.5,
-                ));
+                tex.push(Color::rgb(x as f32 / 3.0, y as f32 / 3.0, 0.5));
             }
         }
 
@@ -1017,21 +1126,20 @@ mod tests {
             .collect();
 
         let out_path = crate::test_module_output_dir("compositing").join("color_variation.png");
-        image::save_buffer(
-            &out_path,
-            &color_pixels,
-            256,
-            256,
-            image::ColorType::Rgb8,
-        )
-        .expect("Failed to save");
+        image::save_buffer(&out_path, &color_pixels, 256, 256, image::ColorType::Rgb8)
+            .expect("Failed to save");
         eprintln!("Wrote: {}", out_path.display());
     }
 
     #[test]
     fn zero_height_preserves_base() {
         let solid = Color::rgb(0.3, 0.7, 0.1);
-        let maps = GlobalMaps::new(16, &BaseColorSource::solid(solid), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let maps = GlobalMaps::new(
+            16,
+            &BaseColorSource::solid(solid),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
 
         for c in &maps.color {
             assert!((c.r - 0.3).abs() < EPS);
@@ -1042,7 +1150,12 @@ mod tests {
 
     #[test]
     fn skip_unpainted_pixels() {
-        let mut global = GlobalMaps::new(16, &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)), NormalMode::SurfacePaint, BackgroundMode::Opaque);
+        let mut global = GlobalMaps::new(
+            16,
+            &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)),
+            NormalMode::SurfacePaint,
+            BackgroundMode::Opaque,
+        );
         let uv = Vec2::new(0.5, 0.5);
 
         let height_map = make_simple_height(1, 1, 0.0);

@@ -44,7 +44,12 @@ pub fn compute_stroke_gradients(
     let mut gy = vec![0.0f32; w * h];
 
     if w < 3 || h < 3 {
-        return StrokeGradientResult { gx, gy, width: w, height: h };
+        return StrokeGradientResult {
+            gx,
+            gy,
+            width: w,
+            height: h,
+        };
     }
 
     for y in 1..(h - 1) {
@@ -54,14 +59,22 @@ pub fn compute_stroke_gradients(
             // with center value so the stroke boundary produces no gradient.
             let s = |dx: usize, dy: usize| {
                 let v = height.data[dy * w + dx];
-                if v > 0.0 { v } else { c }
+                if v > 0.0 {
+                    v
+                } else {
+                    c
+                }
             };
 
             gx[y * w + x] = -s(x - 1, y - 1) - 2.0 * s(x - 1, y) - s(x - 1, y + 1)
-                + s(x + 1, y - 1) + 2.0 * s(x + 1, y) + s(x + 1, y + 1);
+                + s(x + 1, y - 1)
+                + 2.0 * s(x + 1, y)
+                + s(x + 1, y + 1);
 
             gy[y * w + x] = -s(x - 1, y - 1) - 2.0 * s(x, y - 1) - s(x + 1, y - 1)
-                + s(x - 1, y + 1) + 2.0 * s(x, y + 1) + s(x + 1, y + 1);
+                + s(x - 1, y + 1)
+                + 2.0 * s(x, y + 1)
+                + s(x + 1, y + 1);
         }
     }
 
@@ -79,7 +92,12 @@ pub fn compute_stroke_gradients(
         }
     }
 
-    StrokeGradientResult { gx, gy, width: w, height: h }
+    StrokeGradientResult {
+        gx,
+        gy,
+        width: w,
+        height: h,
+    }
 }
 
 /// Generate a stroke density map from the brush profile.
@@ -133,9 +151,7 @@ pub fn generate_stroke_height(
         let active_start = (center - active_width * 0.5)
             .floor()
             .clamp(0.0, local_height as f32) as usize;
-        let active_end = ((center + active_width * 0.5)
-            .ceil() as usize)
-            .min(local_height);
+        let active_end = ((center + active_width * 0.5).ceil() as usize).min(local_height);
         let active_count = active_end.saturating_sub(active_start);
 
         // Paint depletion — load > 1.0 gradually fades out the depletion curve,
@@ -194,8 +210,11 @@ mod tests {
 
     fn params(bw: f32, load: f32, wiggle: f32, preset: PressurePreset) -> StrokeParams {
         StrokeParams {
-            brush_width: bw, load, body_wiggle: wiggle,
-            pressure_curve: PressureCurve::Preset(preset), seed: 42,
+            brush_width: bw,
+            load,
+            body_wiggle: wiggle,
+            pressure_curve: PressureCurve::Preset(preset),
+            seed: 42,
             ..StrokeParams::default()
         }
     }
@@ -205,8 +224,8 @@ mod tests {
         let p = params(30.0, 0.8, 0.0, PressurePreset::FadeOut);
         let profile = generate_brush_profile(30, 42);
         let result = generate_stroke_height(&profile, 100, &p, 42);
-        assert_eq!(result.width, 100);  // stroke_length
-        assert_eq!(result.height, 30);  // brush_width
+        assert_eq!(result.width, 100); // stroke_length
+        assert_eq!(result.height, 30); // brush_width
         assert_eq!(result.data.len(), 100 * 30);
     }
 
@@ -231,8 +250,11 @@ mod tests {
         // Bristle pattern visible (variance > 0)
         let body_vals: Vec<f32> = result.data.iter().copied().filter(|&v| v > 0.0).collect();
         let mean = body_vals.iter().sum::<f32>() / body_vals.len() as f32;
-        let variance =
-            body_vals.iter().map(|&v| (v - mean) * (v - mean)).sum::<f32>() / body_vals.len() as f32;
+        let variance = body_vals
+            .iter()
+            .map(|&v| (v - mean) * (v - mean))
+            .sum::<f32>()
+            / body_vals.len() as f32;
         assert!(variance > 0.0, "no bristle pattern variation");
     }
 
@@ -324,7 +346,12 @@ mod tests {
         let profile = generate_brush_profile(30, 42);
         let result = generate_stroke_height(&profile, 150, &p, 42);
 
-        let max_val = result.data.iter().cloned().fold(0.0f32, f32::max).max(1e-10);
+        let max_val = result
+            .data
+            .iter()
+            .cloned()
+            .fold(0.0f32, f32::max)
+            .max(1e-10);
         let pixels: Vec<u8> = result
             .data
             .iter()
@@ -360,7 +387,8 @@ mod tests {
                 assert!(
                     (center - 15.0).abs() < 2.0,
                     "column {} center={:.1}, expected ~15.0",
-                    x, center
+                    x,
+                    center
                 );
             }
         }
@@ -409,7 +437,8 @@ mod tests {
                 assert!(
                     grad.gx[i].abs() < 0.1 && grad.gy[i].abs() < 0.1,
                     "at ({x},{y}): gx={:.3}, gy={:.3}",
-                    grad.gx[i], grad.gy[i]
+                    grad.gx[i],
+                    grad.gy[i]
                 );
             }
         }
@@ -426,15 +455,25 @@ mod tests {
                 data[y * w + x] = x as f32 / w as f32;
             }
         }
-        let height = StrokeHeightResult { data, width: w, height: h };
+        let height = StrokeHeightResult {
+            data,
+            width: w,
+            height: h,
+        };
         // FadeIn: p=√t, so at x=25 (t=0.5) p≈0.707, atten≈0.5 → gradients halved but still positive
         let curve = PressureCurve::Preset(PressurePreset::FadeIn);
         let grad = compute_stroke_gradients(&height, &curve);
 
         // Interior pixels should have positive gx, near-zero gy
         let mid = 5 * w + 25;
-        assert!(grad.gx[mid] > 0.0, "gx should be positive for rightward slope");
-        assert!(grad.gy[mid].abs() < 0.01, "gy should be ~0 for X-only slope");
+        assert!(
+            grad.gx[mid] > 0.0,
+            "gx should be positive for rightward slope"
+        );
+        assert!(
+            grad.gy[mid].abs() < 0.01,
+            "gy should be ~0 for X-only slope"
+        );
     }
 
     #[test]
@@ -448,12 +487,22 @@ mod tests {
                 data[y * w + x] = y as f32 / h as f32;
             }
         }
-        let height = StrokeHeightResult { data, width: w, height: h };
+        let height = StrokeHeightResult {
+            data,
+            width: w,
+            height: h,
+        };
         let curve = PressureCurve::Preset(PressurePreset::FadeIn);
         let grad = compute_stroke_gradients(&height, &curve);
 
         let mid = 10 * w + 25;
-        assert!(grad.gy[mid] > 0.0, "gy should be positive for downward slope");
-        assert!(grad.gx[mid].abs() < 0.01, "gx should be ~0 for Y-only slope");
+        assert!(
+            grad.gy[mid] > 0.0,
+            "gy should be positive for downward slope"
+        );
+        assert!(
+            grad.gx[mid].abs() < 0.01,
+            "gx should be ~0 for Y-only slope"
+        );
     }
 }

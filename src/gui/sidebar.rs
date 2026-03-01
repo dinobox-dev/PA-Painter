@@ -38,9 +38,9 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
         // Icons are positioned from the right edge inward; the text label
         // fills the remaining space, shrinking when extra icons appear.
         struct BaseRowIcons {
-            reload: bool,   // only drawn when `true`
-            open: bool,     // always present; `true` = enabled
-            clear: bool,    // only drawn when `true`
+            reload: bool, // only drawn when `true`
+            open: bool,   // always present; `true` = enabled
+            clear: bool,  // only drawn when `true`
         }
 
         let draw_base_row = |ui: &mut egui::Ui,
@@ -51,10 +51,8 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
                              open_tip: &str,
                              clear_tip: &str|
          -> (bool, bool, bool) {
-            let (rect, _) = ui.allocate_exact_size(
-                egui::Vec2::new(row_w, row_h),
-                egui::Sense::hover(),
-            );
+            let (rect, _) =
+                ui.allocate_exact_size(egui::Vec2::new(row_w, row_h), egui::Sense::hover());
 
             let mut clicked_reload = false;
             let mut clicked_open = false;
@@ -94,7 +92,15 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 let id = ui.id().with((label, "open"));
                 let resp = ui.interact(r, id, egui::Sense::click());
-                paint_icon(p, ui, r, egui_phosphor::fill::FOLDER_OPEN, 13.0, icons.open, resp.hovered());
+                paint_icon(
+                    p,
+                    ui,
+                    r,
+                    egui_phosphor::fill::FOLDER_OPEN,
+                    13.0,
+                    icons.open,
+                    resp.hovered(),
+                );
                 if resp.on_hover_text(open_tip).clicked() && icons.open {
                     clicked_open = true;
                 }
@@ -109,7 +115,15 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 let id = ui.id().with((label, "reload"));
                 let resp = ui.interact(r, id, egui::Sense::click());
-                paint_icon(p, ui, r, egui_phosphor::fill::ARROW_CLOCKWISE, 13.0, true, resp.hovered());
+                paint_icon(
+                    p,
+                    ui,
+                    r,
+                    egui_phosphor::fill::ARROW_CLOCKWISE,
+                    13.0,
+                    true,
+                    resp.hovered(),
+                );
                 if resp.on_hover_text(reload_tip).clicked() {
                     clicked_reload = true;
                 }
@@ -129,80 +143,128 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
             let text_right = icons_left - icon_gap;
             let max_text_w = (text_right - text_left).max(10.0);
             let text_color = ui.visuals().weak_text_color();
-            paint_truncated_text(p, display_text, font_id.clone(), text_color, text_left, rect, max_text_w);
+            paint_truncated_text(
+                p,
+                display_text,
+                font_id.clone(),
+                text_color,
+                text_left,
+                rect,
+                max_text_w,
+            );
 
             (clicked_reload, clicked_open, clicked_clear)
         };
 
-            // ── Mesh row ──
-            let mesh_text = if let Some(ref mesh) = state.loaded_mesh {
-                let name = short_filename(&state.project.mesh_ref.path);
-                format!("{} ({} grp)", name, mesh.groups.len())
-            } else {
-                "(none)".to_string()
-            };
-            let has_mesh = state.loaded_mesh.is_some();
-            let (reload, open, _) = draw_base_row(
-                ui, "Mesh", &mesh_text,
-                BaseRowIcons { reload: has_mesh, open: true, clear: false },
-                "Reload mesh", "Replace mesh...", "",
-            );
-            if reload { state.pending_reload_mesh = true; }
-            if open { state.pending_replace_mesh = true; }
+        // ── Mesh row ──
+        let mesh_text = if let Some(ref mesh) = state.loaded_mesh {
+            let name = short_filename(&state.project.mesh_ref.path);
+            format!("{} ({} grp)", name, mesh.groups.len())
+        } else {
+            "(none)".to_string()
+        };
+        let has_mesh = state.loaded_mesh.is_some();
+        let (reload, open, _) = draw_base_row(
+            ui,
+            "Mesh",
+            &mesh_text,
+            BaseRowIcons {
+                reload: has_mesh,
+                open: true,
+                clear: false,
+            },
+            "Reload mesh",
+            "Replace mesh...",
+            "",
+        );
+        if reload {
+            state.pending_reload_mesh = true;
+        }
+        if open {
+            state.pending_replace_mesh = true;
+        }
 
-            // ── Color row ──
-            let color_text = if let Some(tex_path) = state.project.base_color.texture_path() {
-                short_filename(tex_path).to_string()
-            } else {
-                "(solid)".to_string()
-            };
-            let has_texture = state.project.base_color.texture_path().is_some();
-            let (reload, open, clear) = draw_base_row(
-                ui, "Color", &color_text,
-                BaseRowIcons { reload: has_texture, open: true, clear: has_texture },
-                "Reload texture", "Load texture...", "Clear texture",
-            );
-            if reload { state.pending_reload_texture = true; }
-            if open { state.pending_load_texture = true; }
-            if clear {
-                state.project.base_color = BaseColor::default();
-                state.loaded_texture = None;
-                state.cached_texture_colors = None;
-                state.texture_colors_hash = 0;
-                state.textures.color = None;
-                state.textures.height = None;
-                state.textures.normal = None;
-                state.textures.stroke_id = None;
-                state.generated = None;
-                state.dirty = true;
-            }
+        // ── Color row ──
+        let color_text = if let Some(tex_path) = state.project.base_color.texture_path() {
+            short_filename(tex_path).to_string()
+        } else {
+            "(solid)".to_string()
+        };
+        let has_texture = state.project.base_color.texture_path().is_some();
+        let (reload, open, clear) = draw_base_row(
+            ui,
+            "Color",
+            &color_text,
+            BaseRowIcons {
+                reload: has_texture,
+                open: true,
+                clear: has_texture,
+            },
+            "Reload texture",
+            "Load texture...",
+            "Clear texture",
+        );
+        if reload {
+            state.pending_reload_texture = true;
+        }
+        if open {
+            state.pending_load_texture = true;
+        }
+        if clear {
+            state.project.base_color = BaseColor::default();
+            state.loaded_texture = None;
+            state.cached_texture_colors = None;
+            state.texture_colors_hash = 0;
+            state.textures.color = None;
+            state.textures.height = None;
+            state.textures.normal = None;
+            state.textures.stroke_id = None;
+            state.generated = None;
+            state.dirty = true;
+        }
 
-            // ── Normal row ──
-            let has_normal = state.project.base_normal.is_some();
-            let normal_text = if let Some(ref normal_path) = state.project.base_normal {
-                short_filename(normal_path).to_string()
-            } else {
-                "(none)".to_string()
-            };
-            let open_tip = if has_normal { "Replace normal..." } else { "Load normal..." };
-            let (reload, open, clear) = draw_base_row(
-                ui, "Normal", &normal_text,
-                BaseRowIcons { reload: has_normal, open: true, clear: has_normal },
-                "Reload normal", open_tip, "Clear normal",
-            );
-            if reload { state.pending_reload_normal = true; }
-            if open { state.pending_load_normal = true; }
-            if clear {
-                state.project.base_normal = None;
-                state.loaded_normal = None;
-                state.normal_tex_hash = 0;
-                state.textures.color = None;
-                state.textures.height = None;
-                state.textures.normal = None;
-                state.textures.stroke_id = None;
-                state.generated = None;
-                state.dirty = true;
-            }
+        // ── Normal row ──
+        let has_normal = state.project.base_normal.is_some();
+        let normal_text = if let Some(ref normal_path) = state.project.base_normal {
+            short_filename(normal_path).to_string()
+        } else {
+            "(none)".to_string()
+        };
+        let open_tip = if has_normal {
+            "Replace normal..."
+        } else {
+            "Load normal..."
+        };
+        let (reload, open, clear) = draw_base_row(
+            ui,
+            "Normal",
+            &normal_text,
+            BaseRowIcons {
+                reload: has_normal,
+                open: true,
+                clear: has_normal,
+            },
+            "Reload normal",
+            open_tip,
+            "Clear normal",
+        );
+        if reload {
+            state.pending_reload_normal = true;
+        }
+        if open {
+            state.pending_load_normal = true;
+        }
+        if clear {
+            state.project.base_normal = None;
+            state.loaded_normal = None;
+            state.normal_tex_hash = 0;
+            state.textures.color = None;
+            state.textures.height = None;
+            state.textures.normal = None;
+            state.textures.stroke_id = None;
+            state.generated = None;
+            state.dirty = true;
+        }
     });
 
     ui.separator();
@@ -212,68 +274,76 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
     ui.indent("settings_content", |ui: &mut egui::Ui| {
         let combo_w = 110.0;
 
-            // Resolution preset
-            let current_res = state.project.settings.resolution_preset;
-            egui::ComboBox::from_label("Resolution")
-                .width(combo_w)
-                .selected_text(format!("{}px", current_res.resolution()))
-                .show_ui(ui, |ui: &mut egui::Ui| {
-                    for &preset in &[
-                        ResolutionPreset::Preview,
-                        ResolutionPreset::Standard,
-                        ResolutionPreset::High,
-                        ResolutionPreset::Ultra,
-                    ] {
-                        ui.selectable_value(
-                            &mut state.project.settings.resolution_preset,
-                            preset,
-                            format!("{}px", preset.resolution()),
-                        );
-                    }
-                });
+        // Resolution preset
+        let current_res = state.project.settings.resolution_preset;
+        egui::ComboBox::from_label("Resolution")
+            .width(combo_w)
+            .selected_text(format!("{}px", current_res.resolution()))
+            .show_ui(ui, |ui: &mut egui::Ui| {
+                for &preset in &[
+                    ResolutionPreset::Preview,
+                    ResolutionPreset::Standard,
+                    ResolutionPreset::High,
+                    ResolutionPreset::Ultra,
+                ] {
+                    ui.selectable_value(
+                        &mut state.project.settings.resolution_preset,
+                        preset,
+                        format!("{}px", preset.resolution()),
+                    );
+                }
+            });
 
-            // Normal mode
-            egui::ComboBox::from_label("Normal Mode")
-                .width(combo_w)
-                .selected_text(match state.project.settings.normal_mode {
-                    NormalMode::SurfacePaint => "SurfacePaint",
-                    NormalMode::DepictedForm => "DepictedForm",
-                })
-                .show_ui(ui, |ui: &mut egui::Ui| {
-                    ui.selectable_value(
-                        &mut state.project.settings.normal_mode,
-                        NormalMode::SurfacePaint,
-                        "SurfacePaint",
-                    );
-                    ui.selectable_value(
-                        &mut state.project.settings.normal_mode,
-                        NormalMode::DepictedForm,
-                        "DepictedForm",
-                    );
-                });
+        // Normal mode
+        egui::ComboBox::from_label("Normal Mode")
+            .width(combo_w)
+            .selected_text(match state.project.settings.normal_mode {
+                NormalMode::SurfacePaint => "SurfacePaint",
+                NormalMode::DepictedForm => "DepictedForm",
+            })
+            .show_ui(ui, |ui: &mut egui::Ui| {
+                ui.selectable_value(
+                    &mut state.project.settings.normal_mode,
+                    NormalMode::SurfacePaint,
+                    "SurfacePaint",
+                );
+                ui.selectable_value(
+                    &mut state.project.settings.normal_mode,
+                    NormalMode::DepictedForm,
+                    "DepictedForm",
+                );
+            });
 
-            // Background mode
-            egui::ComboBox::from_label("Background")
-                .width(combo_w)
-                .selected_text(match state.project.settings.background_mode {
-                    BackgroundMode::Opaque => "Opaque",
-                    BackgroundMode::Transparent => "Transparent",
-                })
-                .show_ui(ui, |ui: &mut egui::Ui| {
-                    ui.selectable_value(
-                        &mut state.project.settings.background_mode,
-                        BackgroundMode::Opaque,
-                        "Opaque",
-                    );
-                    ui.selectable_value(
-                        &mut state.project.settings.background_mode,
-                        BackgroundMode::Transparent,
-                        "Transparent",
-                    );
-                });
+        // Background mode
+        egui::ComboBox::from_label("Background")
+            .width(combo_w)
+            .selected_text(match state.project.settings.background_mode {
+                BackgroundMode::Opaque => "Opaque",
+                BackgroundMode::Transparent => "Transparent",
+            })
+            .show_ui(ui, |ui: &mut egui::Ui| {
+                ui.selectable_value(
+                    &mut state.project.settings.background_mode,
+                    BackgroundMode::Opaque,
+                    "Opaque",
+                );
+                ui.selectable_value(
+                    &mut state.project.settings.background_mode,
+                    BackgroundMode::Transparent,
+                    "Transparent",
+                );
+            });
 
         // Normal strength
-        slider_row(ui, "normal_strength", &mut state.project.settings.normal_strength, 0.0..=1.0, "Normal Strength", None, 2);
+        slider_row(
+            ui,
+            "normal_strength",
+            &mut state.project.settings.normal_strength,
+            0.0..=1.0,
+            "Normal Strength",
+            None,
+            2,
+        );
     });
 
     ui.separator();
@@ -286,31 +356,42 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui: &mut egui::Ui| {
         let font = egui::FontId::proportional(14.0);
         ui.label(egui::RichText::new("Layers").font(font).strong());
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui: &mut egui::Ui| {
-            let has_mesh = state.loaded_mesh.is_some();
-            let size = egui::Vec2::splat(20.0);
-            let (btn_rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-            if ui.is_rect_visible(btn_rect) {
-                paint_icon(ui.painter(), ui, btn_rect, PLUS, 13.0, has_mesh, resp.hovered());
-            }
-            if resp.on_hover_text("Add Layer").clicked() && has_mesh {
-                state.project.layers.push(Layer {
-                    name: "__all__".to_string(),
-                    visible: true,
-                    group_name: "__all__".to_string(),
-                    order: 0, // bottom of stack; all orders reassigned below
-                    paint: PaintValues::default(),
-                    guides: vec![],
-                });
-                // Reassign: index 0 (top of UI) = highest order (painted last = on top)
-                let n = state.project.layers.len() as i32;
-                for (i, layer) in state.project.layers.iter_mut().enumerate() {
-                    layer.order = n - 1 - i as i32;
+        ui.with_layout(
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui: &mut egui::Ui| {
+                let has_mesh = state.loaded_mesh.is_some();
+                let size = egui::Vec2::splat(20.0);
+                let (btn_rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                if ui.is_rect_visible(btn_rect) {
+                    paint_icon(
+                        ui.painter(),
+                        ui,
+                        btn_rect,
+                        PLUS,
+                        13.0,
+                        has_mesh,
+                        resp.hovered(),
+                    );
                 }
-                state.selected_layer = Some(state.project.layers.len() - 1);
-                state.selected_guide = None;
-            }
-        });
+                if resp.on_hover_text("Add Layer").clicked() && has_mesh {
+                    state.project.layers.push(Layer {
+                        name: "__all__".to_string(),
+                        visible: true,
+                        group_name: "__all__".to_string(),
+                        order: 0, // bottom of stack; all orders reassigned below
+                        paint: PaintValues::default(),
+                        guides: vec![],
+                    });
+                    // Reassign: index 0 (top of UI) = highest order (painted last = on top)
+                    let n = state.project.layers.len() as i32;
+                    for (i, layer) in state.project.layers.iter_mut().enumerate() {
+                        layer.order = n - 1 - i as i32;
+                    }
+                    state.selected_layer = Some(state.project.layers.len() - 1);
+                    state.selected_guide = None;
+                }
+            },
+        );
     });
 }
 
@@ -320,169 +401,201 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().indent = SECTION_INDENT;
 
     ui.indent("layers_rows", |ui: &mut egui::Ui| {
+        use egui_phosphor::fill::{ARROW_DOWN, ARROW_UP, EYE, EYE_SLASH, TRASH_SIMPLE};
 
-    use egui_phosphor::fill::{ARROW_DOWN, ARROW_UP, EYE, EYE_SLASH, TRASH_SIMPLE};
+        // Layer rows
+        if state.project.layers.is_empty() {
+            ui.label("No layers.");
+        } else {
+            let mut delete_idx: Option<usize> = None;
+            let mut swap: Option<(usize, usize)> = None;
+            let row_w = ui.available_width();
+            let row_h = LAYER_ICON_SIZE + 2.0;
+            let icon_gap = 2.0;
+            let n_layers = state.project.layers.len();
 
-    // Layer rows
-    if state.project.layers.is_empty() {
-        ui.label("No layers.");
-    } else {
-        let mut delete_idx: Option<usize> = None;
-        let mut swap: Option<(usize, usize)> = None;
-        let row_w = ui.available_width();
-        let row_h = LAYER_ICON_SIZE + 2.0;
-        let icon_gap = 2.0;
-        let n_layers = state.project.layers.len();
+            for i in 0..n_layers {
+                let selected = state.selected_layer == Some(i);
+                let visible = state.project.layers[i].visible;
+                let name = state.project.layers[i].name.clone();
+                let group = state.project.layers[i].group_name.clone();
 
-        for i in 0..n_layers {
-            let selected = state.selected_layer == Some(i);
-            let visible = state.project.layers[i].visible;
-            let name = state.project.layers[i].name.clone();
-            let group = state.project.layers[i].group_name.clone();
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::Vec2::new(row_w, row_h), egui::Sense::hover());
 
-            let (rect, _) = ui.allocate_exact_size(
-                egui::Vec2::new(row_w, row_h),
-                egui::Sense::hover(),
-            );
-
-            if !ui.is_rect_visible(rect) {
-                continue;
-            }
-
-            let p = ui.painter();
-
-            // Selected background
-            if selected {
-                p.rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
-            }
-
-            // ── Eye icon (left, full row height) ──
-            let eye_rect = egui::Rect::from_min_size(
-                rect.min,
-                egui::Vec2::new(LAYER_ICON_SIZE, row_h),
-            );
-            let eye_id = ui.id().with(("layer_eye", i));
-            let eye_resp = ui.interact(eye_rect, eye_id, egui::Sense::click());
-            {
-                let eye_icon = if visible { EYE } else { EYE_SLASH };
-                if eye_resp.hovered() {
-                    p.rect_filled(eye_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
-                }
-                let color = if visible {
-                    if eye_resp.hovered() { ui.visuals().text_color() } else { ui.visuals().weak_text_color() }
-                } else {
-                    ui.visuals().weak_text_color().gamma_multiply(0.5)
-                };
-                p.text(eye_rect.center(), egui::Align2::CENTER_CENTER, eye_icon, egui::FontId::proportional(13.0), color);
-            }
-            if eye_resp.on_hover_text("Toggle visibility").clicked() {
-                state.project.layers[i].visible = !visible;
-            }
-
-            // ── Action icons (right, selected only) ──
-            let mut actions_right = rect.max.x;
-
-            if selected {
-                // Down arrow (rightmost)
-                let can_down = i + 1 < n_layers;
-                actions_right -= LAYER_ICON_SIZE;
-                let down_rect = egui::Rect::from_min_size(
-                    egui::Pos2::new(actions_right, rect.min.y),
-                    egui::Vec2::new(LAYER_ICON_SIZE, row_h),
-                );
-                let down_id = ui.id().with(("layer_down", i));
-                let down_resp = ui.interact(down_rect, down_id, egui::Sense::click());
-                paint_icon(p, ui, down_rect, ARROW_DOWN, 13.0, can_down, down_resp.hovered());
-                if down_resp.on_hover_text("Move down").clicked() && can_down {
-                    swap = Some((i, i + 1));
+                if !ui.is_rect_visible(rect) {
+                    continue;
                 }
 
-                // Up arrow
-                actions_right -= icon_gap + LAYER_ICON_SIZE;
-                let up_rect = egui::Rect::from_min_size(
-                    egui::Pos2::new(actions_right, rect.min.y),
-                    egui::Vec2::new(LAYER_ICON_SIZE, row_h),
-                );
-                let up_id = ui.id().with(("layer_up", i));
-                let up_resp = ui.interact(up_rect, up_id, egui::Sense::click());
-                paint_icon(p, ui, up_rect, ARROW_UP, 13.0, i > 0, up_resp.hovered());
-                if up_resp.on_hover_text("Move up").clicked() && i > 0 {
-                    swap = Some((i, i - 1));
-                }
+                let p = ui.painter();
 
-                // Delete
-                actions_right -= icon_gap + LAYER_ICON_SIZE;
-                let del_rect = egui::Rect::from_min_size(
-                    egui::Pos2::new(actions_right, rect.min.y),
-                    egui::Vec2::new(LAYER_ICON_SIZE, row_h),
-                );
-                let del_id = ui.id().with(("layer_del", i));
-                let del_resp = ui.interact(del_rect, del_id, egui::Sense::click());
-                paint_icon(p, ui, del_rect, TRASH_SIMPLE, 13.0, true, del_resp.hovered());
-                if del_resp.on_hover_text("Delete layer").clicked() {
-                    delete_idx = Some(i);
-                }
-            }
-
-            // ── Name label (middle, clickable) ──
-            let name_left = rect.min.x + LAYER_ICON_SIZE + icon_gap;
-            let name_right = if selected { actions_right - icon_gap } else { rect.max.x };
-            let name_rect = egui::Rect::from_min_max(
-                egui::Pos2::new(name_left, rect.min.y),
-                egui::Pos2::new(name_right, rect.max.y),
-            );
-            let name_id = ui.id().with(("layer_name", i));
-            let name_resp = ui.interact(name_rect, name_id, egui::Sense::click());
-            {
-                if !selected && name_resp.hovered() {
-                    p.rect_filled(name_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
-                }
-                let text_color = if selected {
-                    ui.visuals().selection.stroke.color
-                } else {
-                    ui.visuals().text_color()
-                };
-                let label = format!("{} ({})", name, group);
-                let font_id = egui::TextStyle::Body.resolve(ui.style());
-                let max_text_w = (name_right - name_left - 4.0).max(10.0);
-                paint_truncated_text(p, &label, font_id, text_color, name_left + 2.0, rect, max_text_w);
-            }
-            if name_resp.clicked() {
+                // Selected background
                 if selected {
+                    p.rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
+                }
+
+                // ── Eye icon (left, full row height) ──
+                let eye_rect =
+                    egui::Rect::from_min_size(rect.min, egui::Vec2::new(LAYER_ICON_SIZE, row_h));
+                let eye_id = ui.id().with(("layer_eye", i));
+                let eye_resp = ui.interact(eye_rect, eye_id, egui::Sense::click());
+                {
+                    let eye_icon = if visible { EYE } else { EYE_SLASH };
+                    if eye_resp.hovered() {
+                        p.rect_filled(eye_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                    }
+                    let color = if visible {
+                        if eye_resp.hovered() {
+                            ui.visuals().text_color()
+                        } else {
+                            ui.visuals().weak_text_color()
+                        }
+                    } else {
+                        ui.visuals().weak_text_color().gamma_multiply(0.5)
+                    };
+                    p.text(
+                        eye_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        eye_icon,
+                        egui::FontId::proportional(13.0),
+                        color,
+                    );
+                }
+                if eye_resp.on_hover_text("Toggle visibility").clicked() {
+                    state.project.layers[i].visible = !visible;
+                }
+
+                // ── Action icons (right, selected only) ──
+                let mut actions_right = rect.max.x;
+
+                if selected {
+                    // Down arrow (rightmost)
+                    let can_down = i + 1 < n_layers;
+                    actions_right -= LAYER_ICON_SIZE;
+                    let down_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(actions_right, rect.min.y),
+                        egui::Vec2::new(LAYER_ICON_SIZE, row_h),
+                    );
+                    let down_id = ui.id().with(("layer_down", i));
+                    let down_resp = ui.interact(down_rect, down_id, egui::Sense::click());
+                    paint_icon(
+                        p,
+                        ui,
+                        down_rect,
+                        ARROW_DOWN,
+                        13.0,
+                        can_down,
+                        down_resp.hovered(),
+                    );
+                    if down_resp.on_hover_text("Move down").clicked() && can_down {
+                        swap = Some((i, i + 1));
+                    }
+
+                    // Up arrow
+                    actions_right -= icon_gap + LAYER_ICON_SIZE;
+                    let up_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(actions_right, rect.min.y),
+                        egui::Vec2::new(LAYER_ICON_SIZE, row_h),
+                    );
+                    let up_id = ui.id().with(("layer_up", i));
+                    let up_resp = ui.interact(up_rect, up_id, egui::Sense::click());
+                    paint_icon(p, ui, up_rect, ARROW_UP, 13.0, i > 0, up_resp.hovered());
+                    if up_resp.on_hover_text("Move up").clicked() && i > 0 {
+                        swap = Some((i, i - 1));
+                    }
+
+                    // Delete
+                    actions_right -= icon_gap + LAYER_ICON_SIZE;
+                    let del_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(actions_right, rect.min.y),
+                        egui::Vec2::new(LAYER_ICON_SIZE, row_h),
+                    );
+                    let del_id = ui.id().with(("layer_del", i));
+                    let del_resp = ui.interact(del_rect, del_id, egui::Sense::click());
+                    paint_icon(
+                        p,
+                        ui,
+                        del_rect,
+                        TRASH_SIMPLE,
+                        13.0,
+                        true,
+                        del_resp.hovered(),
+                    );
+                    if del_resp.on_hover_text("Delete layer").clicked() {
+                        delete_idx = Some(i);
+                    }
+                }
+
+                // ── Name label (middle, clickable) ──
+                let name_left = rect.min.x + LAYER_ICON_SIZE + icon_gap;
+                let name_right = if selected {
+                    actions_right - icon_gap
+                } else {
+                    rect.max.x
+                };
+                let name_rect = egui::Rect::from_min_max(
+                    egui::Pos2::new(name_left, rect.min.y),
+                    egui::Pos2::new(name_right, rect.max.y),
+                );
+                let name_id = ui.id().with(("layer_name", i));
+                let name_resp = ui.interact(name_rect, name_id, egui::Sense::click());
+                {
+                    if !selected && name_resp.hovered() {
+                        p.rect_filled(name_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+                    }
+                    let text_color = if selected {
+                        ui.visuals().selection.stroke.color
+                    } else {
+                        ui.visuals().text_color()
+                    };
+                    let label = format!("{} ({})", name, group);
+                    let font_id = egui::TextStyle::Body.resolve(ui.style());
+                    let max_text_w = (name_right - name_left - 4.0).max(10.0);
+                    paint_truncated_text(
+                        p,
+                        &label,
+                        font_id,
+                        text_color,
+                        name_left + 2.0,
+                        rect,
+                        max_text_w,
+                    );
+                }
+                if name_resp.clicked() {
+                    if selected {
+                        state.selected_layer = None;
+                    } else {
+                        state.selected_layer = Some(i);
+                    }
+                    state.selected_guide = None;
+                }
+            }
+
+            // Apply deferred actions
+            let mut structure_changed = false;
+            if let Some(idx) = delete_idx {
+                state.project.layers.remove(idx);
+                state.selected_guide = None;
+                if state.project.layers.is_empty() {
                     state.selected_layer = None;
                 } else {
-                    state.selected_layer = Some(i);
+                    state.selected_layer = Some(idx.min(state.project.layers.len() - 1));
                 }
-                state.selected_guide = None;
+                structure_changed = true;
+            }
+            if let Some((a, b)) = swap {
+                state.project.layers.swap(a, b);
+                state.selected_layer = Some(b);
+                structure_changed = true;
+            }
+            // Keep order fields in sync: index 0 (top of UI) = highest order (painted last = on top)
+            if structure_changed {
+                let n = state.project.layers.len() as i32;
+                for (i, layer) in state.project.layers.iter_mut().enumerate() {
+                    layer.order = n - 1 - i as i32;
+                }
             }
         }
-
-        // Apply deferred actions
-        let mut structure_changed = false;
-        if let Some(idx) = delete_idx {
-            state.project.layers.remove(idx);
-            state.selected_guide = None;
-            if state.project.layers.is_empty() {
-                state.selected_layer = None;
-            } else {
-                state.selected_layer = Some(idx.min(state.project.layers.len() - 1));
-            }
-            structure_changed = true;
-        }
-        if let Some((a, b)) = swap {
-            state.project.layers.swap(a, b);
-            state.selected_layer = Some(b);
-            structure_changed = true;
-        }
-        // Keep order fields in sync: index 0 (top of UI) = highest order (painted last = on top)
-        if structure_changed {
-            let n = state.project.layers.len() as i32;
-            for (i, layer) in state.project.layers.iter_mut().enumerate() {
-                layer.order = n - 1 - i as i32;
-            }
-        }
-    }
-
     }); // indent
 }
 
@@ -495,7 +608,8 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
         let seed_text = seed_to_alpha(state.project.settings.seed);
         // TextEdit fills remaining space minus Shuffle button width
         let button_width = 60.0;
-        let text_width = (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(40.0);
+        let text_width =
+            (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(40.0);
         ui.add(
             egui::TextEdit::singleline(&mut seed_text.clone())
                 .desired_width(text_width)
@@ -543,7 +657,11 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
             let fill_rounding = if p >= 0.99 {
                 rounding
             } else {
-                egui::CornerRadius { nw: rounding.nw, sw: rounding.sw, ..Default::default() }
+                egui::CornerRadius {
+                    nw: rounding.nw,
+                    sw: rounding.sw,
+                    ..Default::default()
+                }
             };
             painter.rect_filled(fill_rect, fill_rounding, fill);
         }
@@ -619,4 +737,3 @@ fn short_filename(path: &str) -> &str {
 }
 
 const LAYER_ICON_SIZE: f32 = 18.0;
-

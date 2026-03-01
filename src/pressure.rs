@@ -31,7 +31,11 @@ fn evaluate_preset(preset: PressurePreset, t: f32) -> f32 {
 /// the desired x-coordinate, then evaluate y at that u.
 fn evaluate_bezier_spline(knots: &[CurveKnot], t: f32) -> f32 {
     if knots.len() < 2 {
-        return if knots.is_empty() { 1.0 } else { knots[0].pos[1].max(0.0) };
+        return if knots.is_empty() {
+            1.0
+        } else {
+            knots[0].pos[1].max(0.0)
+        };
     }
 
     // Find segment
@@ -52,7 +56,11 @@ fn evaluate_bezier_spline(knots: &[CurveKnot], t: f32) -> f32 {
 
     // Linear initial guess
     let span = p3[0] - p0[0];
-    let mut u = if span > 1e-6 { ((t - p0[0]) / span).clamp(0.0, 1.0) } else { 0.0 };
+    let mut u = if span > 1e-6 {
+        ((t - p0[0]) / span).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
 
     // Newton iterations to solve B_x(u) = t
     for _ in 0..8 {
@@ -102,7 +110,11 @@ pub fn preset_to_custom(preset: PressurePreset) -> PressureCurve {
     let knots: Vec<CurveKnot> = (0..len)
         .map(|i| {
             let prev = if i > 0 { Some(samples[i - 1]) } else { None };
-            let next = if i + 1 < len { Some(samples[i + 1]) } else { None };
+            let next = if i + 1 < len {
+                Some(samples[i + 1])
+            } else {
+                None
+            };
             CurveKnot::smooth(samples[i], prev, next)
         })
         .collect();
