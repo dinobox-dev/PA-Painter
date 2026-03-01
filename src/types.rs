@@ -474,7 +474,7 @@ impl Hash for PaintValues {
     }
 }
 
-// ── Layer (replaces PaintSlot) ──
+// ── Layer ──
 
 fn default_visible() -> bool {
     true

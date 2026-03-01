@@ -147,7 +147,7 @@ impl Default for Project {
     fn default() -> Self {
         Self {
             manifest: Manifest {
-                version: "4".to_string(),
+                version: "1".to_string(),
                 app_name: "PracticalArcanaPainter".to_string(),
                 created_at: utc_now_iso8601(),
                 modified_at: utc_now_iso8601(),
@@ -307,7 +307,7 @@ fn generate_thumbnail(project: &Project) -> Option<Vec<u8>> {
 
 // ── Save ──
 
-/// Save a project to a .pap file (v4 format).
+/// Save a project to a `.pap` file.
 pub fn save_project(project: &Project, path: &Path) -> Result<(), ProjectError> {
     let file = std::fs::File::create(path)?;
     let mut zip = ZipWriter::new(file);
@@ -323,7 +323,7 @@ pub fn save_project(project: &Project, path: &Path) -> Result<(), ProjectError> 
     zip.start_file("mesh_ref.json", options)?;
     zip.write_all(mesh_json.as_bytes())?;
 
-    // base_sources.json (v4: replaces color_ref.json)
+    // base_sources.json
     #[derive(Serialize)]
     struct BaseSources<'a> {
         base_color: &'a BaseColor,
@@ -336,7 +336,7 @@ pub fn save_project(project: &Project, path: &Path) -> Result<(), ProjectError> 
     zip.start_file("base_sources.json", options)?;
     zip.write_all(base_json.as_bytes())?;
 
-    // layer_stack.json (v4: replaces slots.json)
+    // layer_stack.json
     let layers_json = serde_json::to_string_pretty(&project.layers)?;
     zip.start_file("layer_stack.json", options)?;
     zip.write_all(layers_json.as_bytes())?;
@@ -377,7 +377,7 @@ pub fn save_project(project: &Project, path: &Path) -> Result<(), ProjectError> 
 
 // ── Load ──
 
-/// Load a project from a .pap file (v4 format).
+/// Load a project from a `.pap` file.
 pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     let file = std::fs::File::open(path)?;
     let mut archive = ZipArchive::new(file)?;
@@ -394,7 +394,7 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     // mesh_ref.json (required)
     let mesh_ref: MeshRef = read_json_entry(&mut archive, "mesh_ref.json")?;
 
-    // base_sources.json (v4)
+    // base_sources.json
     #[derive(Deserialize)]
     struct BaseSources {
         base_color: BaseColor,
@@ -403,7 +403,7 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     }
     let base: BaseSources = read_json_entry(&mut archive, "base_sources.json")?;
 
-    // layer_stack.json (v4)
+    // layer_stack.json
     let layers: Vec<Layer> = read_json_entry(&mut archive, "layer_stack.json")?;
 
     // presets.json
@@ -475,7 +475,7 @@ mod tests {
 
     fn make_manifest() -> Manifest {
         Manifest {
-            version: "4".to_string(),
+            version: "1".to_string(),
             app_name: "Practical Arcana Painter".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             modified_at: "2026-01-01T00:00:00Z".to_string(),
@@ -575,12 +575,12 @@ mod tests {
     #[test]
     fn round_trip_empty_project() {
         let project = make_empty_project();
-        let path = temp_pap_path("empty_v4.pap");
+        let path = temp_pap_path("empty.pap");
 
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
-        assert_eq!(loaded.manifest.version, "4");
+        assert_eq!(loaded.manifest.version, "1");
         assert_eq!(loaded.manifest.app_name, "Practical Arcana Painter");
         assert_eq!(loaded.layers.len(), 0);
         assert!(loaded.cached_height.is_none());
@@ -590,7 +590,7 @@ mod tests {
     #[test]
     fn round_trip_with_layers() {
         let project = make_project_with_layers();
-        let path = temp_pap_path("with_layers_v4.pap");
+        let path = temp_pap_path("with_layers.pap");
 
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
@@ -626,7 +626,7 @@ mod tests {
         project.cached_height = Some(height.clone());
         project.cached_color = Some(color.clone());
 
-        let path = temp_pap_path("with_cache_v4.pap");
+        let path = temp_pap_path("with_cache.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
@@ -646,7 +646,7 @@ mod tests {
     #[test]
     fn round_trip_without_cache() {
         let project = make_project_with_layers();
-        let path = temp_pap_path("no_cache_v4.pap");
+        let path = temp_pap_path("no_cache.pap");
 
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
@@ -660,7 +660,7 @@ mod tests {
         let mut project = make_empty_project();
         project.layers = vec![make_test_layer("detailed", 0, 10)];
 
-        let path = temp_pap_path("complex_guides_v4.pap");
+        let path = temp_pap_path("complex_guides.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn valid_zip_structure() {
         let project = make_project_with_layers();
-        let path = temp_pap_path("zip_structure_v4.pap");
+        let path = temp_pap_path("zip_structure.pap");
         save_project(&project, &path).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -707,7 +707,7 @@ mod tests {
     #[test]
     fn json_readable() {
         let project = make_project_with_layers();
-        let path = temp_pap_path("json_readable_v4.pap");
+        let path = temp_pap_path("json_readable.pap");
         save_project(&project, &path).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -719,7 +719,7 @@ mod tests {
 
         assert!(buf.contains('\n'), "JSON should be pretty-printed");
         let parsed: serde_json::Value = serde_json::from_str(&buf).unwrap();
-        assert_eq!(parsed["version"], "4");
+        assert_eq!(parsed["version"], "1");
         assert_eq!(parsed["app_name"], "Practical Arcana Painter");
     }
 
@@ -732,7 +732,7 @@ mod tests {
             ..OutputSettings::default()
         };
 
-        let path = temp_pap_path("settings_test_v4.pap");
+        let path = temp_pap_path("settings_test.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
@@ -746,7 +746,7 @@ mod tests {
         let mut project = make_empty_project();
         project.base_color = BaseColor::Solid([0.5, 0.3, 0.8]);
 
-        let path = temp_pap_path("solid_color_v4.pap");
+        let path = temp_pap_path("solid_color.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
@@ -761,7 +761,7 @@ mod tests {
         let mut project = make_empty_project();
         project.base_color = BaseColor::Texture("textures/foo.png".to_string());
 
-        let path = temp_pap_path("texture_color_v4.pap");
+        let path = temp_pap_path("texture_color.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
@@ -776,7 +776,7 @@ mod tests {
         let mut project = make_empty_project();
         project.base_normal = Some("normals/base.png".to_string());
 
-        let path = temp_pap_path("base_normal_v4.pap");
+        let path = temp_pap_path("base_normal.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
@@ -794,7 +794,7 @@ mod tests {
         let mut project = make_empty_project();
         project.cached_color = Some(color);
 
-        let path = temp_pap_path("with_thumbnail_v4.pap");
+        let path = temp_pap_path("with_thumbnail.pap");
         save_project(&project, &path).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -809,7 +809,7 @@ mod tests {
     #[test]
     fn no_thumbnail_without_cache() {
         let project = make_empty_project();
-        let path = temp_pap_path("no_thumbnail_v4.pap");
+        let path = temp_pap_path("no_thumbnail.pap");
         save_project(&project, &path).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -835,7 +835,7 @@ mod tests {
 
     #[test]
     fn load_invalid_zip() {
-        let path = temp_pap_path("invalid_v4.pap");
+        let path = temp_pap_path("invalid.pap");
         std::fs::write(&path, b"this is not a zip file").unwrap();
 
         let result = load_project(&path);
@@ -848,7 +848,7 @@ mod tests {
 
     #[test]
     fn load_missing_manifest() {
-        let path = temp_pap_path("no_manifest_v4.pap");
+        let path = temp_pap_path("no_manifest.pap");
         {
             let file = std::fs::File::create(&path).unwrap();
             let mut zip = ZipWriter::new(file);
@@ -876,7 +876,7 @@ mod tests {
     #[test]
     fn round_trip_integrity() {
         let project = make_project_with_layers();
-        let path = temp_pap_path("integrity_v4.pap");
+        let path = temp_pap_path("integrity.pap");
 
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
@@ -928,7 +928,7 @@ mod tests {
         let mut project = make_empty_project();
         project.presets = PresetLibrary::built_in();
 
-        let path = temp_pap_path("presets_rt_v4.pap");
+        let path = temp_pap_path("presets_rt.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
@@ -950,7 +950,7 @@ mod tests {
         let mut project = make_empty_project();
         project.layers = vec![make_test_layer("test", 0, 1)];
 
-        let path = temp_pap_path("visible_default_v4.pap");
+        let path = temp_pap_path("visible_default.pap");
         save_project(&project, &path).unwrap();
         let loaded = load_project(&path).unwrap();
 
