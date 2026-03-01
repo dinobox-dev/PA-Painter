@@ -101,9 +101,9 @@ struct MeshGpuResources {
     index_count: u32,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Ownership anchor: TextureView and BindGroup reference this GPU resource.
     color_texture: wgpu::Texture,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Ownership anchor: texture_bind_group references this view.
     color_texture_view: wgpu::TextureView,
     texture_bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
@@ -111,7 +111,7 @@ struct MeshGpuResources {
     // Offscreen render targets
     render_texture: wgpu::Texture,
     render_srgb_view: wgpu::TextureView,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Ownership anchor: depth_texture_view references this GPU resource.
     depth_texture: wgpu::Texture,
     depth_texture_view: wgpu::TextureView,
     render_size: (u32, u32),
