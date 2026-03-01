@@ -8,7 +8,7 @@ authors = ["DiNo Box Inc."]
 keywords = ["procedural", "texture", "paint", "stroke", "3d"]
 categories = ["graphics", "game-development", "rendering"]
 readme = "README.md"
-rust-version = "1.70"
+rust-version = "1.87"
 # repository = "https://github.com/user/practical-arcana-painter"  # TODO: set before publishing
 
 [[bin]]

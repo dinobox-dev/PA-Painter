@@ -22,7 +22,7 @@ Practical Arcana Painter provides both a **GUI editor** for interactive work and
 
 ## Building
 
-Requires Rust 1.70+ and a GPU with Vulkan/Metal/DX12 support (for the GUI).
+Requires Rust 1.87+ and a GPU with Vulkan/Metal/DX12 support (for the GUI).
 
 ```bash
 # Build both CLI and GUI

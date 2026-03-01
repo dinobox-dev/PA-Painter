@@ -53,17 +53,17 @@ pub mod error;
 pub mod test_util;
 
 // ── Pipeline stages ──
+pub mod compositing;
 pub mod direction_field;
+pub mod output;
 pub mod path_placement;
 pub mod stroke_height;
-pub mod compositing;
-pub mod output;
 
 // ── Data & types ──
-pub mod types;
-pub mod project;
-pub mod pressure;
 pub mod brush_profile;
+pub mod pressure;
+pub mod project;
+pub mod types;
 
 // ── I/O & export ──
 pub mod asset_io;
@@ -72,6 +72,6 @@ pub mod stroke_color;
 
 // ── Utilities ──
 pub mod math;
-pub mod rng;
 pub mod object_normal;
+pub mod rng;
 pub mod uv_mask;
