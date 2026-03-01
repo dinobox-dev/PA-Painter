@@ -15,11 +15,10 @@
 //! ## Quick start
 //!
 //! ```no_run
+//! use std::path::Path;
 //! use practical_arcana_painter::project::load_project;
-//! use practical_arcana_painter::compositing::{composite_all_with_paths, generate_all_paths};
-//! use practical_arcana_painter::output::{export_all, ExportFormat};
 //!
-//! let project = load_project("scene.pap").unwrap();
+//! let project = load_project(Path::new("scene.pap")).unwrap();
 //! // … see the CLI binary (src/main.rs) for a full usage example.
 //! ```
 //!
