@@ -1154,7 +1154,7 @@ mod tests {
             }
         }
 
-        lengths.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        lengths.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let median = lengths[lengths.len() / 2];
         let max_length_uv = params.max_stroke_length / 512.0;
         let expected_median = max_length_uv * 0.707;
@@ -1261,7 +1261,7 @@ mod tests {
                     lengths.push(len);
                 }
             }
-            lengths.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            lengths.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             medians.push(lengths[lengths.len() / 2]);
         }
 

@@ -615,7 +615,7 @@ fn seed_to_alpha(mut seed: u32) -> String {
 }
 
 fn short_filename(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or(path)
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
 const LAYER_ICON_SIZE: f32 = 18.0;

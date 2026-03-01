@@ -758,7 +758,7 @@ impl StrokePath {
         let last_seg = self.points.len() - 2;
         let idx = match self
             .cumulative_lengths
-            .binary_search_by(|v| v.partial_cmp(&distance).unwrap())
+            .binary_search_by(|v| v.partial_cmp(&distance).unwrap_or(std::cmp::Ordering::Equal))
         {
             Ok(i) => i.min(last_seg),
             Err(i) => i.saturating_sub(1).min(last_seg),
