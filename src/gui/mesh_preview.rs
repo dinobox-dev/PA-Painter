@@ -16,6 +16,7 @@ struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
     uv: [f32; 2],
+    tangent: [f32; 4], // xyz = tangent direction, w = handedness sign
 }
 
 // ── Uniform buffer ─────────────────────────────────────────────────
@@ -105,6 +106,10 @@ struct MeshGpuResources {
     color_texture: wgpu::Texture,
     #[allow(dead_code)] // Ownership anchor: texture_bind_group references this view.
     color_texture_view: wgpu::TextureView,
+    #[allow(dead_code)] // Ownership anchor: TextureView and BindGroup reference this GPU resource.
+    normal_texture: wgpu::Texture,
+    #[allow(dead_code)] // Ownership anchor: texture_bind_group references this view.
+    normal_texture_view: wgpu::TextureView,
     texture_bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -147,8 +152,72 @@ fn compute_smooth_normals(mesh: &LoadedMesh) -> Vec<Vec3> {
     normals
 }
 
+// ── Tangent computation ───────────────────────────────────────────
+
+/// Compute per-vertex tangent vectors from mesh geometry and UV coordinates.
+/// Returns `[f32; 4]` per vertex: xyz = tangent direction, w = handedness sign.
+fn compute_tangents(mesh: &LoadedMesh, normals: &[Vec3]) -> Vec<[f32; 4]> {
+    let n = mesh.positions.len();
+    let mut tan_accum = vec![Vec3::ZERO; n];
+    let mut bitan_accum = vec![Vec3::ZERO; n];
+
+    for tri in mesh.indices.chunks(3) {
+        if tri.len() < 3 {
+            continue;
+        }
+        let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
+        let v0 = mesh.positions[i0];
+        let v1 = mesh.positions[i1];
+        let v2 = mesh.positions[i2];
+        let e1 = v1 - v0;
+        let e2 = v2 - v0;
+
+        let uv0 = mesh.uvs.get(i0).copied().unwrap_or(glam::Vec2::ZERO);
+        let uv1 = mesh.uvs.get(i1).copied().unwrap_or(glam::Vec2::ZERO);
+        let uv2 = mesh.uvs.get(i2).copied().unwrap_or(glam::Vec2::ZERO);
+        let duv1 = uv1 - uv0;
+        let duv2 = uv2 - uv0;
+
+        let det = duv1.x * duv2.y - duv2.x * duv1.y;
+        if det.abs() < 1e-8 {
+            continue; // degenerate UV triangle
+        }
+        let r = 1.0 / det;
+        let t = (e1 * duv2.y - e2 * duv1.y) * r;
+        let b = (e2 * duv1.x - e1 * duv2.x) * r;
+
+        tan_accum[i0] += t;
+        tan_accum[i1] += t;
+        tan_accum[i2] += t;
+        bitan_accum[i0] += b;
+        bitan_accum[i1] += b;
+        bitan_accum[i2] += b;
+    }
+
+    (0..n)
+        .map(|i| {
+            let n_vec = normals[i];
+            let t = tan_accum[i];
+            // Gram-Schmidt orthogonalize: T' = normalize(T - N * dot(N, T))
+            let t_ortho = (t - n_vec * n_vec.dot(t)).normalize_or_zero();
+            if t_ortho.length_squared() < 0.5 {
+                // Fallback for degenerate tangent
+                return [1.0, 0.0, 0.0, 1.0];
+            }
+            // Handedness: sign(dot(cross(N, T), B))
+            let w = if n_vec.cross(t_ortho).dot(bitan_accum[i]) < 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
+            [t_ortho.x, t_ortho.y, t_ortho.z, w]
+        })
+        .collect()
+}
+
 fn build_vertices(mesh: &LoadedMesh) -> Vec<Vertex> {
     let normals = compute_smooth_normals(mesh);
+    let tangents = compute_tangents(mesh, &normals);
     mesh.positions
         .iter()
         .enumerate()
@@ -159,6 +228,7 @@ fn build_vertices(mesh: &LoadedMesh) -> Vec<Vertex> {
                 mesh.uvs.get(i).map(|u| u.x).unwrap_or(0.0),
                 mesh.uvs.get(i).map(|u| u.y).unwrap_or(0.0),
             ],
+            tangent: tangents[i],
         })
         .collect()
 }
@@ -183,6 +253,44 @@ fn create_placeholder_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgp
     });
     let data = [
         128u8, 128, 128, 255, 128, 128, 128, 255, 128, 128, 128, 255, 128, 128, 128, 255,
+    ];
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &data,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(8),
+            rows_per_image: Some(2),
+        },
+        size,
+    );
+    texture
+}
+
+fn create_placeholder_normal_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
+    let size = wgpu::Extent3d {
+        width: 2,
+        height: 2,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mesh_placeholder_normal"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    // (128, 128, 255) = flat up-facing normal; alpha=0 = use vertex normal
+    let data = [
+        128u8, 128, 255, 0, 128, 128, 255, 0, 128, 128, 255, 0, 128, 128, 255, 0,
     ];
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
@@ -308,6 +416,9 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
     let color_texture = create_placeholder_texture(device, queue);
     let color_texture_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+    let normal_texture = create_placeholder_normal_texture(device, queue);
+    let normal_texture_view = normal_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("mesh_sampler"),
         mag_filter: wgpu::FilterMode::Linear,
@@ -335,6 +446,16 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
     let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -348,6 +469,10 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&normal_texture_view),
             },
         ],
     });
@@ -377,6 +502,7 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
                     0 => Float32x3,
                     1 => Float32x3,
                     2 => Float32x2,
+                    3 => Float32x4,
                 ],
             }],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -419,6 +545,8 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         uniform_bind_group,
         color_texture,
         color_texture_view,
+        normal_texture,
+        normal_texture_view,
         texture_bind_group,
         texture_bind_group_layout,
         sampler,
@@ -533,10 +661,97 @@ pub fn upload_color_texture(
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&res.sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&res.normal_texture_view),
+                },
             ],
         });
         res.color_texture = texture;
         res.color_texture_view = view;
+    }
+}
+
+// ── Normal texture upload ──────────────────────────────────────────
+
+/// Upload generated normal map data to the 3D preview texture.
+pub fn upload_normal_texture(
+    render_state: &egui_wgpu::RenderState,
+    normal_data: &[[f32; 3]],
+    resolution: usize,
+) {
+    let device = &render_state.device;
+    let queue = &render_state.queue;
+
+    // Normal data is already [0, 1] encoded (0.5 = zero perturbation).
+    // Write directly to texture — no additional encoding needed.
+    let pixels: Vec<u8> = normal_data
+        .iter()
+        .flat_map(|n| {
+            [
+                (n[0].clamp(0.0, 1.0) * 255.0) as u8,
+                (n[1].clamp(0.0, 1.0) * 255.0) as u8,
+                (n[2].clamp(0.0, 1.0) * 255.0) as u8,
+                255u8, // alpha=1 → use this normal map
+            ]
+        })
+        .collect();
+
+    let size = wgpu::Extent3d {
+        width: resolution as u32,
+        height: resolution as u32,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mesh_normal_tex"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &pixels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(resolution as u32 * 4),
+            rows_per_image: Some(resolution as u32),
+        },
+        size,
+    );
+
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let mut renderer = render_state.renderer.write();
+    if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
+        res.texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mesh_texture_bg"),
+            layout: &res.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&res.color_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&res.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+            ],
+        });
+        res.normal_texture = texture;
+        res.normal_texture_view = view;
     }
 }
 

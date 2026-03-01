@@ -136,10 +136,11 @@ impl PainterApp {
             "gen_stroke_id",
         ));
 
-        // Upload color texture to 3D preview
+        // Upload color and normal textures to 3D preview
         if let Some(ref rs) = self.render_state {
             if self.state.mesh_preview.gpu_ready {
                 mesh_preview::upload_color_texture(rs, &result.color, r as usize);
+                mesh_preview::upload_normal_texture(rs, &result.normal_map, r as usize);
             }
         }
 
@@ -176,9 +177,10 @@ impl PainterApp {
         }
         self.state.mesh_preview.fit_to_mesh(mesh);
 
-        // If we already have generated color data, upload it
+        // If we already have generated data, upload color and normal textures
         if let Some(ref gen) = self.state.generated {
             mesh_preview::upload_color_texture(rs, &gen.color, gen.resolution as usize);
+            mesh_preview::upload_normal_texture(rs, &gen.normal_map, gen.resolution as usize);
         }
     }
 }
