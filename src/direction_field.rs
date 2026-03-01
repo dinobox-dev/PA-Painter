@@ -1,3 +1,8 @@
+//! **Pipeline stage 1** — direction field generation from user-placed guides.
+//!
+//! Computes a per-texel flow direction by blending contributions from directional,
+//! source, sink, and vortex guides with distance-based influence falloff.
+
 use glam::Vec2;
 
 use crate::types::{Guide, GuideType};

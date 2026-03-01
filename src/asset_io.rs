@@ -1,3 +1,6 @@
+//! Mesh and texture asset loading — OBJ, glTF/GLB mesh import and image I/O with
+//! sRGB ↔ linear conversion.
+
 use glam::{Vec2, Vec3};
 use std::collections::HashSet;
 use std::path::Path;

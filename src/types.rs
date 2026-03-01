@@ -1,3 +1,8 @@
+//! Core data structures shared across the pipeline.
+//!
+//! Defines [`Color`], [`PaintValues`], [`StrokeParams`], [`Layer`], [`Guide`],
+//! pressure curves, preset libraries, and all supporting types.
+
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};

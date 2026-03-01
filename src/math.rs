@@ -1,3 +1,5 @@
+//! Math utilities: smoothstep, linear interpolation, vector helpers, and angle normalization.
+
 use crate::types::Color;
 use glam::Vec2;
 

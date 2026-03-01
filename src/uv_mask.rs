@@ -1,3 +1,5 @@
+//! UV-space rasterized masks for per-mesh-group painting isolation.
+
 use glam::Vec2;
 
 use crate::asset_io::LoadedMesh;

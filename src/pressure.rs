@@ -1,3 +1,6 @@
+//! Pressure curve evaluation — maps stroke progress `[0, 1]` to a pressure value
+//! using either a built-in preset or a user-defined cubic Bézier spline.
+
 use crate::types::{CurveKnot, PressureCurve, PressurePreset};
 use std::f32::consts::PI;
 

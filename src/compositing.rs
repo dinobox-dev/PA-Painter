@@ -1,3 +1,8 @@
+//! **Pipeline stage 4** — multi-layer compositing into unified global maps.
+//!
+//! Blends stroke height, color, gradient, and AO contributions from all visible
+//! paint layers into a single [`GlobalMaps`] struct, respecting layer ordering and masks.
+
 use glam::Vec2;
 use rayon::prelude::*;
 

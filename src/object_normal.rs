@@ -1,3 +1,6 @@
+//! Object-space normal computation — rasterizes mesh normals and tangent frames
+//! into UV space for the *Depicted Form* normal mode.
+
 use glam::{Vec2, Vec3};
 
 use crate::asset_io::LoadedMesh;

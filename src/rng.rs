@@ -1,3 +1,5 @@
+//! Deterministic random number generator wrapper backed by ChaCha8.
+
 use glam::Vec2;
 use rand::Rng;
 use rand::SeedableRng;

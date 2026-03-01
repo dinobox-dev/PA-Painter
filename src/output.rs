@@ -1,3 +1,8 @@
+//! **Pipeline stage 5** — final output map generation and export.
+//!
+//! Converts composited global maps into color, normal, height, and AO textures,
+//! then writes them as PNG or OpenEXR files.
+
 use std::path::Path;
 
 use crate::asset_io::linear_to_srgb;

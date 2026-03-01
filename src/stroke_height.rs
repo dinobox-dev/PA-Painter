@@ -1,3 +1,8 @@
+//! **Pipeline stage 3** — stroke height accumulation from pressure curves and brush profiles.
+//!
+//! Maps each pixel's distance from stroke centerlines into height values,
+//! modulated by pressure curves, load variation, and Perlin noise.
+
 use crate::math::{interpolate_array, lerp, smoothstep};
 use crate::pressure::evaluate_pressure;
 use crate::types::{PressureCurve, StrokeParams};

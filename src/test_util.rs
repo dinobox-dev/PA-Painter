@@ -1,3 +1,5 @@
+//! Shared test helper functions and factory methods for constructing test fixtures.
+
 use glam::Vec2;
 
 use crate::types::{Guide, GuideType, Layer, PaintLayer, PaintValues, StrokeParams};

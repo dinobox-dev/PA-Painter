@@ -1,3 +1,5 @@
+//! Unified error type that aggregates all sub-system errors in the painter pipeline.
+
 use crate::asset_io::{MeshError, TextureError};
 use crate::output::OutputError;
 use crate::project::ProjectError;

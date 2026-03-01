@@ -1,3 +1,5 @@
+//! Brush cross-section profile generator using Gaussian curves with Perlin noise variation.
+
 use crate::rng::SeededRng;
 use noise::{Fbm, NoiseFn, Perlin};
 

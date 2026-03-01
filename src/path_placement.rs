@@ -1,3 +1,9 @@
+//! **Pipeline stage 2** — stroke path placement along the direction field.
+//!
+//! Seeds initial points via Poisson-disk sampling, then traces streamlines through
+//! the direction field. Supports density control, overscan, color/normal boundary
+//! breaks, and multi-pass refinement.
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 

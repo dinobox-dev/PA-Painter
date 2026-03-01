@@ -1,3 +1,6 @@
+//! Stroke colorization — samples base color textures, applies HSV variation, and
+//! handles bilinear interpolation for per-stroke color assignment.
+
 use crate::rng::SeededRng;
 use crate::types::{Color, HsvColor, StrokePath};
 use glam::Vec2;

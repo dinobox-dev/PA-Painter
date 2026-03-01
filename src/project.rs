@@ -1,3 +1,9 @@
+//! `.pap` project file I/O and the top-level [`Project`] data model.
+//!
+//! A `.pap` file is a ZIP archive containing `project.json` plus optional asset
+//! references. This module handles serialization, deserialization, migration,
+//! and layer/mask management.
+
 use std::io::{Read, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
