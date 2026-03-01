@@ -6,6 +6,7 @@ use practical_arcana_painter::types::{
 };
 
 use super::state::AppState;
+use super::widgets::{paint_icon, paint_truncated_text};
 
 pub const SECTION_INDENT: f32 = 8.0;
 
@@ -77,7 +78,7 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 let id = ui.id().with((label, "clear"));
                 let resp = ui.interact(r, id, egui::Sense::click());
-                draw_layer_icon(p, ui, r, egui_phosphor::fill::X, true, resp.hovered());
+                paint_icon(p, ui, r, egui_phosphor::fill::X, 13.0, true, resp.hovered());
                 if resp.on_hover_text(clear_tip).clicked() {
                     clicked_clear = true;
                 }
@@ -93,7 +94,7 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 let id = ui.id().with((label, "open"));
                 let resp = ui.interact(r, id, egui::Sense::click());
-                draw_layer_icon(p, ui, r, egui_phosphor::fill::FOLDER_OPEN, icons.open, resp.hovered());
+                paint_icon(p, ui, r, egui_phosphor::fill::FOLDER_OPEN, 13.0, icons.open, resp.hovered());
                 if resp.on_hover_text(open_tip).clicked() && icons.open {
                     clicked_open = true;
                 }
@@ -108,7 +109,7 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 let id = ui.id().with((label, "reload"));
                 let resp = ui.interact(r, id, egui::Sense::click());
-                draw_layer_icon(p, ui, r, egui_phosphor::fill::ARROW_CLOCKWISE, true, resp.hovered());
+                paint_icon(p, ui, r, egui_phosphor::fill::ARROW_CLOCKWISE, 13.0, true, resp.hovered());
                 if resp.on_hover_text(reload_tip).clicked() {
                     clicked_reload = true;
                 }
@@ -128,20 +129,7 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
             let text_right = icons_left - icon_gap;
             let max_text_w = (text_right - text_left).max(10.0);
             let text_color = ui.visuals().weak_text_color();
-            let galley = p.layout_no_wrap(display_text.to_string(), font_id.clone(), text_color);
-            let text_y = rect.center().y - galley.size().y * 0.5;
-            if galley.size().x > max_text_w {
-                let ell = p.layout_no_wrap("\u{2026}".to_string(), font_id.clone(), text_color);
-                let ell_w = ell.size().x;
-                let clip = egui::Rect::from_min_size(
-                    egui::Pos2::new(text_left, rect.min.y),
-                    egui::Vec2::new(max_text_w - ell_w, rect.height()),
-                );
-                p.with_clip_rect(clip).galley(egui::Pos2::new(text_left, text_y), galley, text_color);
-                p.galley(egui::Pos2::new(text_left + max_text_w - ell_w, text_y), ell, text_color);
-            } else {
-                p.galley(egui::Pos2::new(text_left, text_y), galley, text_color);
-            }
+            paint_truncated_text(p, display_text, font_id.clone(), text_color, text_left, rect, max_text_w);
 
             (clicked_reload, clicked_open, clicked_clear)
         };
@@ -306,7 +294,7 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
             let size = egui::Vec2::splat(20.0);
             let (btn_rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
             if ui.is_rect_visible(btn_rect) {
-                draw_layer_icon(ui.painter(), ui, btn_rect, PLUS, has_mesh, resp.hovered());
+                paint_icon(ui.painter(), ui, btn_rect, PLUS, 13.0, has_mesh, resp.hovered());
             }
             if resp.on_hover_text("Add Layer").clicked() && has_mesh {
                 state.project.layers.push(Layer {
@@ -407,7 +395,7 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 let down_id = ui.id().with(("layer_down", i));
                 let down_resp = ui.interact(down_rect, down_id, egui::Sense::click());
-                draw_layer_icon(p, ui, down_rect, ARROW_DOWN, can_down, down_resp.hovered());
+                paint_icon(p, ui, down_rect, ARROW_DOWN, 13.0, can_down, down_resp.hovered());
                 if down_resp.on_hover_text("Move down").clicked() && can_down {
                     swap = Some((i, i + 1));
                 }
@@ -420,7 +408,7 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 let up_id = ui.id().with(("layer_up", i));
                 let up_resp = ui.interact(up_rect, up_id, egui::Sense::click());
-                draw_layer_icon(p, ui, up_rect, ARROW_UP, i > 0, up_resp.hovered());
+                paint_icon(p, ui, up_rect, ARROW_UP, 13.0, i > 0, up_resp.hovered());
                 if up_resp.on_hover_text("Move up").clicked() && i > 0 {
                     swap = Some((i, i - 1));
                 }
@@ -433,7 +421,7 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
                 );
                 let del_id = ui.id().with(("layer_del", i));
                 let del_resp = ui.interact(del_rect, del_id, egui::Sense::click());
-                draw_layer_icon(p, ui, del_rect, TRASH_SIMPLE, true, del_resp.hovered());
+                paint_icon(p, ui, del_rect, TRASH_SIMPLE, 13.0, true, del_resp.hovered());
                 if del_resp.on_hover_text("Delete layer").clicked() {
                     delete_idx = Some(i);
                 }
@@ -460,20 +448,7 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
                 let label = format!("{} ({})", name, group);
                 let font_id = egui::TextStyle::Body.resolve(ui.style());
                 let max_text_w = (name_right - name_left - 4.0).max(10.0);
-                let galley = p.layout_no_wrap(label, font_id.clone(), text_color);
-                let text_y = rect.center().y - galley.size().y * 0.5;
-                if galley.size().x > max_text_w {
-                    let ell = p.layout_no_wrap("\u{2026}".to_string(), font_id, text_color);
-                    let ell_w = ell.size().x;
-                    let clip = egui::Rect::from_min_size(
-                        egui::Pos2::new(name_left + 2.0, rect.min.y),
-                        egui::Vec2::new(max_text_w - ell_w, rect.height()),
-                    );
-                    p.with_clip_rect(clip).galley(egui::Pos2::new(name_left + 2.0, text_y), galley, text_color);
-                    p.galley(egui::Pos2::new(name_left + 2.0 + max_text_w - ell_w, text_y), ell, text_color);
-                } else {
-                    p.galley(egui::Pos2::new(name_left + 2.0, text_y), galley, text_color);
-                }
+                paint_truncated_text(p, &label, font_id, text_color, name_left + 2.0, rect, max_text_w);
             }
             if name_resp.clicked() {
                 if selected {
@@ -648,30 +623,3 @@ fn short_filename(path: &str) -> &str {
 
 const LAYER_ICON_SIZE: f32 = 18.0;
 
-/// Draw a small icon with hover highlight (used within manual layer row painting).
-fn draw_layer_icon(
-    p: &egui::Painter,
-    ui: &egui::Ui,
-    rect: egui::Rect,
-    icon: &str,
-    active: bool,
-    hovered: bool,
-) {
-    if hovered && active {
-        p.rect_filled(rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
-    }
-    let color = if !active {
-        ui.visuals().weak_text_color().gamma_multiply(0.4)
-    } else if hovered {
-        ui.visuals().text_color()
-    } else {
-        ui.visuals().weak_text_color()
-    };
-    p.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        icon,
-        egui::FontId::proportional(13.0),
-        color,
-    );
-}

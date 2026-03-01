@@ -9,6 +9,7 @@ pub mod state;
 pub mod textures;
 pub mod undo;
 pub mod viewport;
+pub mod widgets;
 
 use eframe::egui;
 use eframe::egui_wgpu;

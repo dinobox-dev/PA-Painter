@@ -10,6 +10,7 @@ use super::preview::StrokePreviewCache;
 use super::preview;
 use super::sidebar::{build_group_names, section_header, SECTION_INDENT};
 use super::state::AppState;
+use super::widgets::{paint_icon, paint_truncated_text, small_icon_button};
 
 /// Draw the right-panel layer editor for the currently selected layer.
 /// Returns early if no layer is selected.
@@ -265,29 +266,7 @@ fn show_preset_combo_sized(ui: &mut egui::Ui, state: &mut AppState, layer_idx: u
                         };
                         let max_text_w = (text_right - text_left).max(10.0);
                         let font_id = egui::TextStyle::Body.resolve(ui.style());
-                        let galley = p.layout_no_wrap(
-                            preset.name.clone(), font_id.clone(), text_color,
-                        );
-                        let text_y = rect.center().y - galley.size().y * 0.5;
-                        if galley.size().x > max_text_w {
-                            let ell = p.layout_no_wrap(
-                                "\u{2026}".to_string(), font_id, text_color,
-                            );
-                            let ell_w = ell.size().x;
-                            let clip = egui::Rect::from_min_size(
-                                egui::Pos2::new(text_left, rect.min.y),
-                                egui::Vec2::new(max_text_w - ell_w, rect.height()),
-                            );
-                            p.with_clip_rect(clip).galley(
-                                egui::Pos2::new(text_left, text_y), galley, text_color,
-                            );
-                            p.galley(
-                                egui::Pos2::new(text_left + max_text_w - ell_w, text_y),
-                                ell, text_color,
-                            );
-                        } else {
-                            p.galley(egui::Pos2::new(text_left, text_y), galley, text_color);
-                        }
+                        paint_truncated_text(p, &preset.name, font_id, text_color, text_left, rect, max_text_w);
                     }
                     if resp.clicked() {
                         selected_values = Some(preset.values.clone());
@@ -295,25 +274,14 @@ fn show_preset_combo_sized(ui: &mut egui::Ui, state: &mut AppState, layer_idx: u
 
                     // Delete button (overlaid on the row, right side)
                     let del_rect = egui::Rect::from_min_size(
-                        egui::Pos2::new(rect.max.x - delete_btn_w - 2.0, rect.min.y + 1.0),
-                        egui::Vec2::splat(delete_btn_w),
+                        egui::Pos2::new(rect.max.x - delete_btn_w, rect.min.y),
+                        egui::Vec2::new(delete_btn_w, row_h),
                     );
                     let del_id = ui.id().with(("del_preset", i));
                     let del_resp = ui.interact(del_rect, del_id, egui::Sense::click());
                     if ui.is_rect_visible(del_rect) {
                         use egui_phosphor::fill::TRASH_SIMPLE;
-                        let del_color = if del_resp.hovered() {
-                            ui.visuals().text_color()
-                        } else {
-                            ui.visuals().weak_text_color()
-                        };
-                        ui.painter().text(
-                            del_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            TRASH_SIMPLE,
-                            egui::FontId::proportional(12.0),
-                            del_color,
-                        );
+                        paint_icon(ui.painter(), ui, del_rect, TRASH_SIMPLE, 13.0, true, del_resp.hovered());
                     }
                     if del_resp.on_hover_text("Delete").clicked() {
                         delete_user_idx = Some(i);
@@ -359,29 +327,7 @@ fn show_preset_combo_sized(ui: &mut egui::Ui, state: &mut AppState, layer_idx: u
                     };
                     let max_text_w = (rect.max.x - text_left).max(10.0);
                     let font_id = egui::TextStyle::Body.resolve(ui.style());
-                    let galley = p.layout_no_wrap(
-                        preset.name.clone(), font_id.clone(), text_color,
-                    );
-                    let text_y = rect.center().y - galley.size().y * 0.5;
-                    if galley.size().x > max_text_w {
-                        let ell = p.layout_no_wrap(
-                            "\u{2026}".to_string(), font_id, text_color,
-                        );
-                        let ell_w = ell.size().x;
-                        let clip = egui::Rect::from_min_size(
-                            egui::Pos2::new(text_left, rect.min.y),
-                            egui::Vec2::new(max_text_w - ell_w, rect.height()),
-                        );
-                        p.with_clip_rect(clip).galley(
-                            egui::Pos2::new(text_left, text_y), galley, text_color,
-                        );
-                        p.galley(
-                            egui::Pos2::new(text_left + max_text_w - ell_w, text_y),
-                            ell, text_color,
-                        );
-                    } else {
-                        p.galley(egui::Pos2::new(text_left, text_y), galley, text_color);
-                    }
+                    paint_truncated_text(p, &preset.name, font_id, text_color, text_left, rect, max_text_w);
                 }
                 if resp.clicked() {
                     selected_values = Some(preset.values.clone());
@@ -425,30 +371,8 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
     let save_name_id = ui.id().with("preset_save_name");
     let mut save_open: bool = ui.data_mut(|d| d.get_temp(save_open_id).unwrap_or(false));
 
-    let icon_h = ui.spacing().interact_size.y;
-    let icon_w = 20.0;
     let enabled = is_custom && !save_open;
-    let (btn_rect, btn_resp) =
-        ui.allocate_exact_size(egui::Vec2::new(icon_w, icon_h), egui::Sense::click());
-    if ui.is_rect_visible(btn_rect) {
-        let hovered = btn_resp.hovered() && enabled;
-        if hovered {
-            ui.painter()
-                .rect_filled(btn_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
-        }
-        let color = if !enabled {
-            ui.visuals().weak_text_color().gamma_multiply(0.4)
-        } else {
-            ui.visuals().text_color()
-        };
-        ui.painter().text(
-            btn_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            FLOPPY_DISK,
-            egui::FontId::proportional(14.0),
-            color,
-        );
-    }
+    let btn_resp = small_icon_button(ui, FLOPPY_DISK, 14.0, 20.0, enabled);
     if enabled {
         btn_resp.clone().on_hover_text("Save as Preset");
     } else {
@@ -476,12 +400,11 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
 
         let area_resp = egui::Area::new(egui::Id::new("save_preset_popup"))
             .order(egui::Order::Foreground)
-            .fixed_pos(egui::Pos2::new(btn_rect.left(), btn_rect.bottom() + 4.0))
+            .fixed_pos(egui::Pos2::new(btn_resp.rect.left(), btn_resp.rect.bottom() + 4.0))
             .show(ui.ctx(), |ui: &mut egui::Ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui: &mut egui::Ui| {
                     use egui_phosphor::fill::{CHECK, X};
-                    let btn_h = ui.spacing().interact_size.y;
-                    let btn_w = 20.0;
+                    let btn_side = 20.0;
 
                     ui.horizontal(|ui: &mut egui::Ui| {
                         let text_w = 140.0_f32;
@@ -497,23 +420,7 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
                         let can_save = !name.trim().is_empty();
 
                         // Save (check) icon
-                        let (save_rect, save_resp) =
-                            ui.allocate_exact_size(egui::Vec2::new(btn_w, btn_h), egui::Sense::click());
-                        if ui.is_rect_visible(save_rect) {
-                            let hovered = save_resp.hovered() && can_save;
-                            if hovered {
-                                ui.painter().rect_filled(save_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
-                            }
-                            let color = if !can_save {
-                                ui.visuals().weak_text_color().gamma_multiply(0.4)
-                            } else {
-                                ui.visuals().text_color()
-                            };
-                            ui.painter().text(
-                                save_rect.center(), egui::Align2::CENTER_CENTER,
-                                CHECK, egui::FontId::proportional(14.0), color,
-                            );
-                        }
+                        let save_resp = small_icon_button(ui, CHECK, 14.0, btn_side, can_save);
                         if can_save {
                             save_resp.clone().on_hover_text("Save (Enter)");
                         }
@@ -537,22 +444,7 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
                         }
 
                         // Cancel (X) icon
-                        let (cancel_rect, cancel_resp) =
-                            ui.allocate_exact_size(egui::Vec2::new(btn_w, btn_h), egui::Sense::click());
-                        if ui.is_rect_visible(cancel_rect) {
-                            if cancel_resp.hovered() {
-                                ui.painter().rect_filled(cancel_rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
-                            }
-                            let color = if cancel_resp.hovered() {
-                                ui.visuals().text_color()
-                            } else {
-                                ui.visuals().weak_text_color()
-                            };
-                            ui.painter().text(
-                                cancel_rect.center(), egui::Align2::CENTER_CENTER,
-                                X, egui::FontId::proportional(14.0), color,
-                            );
-                        }
+                        let cancel_resp = small_icon_button(ui, X, 14.0, btn_side, true);
                         cancel_resp.clone().on_hover_text("Cancel (Esc)");
                         if cancel_resp.clicked() {
                             close = true;

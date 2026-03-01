@@ -5,6 +5,7 @@ use practical_arcana_painter::types::GuideType;
 
 use super::mesh_preview;
 use super::state::{AppState, GroupDimKey, GuideTool, MapMode, ViewportTab};
+use super::widgets::toolbar_icon_button;
 
 /// Convert UV coordinate to screen position.
 pub fn uv_to_screen(uv: glam::Vec2, state: &AppState, viewport_rect: Rect) -> Pos2 {
@@ -142,55 +143,6 @@ pub fn show(
 }
 
 // ── Strip contents ──────────────────────────────────────────────────
-
-/// Square icon button with a small shortcut number badge in the top-left corner.
-fn icon_button(
-    ui: &mut egui::Ui,
-    selected: bool,
-    icon: &str,
-    num: &str,
-    tooltip: &str,
-) -> bool {
-    let size = Vec2::splat(32.0);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-
-    if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
-        let cr = 4.0;
-
-        // Background
-        if selected {
-            painter.rect_filled(rect, cr, ui.visuals().selection.bg_fill);
-        } else if response.hovered() {
-            painter.rect_filled(rect, cr, ui.visuals().widgets.hovered.bg_fill);
-        }
-
-        // Icon (centered)
-        let icon_color = if selected {
-            ui.visuals().selection.stroke.color
-        } else {
-            ui.visuals().text_color()
-        };
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            icon,
-            egui::FontId::proportional(18.0),
-            icon_color,
-        );
-
-        // Number badge (top-left)
-        painter.text(
-            rect.left_top() + Vec2::new(3.0, 1.0),
-            egui::Align2::LEFT_TOP,
-            num,
-            egui::FontId::proportional(9.0),
-            ui.visuals().weak_text_color(),
-        );
-    }
-
-    response.on_hover_text(tooltip).clicked()
-}
 
 /// Wireframe toggle + path overlay button with popup palette, shared by UV and Guide strips.
 fn strip_overlay_controls(ui: &mut egui::Ui, state: &mut AppState) {
@@ -371,7 +323,7 @@ fn strip_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
         (MapMode::StrokeId, "4", HASH,      "Stroke ID"),
     ];
     for (mode, num, icon, tooltip) in &maps {
-        if icon_button(ui, state.map_mode == *mode, icon, num, tooltip) {
+        if toolbar_icon_button(ui, state.map_mode == *mode, icon, num, tooltip) {
             state.map_mode = *mode;
         }
     }
@@ -391,7 +343,7 @@ fn strip_guide(ui: &mut egui::Ui, state: &mut AppState) {
         (GuideTool::AddVortex,      "4", SPIRAL,  "Vortex"),
     ];
     for (tool, num, icon, tooltip) in &tools {
-        if icon_button(ui, state.guide_tool == *tool, icon, num, tooltip) {
+        if toolbar_icon_button(ui, state.guide_tool == *tool, icon, num, tooltip) {
             if state.guide_tool != *tool {
                 if *tool != GuideTool::Select {
                     state.selected_guide = None;
