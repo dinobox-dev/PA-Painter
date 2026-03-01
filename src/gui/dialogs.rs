@@ -431,12 +431,15 @@ pub fn save_project_action(state: &mut AppState) {
     let path = if let Some(ref path) = state.project_path {
         path.clone()
     } else {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(mut path) = rfd::FileDialog::new()
             .add_filter("PAP Project", &["pap"])
             .save_file()
         else {
             return;
         };
+        if path.extension().is_none() {
+            path.set_extension("pap");
+        }
         path
     };
 
