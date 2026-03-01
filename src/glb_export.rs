@@ -733,8 +733,10 @@ mod tests {
                 guides: guides.clone(),
             };
 
-            let mut settings = OutputSettings::default();
-            settings.normal_mode = normal_mode;
+            let settings = OutputSettings {
+                normal_mode,
+                ..OutputSettings::default()
+            };
 
             let mesh_nd = match normal_mode {
                 NormalMode::DepictedForm => Some(&nd),
@@ -742,7 +744,7 @@ mod tests {
             };
 
             let maps = composite_all(
-                &[layer.clone()],
+                std::slice::from_ref(&layer),
                 res,
                 &BaseColorSource::solid(solid),
                 &settings,
@@ -875,12 +877,14 @@ mod tests {
         };
 
         let solid = C::rgb(0.55, 0.35, 0.25);
-        let mut settings = OutputSettings::default();
-        settings.normal_mode = NormalMode::DepictedForm;
-        settings.background_mode = BackgroundMode::Transparent;
+        let settings = OutputSettings {
+            normal_mode: NormalMode::DepictedForm,
+            background_mode: BackgroundMode::Transparent,
+            ..OutputSettings::default()
+        };
 
         let maps = composite_all(
-            &[layer.clone()],
+            std::slice::from_ref(&layer),
             res,
             &BaseColorSource::solid(solid),
             &settings,
@@ -959,9 +963,11 @@ mod tests {
         };
 
         let solid = C::rgb(0.55, 0.35, 0.25);
-        let mut settings = OutputSettings::default();
-        settings.normal_mode = NormalMode::DepictedForm;
-        settings.background_mode = BackgroundMode::Transparent;
+        let settings = OutputSettings {
+            normal_mode: NormalMode::DepictedForm,
+            background_mode: BackgroundMode::Transparent,
+            ..OutputSettings::default()
+        };
 
         // Generate paths with overscan + Poisson + 3 passes
         let paths = generate_paths(&layer, 0, None, Some(&nd), None);
@@ -969,7 +975,7 @@ mod tests {
 
         let cached_paths = vec![paths];
         let maps = composite_all_with_paths(
-            &[layer.clone()],
+            std::slice::from_ref(&layer),
             res,
             &BaseColorSource::solid(solid),
             &settings,

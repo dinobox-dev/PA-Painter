@@ -507,8 +507,10 @@ mod tests {
     #[test]
     fn streamline_straight_horizontal() {
         let layer = make_layer();
-        let mut params = StrokeParams::default();
-        params.angle_variation = 0.0;
+        let params = StrokeParams {
+            angle_variation: 0.0,
+            ..StrokeParams::default()
+        };
 
         let field = DirectionField::new(&layer.guides, 512);
         let mut rng = SeededRng::new(42);
@@ -543,8 +545,10 @@ mod tests {
             influence: 1.5,
             ..Guide::default()
         }];
-        let mut params = StrokeParams::default();
-        params.angle_variation = 0.0;
+        let params = StrokeParams {
+            angle_variation: 0.0,
+            ..StrokeParams::default()
+        };
 
         let field = DirectionField::new(&guides, 512);
         let mut rng = SeededRng::new(42);

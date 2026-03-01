@@ -78,7 +78,7 @@ mod tests {
     fn value_range() {
         let profile = generate_brush_profile(60, 99);
         for &v in &profile {
-            assert!(v >= 0.0 && v <= 1.0, "value {} out of range", v);
+            assert!((0.0..=1.0).contains(&v), "value {} out of range", v);
         }
     }
 

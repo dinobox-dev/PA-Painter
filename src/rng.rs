@@ -74,7 +74,7 @@ mod tests {
         let mut rng = SeededRng::new(7);
         for _ in 0..100 {
             let v = rng.next_f32_range(2.0, 5.0);
-            assert!(v >= 2.0 && v < 5.0);
+            assert!((2.0..5.0).contains(&v));
         }
     }
 
@@ -83,7 +83,7 @@ mod tests {
         let mut rng = SeededRng::new(7);
         for _ in 0..100 {
             let v = rng.next_i32_range(-3, 3);
-            assert!(v >= -3 && v <= 3);
+            assert!((-3..=3).contains(&v));
         }
     }
 }

@@ -687,7 +687,7 @@ mod tests {
         );
         assert_eq!(maps.color.len(), 16);
 
-        let center = maps.color[1 * 4 + 1];
+        let center = maps.color[5];
         assert!(center.r > 0.0 && center.g > 0.0);
     }
 
@@ -964,7 +964,7 @@ mod tests {
         let solid = Color::rgb(0.5, 0.5, 0.5);
 
         let maps1 = composite_all(
-            &[layer.clone()],
+            std::slice::from_ref(&layer),
             64,
             &BaseColorSource::solid(solid),
             &settings,

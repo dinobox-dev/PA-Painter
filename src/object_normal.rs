@@ -764,12 +764,14 @@ mod tests {
             }],
         };
 
-        let mut settings = OutputSettings::default();
-        settings.normal_mode = NormalMode::DepictedForm;
+        let settings = OutputSettings {
+            normal_mode: NormalMode::DepictedForm,
+            ..OutputSettings::default()
+        };
 
         let solid = crate::types::Color::rgb(0.5, 0.4, 0.3);
         let maps = composite_all(
-            &[layer.clone()],
+            std::slice::from_ref(&layer),
             res,
             &BaseColorSource::solid(solid),
             &settings,
@@ -973,13 +975,15 @@ mod tests {
         let mut layer_on = base_layer.clone();
         layer_on.params.normal_break_threshold = Some(0.5);
 
-        let mut settings = OutputSettings::default();
-        settings.normal_mode = NormalMode::DepictedForm;
+        let settings = OutputSettings {
+            normal_mode: NormalMode::DepictedForm,
+            ..OutputSettings::default()
+        };
         let solid = crate::types::Color::rgb(0.5, 0.4, 0.3);
 
         let base_color = BaseColorSource::solid(solid);
         let maps_off = composite_all(
-            &[base_layer.clone()],
+            std::slice::from_ref(&base_layer),
             res,
             &base_color,
             &settings,
@@ -987,7 +991,7 @@ mod tests {
             &[],
         );
         let maps_on = composite_all(
-            &[layer_on.clone()],
+            std::slice::from_ref(&layer_on),
             res,
             &base_color,
             &settings,

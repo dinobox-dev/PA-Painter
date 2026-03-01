@@ -536,8 +536,7 @@ mod tests {
         let size = (res * res) as usize;
         let normals = generate_normal_map(&zeros(size), &zeros(size), res, 1.0);
 
-        for i in 0..size {
-            let n = normals[i];
+        for (i, n) in normals.iter().enumerate() {
             assert!(
                 (n[0] - 0.5).abs() < EPS && (n[1] - 0.5).abs() < EPS && (n[2] - 1.0).abs() < EPS,
                 "flat at {i}: expected (0.5, 0.5, 1.0), got ({:.4}, {:.4}, {:.4})",
@@ -585,8 +584,7 @@ mod tests {
         let size = (res * res) as usize;
         let gx = vec![1.0f32; size];
         let normals = generate_normal_map(&gx, &zeros(size), res, 0.0);
-        for i in 0..size {
-            let n = normals[i];
+        for (i, n) in normals.iter().enumerate() {
             assert!(
                 (n[0] - 0.5).abs() < EPS && (n[1] - 0.5).abs() < EPS,
                 "strength=0 at {i}: expected flat, got ({:.4}, {:.4}, {:.4})",
@@ -630,8 +628,7 @@ mod tests {
         }
 
         let normals = generate_normal_map(&gx, &gy, res, 1.5);
-        for i in 0..size {
-            let n = normals[i];
+        for (i, n) in normals.iter().enumerate() {
             let dx = n[0] * 2.0 - 1.0;
             let dy = n[1] * 2.0 - 1.0;
             let dz = n[2] * 2.0 - 1.0;
