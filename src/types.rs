@@ -427,7 +427,7 @@ impl Default for PaintValues {
             .presets
             .into_iter()
             .find(|p| p.name == "heavy_load")
-            .unwrap()
+            .expect("built-in 'heavy_load' preset must exist")
             .values
     }
 }
@@ -799,7 +799,8 @@ impl StrokePath {
             return self.points[0];
         }
         if t >= 1.0 {
-            return *self.points.last().unwrap();
+            // Safety: len >= 1 checked above, so last() is always Some.
+            return *self.points.last().expect("non-empty path");
         }
         let (seg, frac) = self.find_segment(self.total_length * t);
         self.points[seg].lerp(self.points[seg + 1], frac)

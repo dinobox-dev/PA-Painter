@@ -78,7 +78,7 @@ fn update_group_dim_cache(ctx: &egui::Context, state: &mut AppState) {
         return;
     }
 
-    let key = desired_key.unwrap();
+    let Some(key) = desired_key else { return };
 
     let texture = state.loaded_mesh.as_ref().and_then(|mesh| {
         let group = mesh.groups.iter().find(|g| g.name == key.group_name)?;

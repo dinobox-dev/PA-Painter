@@ -128,7 +128,7 @@ pub fn direction_at(uv: Vec2, guides: &[Guide]) -> Vec2 {
                     .partial_cmp(&uv.distance(b.position))
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .unwrap();
+            .expect("guides must not be empty for nearest-neighbor fallback");
         let dir = guide_contribution(nearest, uv);
         return if dir.length_squared() > 0.0 {
             dir
@@ -145,7 +145,7 @@ pub fn direction_at(uv: Vec2, guides: &[Guide]) -> Vec2 {
                 .partial_cmp(&b.weight)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
-        .unwrap()
+        .expect("weighted list must not be empty")
         .dir;
 
     // Weighted mean with sign alignment for headless guides
