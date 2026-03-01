@@ -767,7 +767,7 @@ fn draw_lighting_panel(
         let panel_x = viewport_rect.right() - panel_w - 8.0;
         let panel_y = btn_rect.bottom() + 4.0;
 
-        egui::Area::new(ui.id().with("lighting_panel"))
+        egui::Area::new(egui::Id::new("mesh_lighting_panel"))
             .fixed_pos(Pos2::new(panel_x, panel_y))
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui: &mut egui::Ui| {
