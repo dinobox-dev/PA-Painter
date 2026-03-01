@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            ext: .exe
+
+          - name: Linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+            ext: ""
+
+          - name: macOS-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+            ext: ""
+
+          - name: macOS-x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+            ext: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          DIR="practical-arcana-painter-${TAG}-${{ matrix.target }}"
+          mkdir "$DIR"
+          cp "target/${{ matrix.target }}/release/practical-arcana-painter${{ matrix.ext }}" "$DIR/"
+          cp "target/${{ matrix.target }}/release/practical-arcana-painter-gui${{ matrix.ext }}" "$DIR/"
+          cp README.md LICENSE CHANGELOG.md "$DIR/"
+          tar czf "${DIR}.tar.gz" "$DIR"
+          echo "ASSET=${DIR}.tar.gz" >> $GITHUB_ENV
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF -replace 'refs/tags/',''
+          $dir = "practical-arcana-painter-${tag}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $dir
+          Copy-Item "target/${{ matrix.target }}/release/practical-arcana-painter${{ matrix.ext }}" "$dir/"
+          Copy-Item "target/${{ matrix.target }}/release/practical-arcana-painter-gui${{ matrix.ext }}" "$dir/"
+          Copy-Item README.md,LICENSE,CHANGELOG.md "$dir/"
+          Compress-Archive -Path "$dir" -DestinationPath "${dir}.zip"
+          echo "ASSET=${dir}.zip" >> $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.ASSET }}
+
+  # Create a universal macOS binary from arm64 + x64
+  macos-universal:
+    name: macOS Universal
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: aarch64-apple-darwin
+          path: arm64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86_64-apple-darwin
+          path: x64
+
+      - name: Create universal binary
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          DIR="practical-arcana-painter-${TAG}-universal-apple-darwin"
+          mkdir -p "$DIR" tmp-arm64 tmp-x64
+
+          tar xzf arm64/*.tar.gz -C tmp-arm64 --strip-components=1
+          tar xzf x64/*.tar.gz -C tmp-x64 --strip-components=1
+
+          lipo -create -output "$DIR/practical-arcana-painter" \
+            tmp-arm64/practical-arcana-painter tmp-x64/practical-arcana-painter
+          lipo -create -output "$DIR/practical-arcana-painter-gui" \
+            tmp-arm64/practical-arcana-painter-gui tmp-x64/practical-arcana-painter-gui
+
+          cp README.md LICENSE CHANGELOG.md "$DIR/"
+          tar czf "${DIR}.tar.gz" "$DIR"
+          echo "ASSET=${DIR}.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-apple-darwin
+          path: ${{ env.ASSET }}
+
+  release:
+    name: Publish Release
+    needs: [build, macos-universal]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**/*
