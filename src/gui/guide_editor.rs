@@ -120,13 +120,12 @@ fn handle_select(
     }
 
     // ── Cursor hints ──
-    if state.guide_drag.is_some() {
+    if let Some(ref drag) = state.guide_drag {
         // During drag: show active-drag cursor
-        let icon = match state.guide_drag {
-            Some(DragTarget::GuidePosition(_)) => CursorIcon::Grabbing,
-            Some(DragTarget::GuideDirection(_)) => CursorIcon::Crosshair,
-            Some(DragTarget::GuideInfluence(_)) => CursorIcon::ResizeHorizontal,
-            None => unreachable!(),
+        let icon = match drag {
+            DragTarget::GuidePosition(_) => CursorIcon::Grabbing,
+            DragTarget::GuideDirection(_) => CursorIcon::Crosshair,
+            DragTarget::GuideInfluence(_) => CursorIcon::ResizeHorizontal,
         };
         ui.output_mut(|o| o.cursor_icon = icon);
     } else if response.hovered() {
