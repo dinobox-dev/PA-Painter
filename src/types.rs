@@ -428,6 +428,8 @@ impl Default for PaintValues {
     }
 }
 
+// IMPORTANT: When adding fields to PaintValues, update this Hash impl too.
+// Forgetting a field will silently break preview cache invalidation.
 impl Hash for PaintValues {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.brush_width.to_bits().hash(state);
