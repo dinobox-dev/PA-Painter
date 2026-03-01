@@ -3,7 +3,8 @@ use std::path::Path;
 use crate::asset_io::linear_to_srgb;
 use crate::compositing::GlobalMaps;
 use crate::object_normal::MeshNormalData;
-use crate::types::{BackgroundMode, Color, NormalMode, OutputSettings};
+use crate::stroke_color::hsv_to_rgb;
+use crate::types::{BackgroundMode, Color, HsvColor, NormalMode, OutputSettings};
 
 // ── Error Type ──
 
@@ -325,7 +326,12 @@ pub fn export_stroke_id_png(
             // Alternate saturation/value to further separate neighbors
             let sat = if i % 2 == 0 { 0.9 } else { 0.65 };
             let val = if (i / 2) % 2 == 0 { 1.0 } else { 0.75 };
-            (id, hsv_to_rgb_bytes(hue, sat, val))
+            let c = hsv_to_rgb(HsvColor { h: hue / 360.0, s: sat, v: val });
+            (id, [
+                (c.r * 255.0).round() as u8,
+                (c.g * 255.0).round() as u8,
+                (c.b * 255.0).round() as u8,
+            ])
         })
         .collect();
 
@@ -340,27 +346,6 @@ pub fn export_stroke_id_png(
 
     image::save_buffer(path, &pixels, resolution, resolution, image::ColorType::Rgb8)?;
     Ok(())
-}
-
-/// Convert HSV (h: 0..360, s: 0..1, v: 0..1) to sRGB bytes.
-fn hsv_to_rgb_bytes(h: f32, s: f32, v: f32) -> [u8; 3] {
-    let c = v * s;
-    let h2 = h / 60.0;
-    let x = c * (1.0 - (h2 % 2.0 - 1.0).abs());
-    let (r1, g1, b1) = match h2 as u32 {
-        0 => (c, x, 0.0),
-        1 => (x, c, 0.0),
-        2 => (0.0, c, x),
-        3 => (0.0, x, c),
-        4 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-    let m = v - c;
-    [
-        ((r1 + m) * 255.0).round() as u8,
-        ((g1 + m) * 255.0).round() as u8,
-        ((b1 + m) * 255.0).round() as u8,
-    ]
 }
 
 // ── EXR Export Functions ──
