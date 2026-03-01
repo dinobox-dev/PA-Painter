@@ -934,25 +934,4 @@ mod tests {
             normals[0][0]
         );
     }
-
-    fn visual_full_output() {
-        let mut layer = make_layer_with_order(0);
-        layer.params.brush_width = 25.0;
-        layer.params.color_variation = 0.1;
-
-        let settings = OutputSettings::default();
-
-        let solid = Color::rgb(0.6, 0.4, 0.3);
-        let maps = composite_all(&[layer.clone()], 256, &BaseColorSource::solid(solid), &settings, None, &[]);
-
-        let dir = crate::test_module_output_dir("export");
-        let _ = std::fs::create_dir_all(&dir);
-
-        export_all(&maps, &settings, &dir, ExportFormat::Png, None).unwrap();
-
-        eprintln!("Wrote: {}/color_map.png", dir.display());
-        eprintln!("Wrote: {}/height_map.png", dir.display());
-        eprintln!("Wrote: {}/normal_map.png", dir.display());
-        eprintln!("Wrote: {}/stroke_id_map.png", dir.display());
-    }
 }
