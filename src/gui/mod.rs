@@ -215,11 +215,10 @@ impl eframe::App for PainterApp {
         }
 
         // ── Cmd+G: Generate ──
-        if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::G)) {
-            if !self.state.generation.is_running() {
+        if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::G))
+            && !self.state.generation.is_running() {
                 self.state.pending_generate = true;
             }
-        }
 
         // ── Backtick key: cycle viewport tabs ──
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Backtick)) {
@@ -376,11 +375,10 @@ impl eframe::App for PainterApp {
                         if stale {
                             let needs_normal = layer.paint.normal_break_threshold.is_some();
                             let normals_stale = needs_normal
-                                && !self
+                                && self
                                     .state
                                     .cached_mesh_normals
-                                    .as_ref()
-                                    .is_some_and(|(r, _)| *r == BASE_RESOLUTION);
+                                    .as_ref().is_none_or(|(r, _)| *r != BASE_RESOLUTION);
 
                             let input = preview::PathOverlayInput {
                                 layer: layer.clone(),

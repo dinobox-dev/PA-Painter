@@ -76,12 +76,11 @@ impl UvMask {
                         }
                         let nx = px as i32 + dx;
                         let ny = py as i32 + dy;
-                        if nx >= 0 && nx < res as i32 && ny >= 0 && ny < res as i32 {
-                            if original[(ny as u32 * res + nx as u32) as usize] {
+                        if nx >= 0 && nx < res as i32 && ny >= 0 && ny < res as i32
+                            && original[(ny as u32 * res + nx as u32) as usize] {
                                 self.data[(py * res + px) as usize] = true;
                                 break 'search;
                             }
-                        }
                     }
                 }
             }

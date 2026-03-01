@@ -171,7 +171,7 @@ fn subdivide_and_displace(
                 indices.extend_from_slice(&[a, c, b]);
 
                 // Downward-pointing triangle (if not last column)
-                if col + 1 <= cols - 1 {
+                if col < cols - 1 {
                     let d = top_start + col + 1;
                     let e = bot_start + col + 1;
                     let f = bot_start + col;
@@ -335,7 +335,7 @@ fn build_bin_buffer(mesh: &SubdividedMesh, color_png: &[u8], normal_png: &[u8]) 
 }
 
 fn pad_to_4(buf: &mut Vec<u8>) {
-    while buf.len() % 4 != 0 {
+    while !buf.len().is_multiple_of(4) {
         buf.push(0);
     }
 }

@@ -414,6 +414,7 @@ pub fn composite_all_with_paths(
 ///
 /// When `cached_paths` is `Some`, those paths are used directly instead of
 /// regenerating them.
+#[allow(clippy::too_many_arguments)]
 pub fn composite_layer(
     layer: &PaintLayer,
     layer_index: u32,

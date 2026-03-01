@@ -343,14 +343,13 @@ fn strip_guide(ui: &mut egui::Ui, state: &mut AppState) {
         (GuideTool::AddVortex,      "4", SPIRAL,  "Vortex"),
     ];
     for (tool, num, icon, tooltip) in &tools {
-        if toolbar_icon_button(ui, state.guide_tool == *tool, icon, num, tooltip) {
-            if state.guide_tool != *tool {
+        if toolbar_icon_button(ui, state.guide_tool == *tool, icon, num, tooltip)
+            && state.guide_tool != *tool {
                 if *tool != GuideTool::Select {
                     state.selected_guide = None;
                 }
                 state.guide_tool = *tool;
             }
-        }
     }
     ui.separator();
     strip_overlay_controls(ui, state);
@@ -727,7 +726,7 @@ fn draw_path_overlay(painter: &egui::Painter, state: &AppState, rect: Rect) {
         const MAX_SEGMENTS: usize = 100_000;
         let total_segs: usize = paths.iter().map(|p| p.len().saturating_sub(1)).sum();
         let stride = if total_segs > MAX_SEGMENTS {
-            (total_segs + MAX_SEGMENTS - 1) / MAX_SEGMENTS
+            total_segs.div_ceil(MAX_SEGMENTS)
         } else {
             1
         };

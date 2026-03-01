@@ -15,15 +15,11 @@ use practical_arcana_painter::types::{Color, Guide, Layer, PaintValues, StrokePa
 // ── Caches ──────────────────────────────────────────────────────
 
 /// Cached stroke density texture and the parameters that produced it.
+#[derive(Default)]
 pub struct StrokePreviewCache {
     entry: Option<(PaintValues, u32, egui::TextureHandle)>,
 }
 
-impl Default for StrokePreviewCache {
-    fn default() -> Self {
-        Self { entry: None }
-    }
-}
 
 impl StrokePreviewCache {
     /// Access the cached texture handle (if any).
@@ -108,6 +104,7 @@ struct LayerPathKey {
 }
 
 /// Cached path data for a single layer.
+#[derive(Default)]
 pub struct LayerPathCache {
     key: Option<LayerPathKey>,
     pub paths: Vec<Vec<[f32; 2]>>,
@@ -115,15 +112,6 @@ pub struct LayerPathCache {
     pub original_total_segments: usize,
 }
 
-impl Default for LayerPathCache {
-    fn default() -> Self {
-        Self {
-            key: None,
-            paths: Vec::new(),
-            original_total_segments: 0,
-        }
-    }
-}
 
 impl LayerPathCache {
     /// Check if cache is stale for the given layer state, seed, and color texture hash.
@@ -143,6 +131,7 @@ impl LayerPathCache {
 
 /// Per-layer path preview caches for viewport overlay.
 /// Maintains one cache entry per layer index, growing/shrinking with the layer stack.
+#[derive(Default)]
 pub struct PathOverlayCache {
     caches: Vec<LayerPathCache>,
     /// Tracks the parameters of the currently in-flight worker computation.
@@ -150,14 +139,6 @@ pub struct PathOverlayCache {
     pending: Option<(usize, LayerPathKey)>,
 }
 
-impl Default for PathOverlayCache {
-    fn default() -> Self {
-        Self {
-            caches: Vec::new(),
-            pending: None,
-        }
-    }
-}
 
 impl PathOverlayCache {
     /// Sync cache vec length to match layer count.
@@ -172,6 +153,7 @@ impl PathOverlayCache {
 
     /// Get cached paths for the selected layer (if any).
     /// Returns (layer_index, paths, original_total_segments).
+    #[allow(clippy::type_complexity)]
     pub fn selected_paths(&self, selected: Option<usize>) -> Option<(usize, &Vec<Vec<[f32; 2]>>, usize)> {
         let i = selected?;
         self.caches.get(i).map(|c| (i, &c.paths, c.original_total_segments))
@@ -394,7 +376,7 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
     let original_total_points: usize = paths.iter().map(|p| p.points.len()).sum();
     let original_total_segments = original_total_points.saturating_sub(paths.len());
     let point_stride = if original_total_points > OVERLAY_POINT_BUDGET {
-        (original_total_points + OVERLAY_POINT_BUDGET - 1) / OVERLAY_POINT_BUDGET
+        original_total_points.div_ceil(OVERLAY_POINT_BUDGET)
     } else {
         1
     };
@@ -438,17 +420,11 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
 // ── Preset Thumbnail Cache ─────────────────────────────────────
 
 /// Cache of small stroke preview textures keyed by PaintValues.
+#[derive(Default)]
 pub struct PresetThumbnailCache {
     entries: Vec<(PaintValues, egui::TextureHandle)>,
 }
 
-impl Default for PresetThumbnailCache {
-    fn default() -> Self {
-        Self {
-            entries: Vec::new(),
-        }
-    }
-}
 
 impl PresetThumbnailCache {
     /// Get or generate a thumbnail for the given PaintValues.
@@ -484,7 +460,7 @@ impl PresetThumbnailCache {
             .collect();
 
         let handle = ctx.load_texture(
-            &format!("preset_thumb_{}", self.entries.len()),
+            format!("preset_thumb_{}", self.entries.len()),
             egui::ColorImage::new([result.width, result.height], pixels),
             egui::TextureOptions::LINEAR,
         );

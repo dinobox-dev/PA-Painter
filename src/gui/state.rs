@@ -14,6 +14,7 @@ use super::preview::PreviewCache;
 use super::undo::{UndoHistory, UndoSnapshot};
 
 /// What part of a guide is being dragged.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy)]
 pub enum DragTarget {
     GuidePosition(usize),
@@ -50,18 +51,15 @@ impl ViewportTab {
 
 /// Guide editing tool (active only in the Guide tab).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum GuideTool {
+    #[default]
     Select,         // 1 — click=select, drag center=move, drag handle=direction
     AddDirectional, // 2
     AddRadial,      // 3 — creates Source; toggle Inward in popup for Sink
     AddVortex,      // 4
 }
 
-impl Default for GuideTool {
-    fn default() -> Self {
-        Self::Select
-    }
-}
 
 /// Viewport pan/zoom state.
 pub struct ViewportState {
@@ -120,19 +118,12 @@ pub struct GroupDimKey {
 }
 
 /// Cached dim overlay texture that dims outside the selected layer's vertex group.
+#[derive(Default)]
 pub struct GroupDimCache {
     pub key: Option<GroupDimKey>,
     pub texture: Option<egui::TextureHandle>,
 }
 
-impl Default for GroupDimCache {
-    fn default() -> Self {
-        Self {
-            key: None,
-            texture: None,
-        }
-    }
-}
 
 impl GroupDimCache {
     pub fn invalidate(&mut self) {

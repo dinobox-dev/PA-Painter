@@ -118,7 +118,7 @@ pub fn stroke_id_to_handle(
                 egui::Color32::from_gray(0)
             } else {
                 // Golden-ratio hue spread for visually distinct colors
-                let hue = (id as f32 * 0.618033988749895) % 1.0;
+                let hue = (id as f32 * 0.618_034) % 1.0;
                 let (r, g, b) = hsv_to_rgb(hue, 0.65, 0.85);
                 egui::Color32::from_rgb(
                     (r * 255.0) as u8,

@@ -620,8 +620,8 @@ fn draw_curve_knots_and_handles(
         let mut hout_dragged: Option<usize> = None;
         let mut remove_idx: Option<usize> = None;
 
-        for i in 0..n {
-            let center = canvas.to_screen(knots[i].pos[0], knots[i].pos[1]);
+        for (i, knot) in knots.iter().enumerate() {
+            let center = canvas.to_screen(knot.pos[0], knot.pos[1]);
             let id = response.id.with(("knot", i));
             let hit_rect =
                 egui::Rect::from_center_size(center, egui::Vec2::splat(HIT_RADIUS * 2.0));
@@ -635,9 +635,9 @@ fn draw_curve_knots_and_handles(
             }
         }
 
-        for i in 0..n {
+        for (i, knot) in knots.iter().enumerate() {
             if i > 0 {
-                let center = canvas.to_screen(knots[i].handle_in[0], knots[i].handle_in[1]);
+                let center = canvas.to_screen(knot.handle_in[0], knot.handle_in[1]);
                 let id = response.id.with(("hin", i));
                 let hit_rect =
                     egui::Rect::from_center_size(center, egui::Vec2::splat(HIT_RADIUS * 2.0));
@@ -647,7 +647,7 @@ fn draw_curve_knots_and_handles(
                 }
             }
             if i < n - 1 {
-                let center = canvas.to_screen(knots[i].handle_out[0], knots[i].handle_out[1]);
+                let center = canvas.to_screen(knot.handle_out[0], knot.handle_out[1]);
                 let id = response.id.with(("hout", i));
                 let hit_rect =
                     egui::Rect::from_center_size(center, egui::Vec2::splat(HIT_RADIUS * 2.0));

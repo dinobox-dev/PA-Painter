@@ -232,9 +232,7 @@ impl DirectionField {
             // each guide region's direction without cross-boundary blending.
             let nearest = if fx < 0.5 {
                 if fy < 0.5 { d00 } else { d01 }
-            } else {
-                if fy < 0.5 { d10 } else { d11 }
-            };
+            } else if fy < 0.5 { d10 } else { d11 };
             return if nearest.length_squared() < 1e-12 {
                 d00
             } else {
