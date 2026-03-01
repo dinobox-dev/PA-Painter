@@ -9,7 +9,8 @@ keywords = ["procedural", "texture", "paint", "stroke", "3d"]
 categories = ["graphics", "game-development", "rendering"]
 readme = "README.md"
 rust-version = "1.87"
-# repository = "https://github.com/user/practical-arcana-painter"  # TODO: set before publishing
+repository = "https://github.com/dinobox-dev/Practical-Arcana-Painter"
+homepage = "https://github.com/dinobox-dev/Practical-Arcana-Painter"
 
 [[bin]]
 name = "practical-arcana-painter"

@@ -1,10 +1,10 @@
 # Practical Arcana Painter
 
-<!-- ![CI](https://github.com/user/practical-arcana-painter/actions/workflows/ci.yml/badge.svg) -->
+![CI](https://github.com/dinobox-dev/Practical-Arcana-Painter/actions/workflows/ci.yml/badge.svg)
 
 Procedural paint stroke generator for 3D assets. Turn any mesh into a hand-painted look with full control over stroke direction, density, and layering.
 
-Practical Arcana Painter provides both a **GUI editor** for interactive work and a **CLI renderer** for headless batch processing. The core rendering engine is available as a Rust library crate.
+Built for *Practical Arcana* (coming soon), but works with any UV-mapped 3D mesh. Provides both a **GUI editor** for interactive work and a **CLI renderer** for headless batch processing. The core rendering engine is available as a Rust library crate.
 
 <!-- ![Screenshot](docs/screenshot.png) -->
 
