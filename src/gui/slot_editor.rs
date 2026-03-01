@@ -10,7 +10,7 @@ use super::preview::StrokePreviewCache;
 use super::preview;
 use super::sidebar::{build_group_names, section_header, SECTION_INDENT};
 use super::state::AppState;
-use super::widgets::{paint_icon, paint_truncated_text, small_icon_button};
+use super::widgets::{paint_icon, paint_truncated_text, slider_row, small_icon_button};
 
 /// Draw the right-panel layer editor for the currently selected layer.
 /// Returns early if no layer is selected.
@@ -88,51 +88,23 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(4.0);
 
         ui.label(egui::RichText::new("Brush").weak());
-        ui.add(
-            egui::Slider::new(&mut layer.paint.brush_width, 5.0..=100.0)
-                .text("Brush Width"),
-        );
-        ui.add(
-            egui::Slider::new(&mut layer.paint.load, 0.0..=2.0)
-                .step_by(0.01)
-                .text("Load"),
-        );
-        ui.add(
-            egui::Slider::new(&mut layer.paint.body_wiggle, 0.0..=0.5)
-                .step_by(0.01)
-                .text("Body Wiggle"),
-        );
+        slider_row(ui, "brush_width", &mut layer.paint.brush_width, 5.0..=100.0, "Brush Width", None, 1);
+        slider_row(ui, "load", &mut layer.paint.load, 0.0..=2.0, "Load", Some(0.01), 2);
+        slider_row(ui, "body_wiggle", &mut layer.paint.body_wiggle, 0.0..=0.5, "Body Wiggle", Some(0.01), 2);
 
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Layout").weak());
-        ui.add(
-            egui::Slider::new(&mut layer.paint.stroke_spacing, 0.1..=3.0)
-                .step_by(0.1)
-                .text("Spacing"),
-        );
-        ui.add(
-            egui::Slider::new(&mut layer.paint.max_stroke_length, 10.0..=500.0)
-                .text("Max Length"),
-        );
-        ui.add(
-            egui::Slider::new(&mut layer.paint.angle_variation, 0.0..=45.0)
-                .text("Angle Var"),
-        );
-        ui.add(
-            egui::Slider::new(&mut layer.paint.max_turn_angle, 0.0..=90.0)
-                .text("Max Turn"),
-        );
-        ui.add(
-            egui::Slider::new(&mut layer.paint.color_variation, 0.0..=0.5)
-                .step_by(0.01)
-                .text("Color Var"),
-        );
+        slider_row(ui, "stroke_spacing", &mut layer.paint.stroke_spacing, 0.1..=3.0, "Spacing", Some(0.1), 1);
+        slider_row(ui, "max_stroke_length", &mut layer.paint.max_stroke_length, 10.0..=500.0, "Max Length", None, 0);
+        slider_row(ui, "angle_variation", &mut layer.paint.angle_variation, 0.0..=45.0, "Angle Var", None, 1);
+        slider_row(ui, "max_turn_angle", &mut layer.paint.max_turn_angle, 0.0..=90.0, "Max Turn", None, 1);
+        slider_row(ui, "color_variation", &mut layer.paint.color_variation, 0.0..=0.5, "Color Var", Some(0.01), 2);
 
         let mut color_break_enabled = layer.paint.color_break_threshold.is_some();
         ui.checkbox(&mut color_break_enabled, "Color Break");
         if color_break_enabled {
             let val = layer.paint.color_break_threshold.get_or_insert(0.1);
-            ui.add(egui::Slider::new(val, 0.01..=0.5).text("Threshold"));
+            slider_row(ui, "color_break_thr", val, 0.01..=0.5, "Threshold", None, 2);
         } else {
             layer.paint.color_break_threshold = None;
         }
@@ -141,7 +113,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.checkbox(&mut normal_break_enabled, "Normal Break");
         if normal_break_enabled {
             let val = layer.paint.normal_break_threshold.get_or_insert(0.5);
-            ui.add(egui::Slider::new(val, 0.0..=1.0).text("Threshold"));
+            slider_row(ui, "normal_break_thr", val, 0.0..=1.0, "Threshold", None, 2);
         } else {
             layer.paint.normal_break_threshold = None;
         }

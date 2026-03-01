@@ -125,6 +125,88 @@ pub fn toolbar_icon_button(
     response.on_hover_text(tooltip).clicked()
 }
 
+// ── Slider Row ─────────────────────────────────────────────────
+
+/// Slider track + fixed-width text input + label on a single row.
+///
+/// Uses `TextEdit` with `clip_text(true)` so the value field never
+/// expands when large numbers are typed — unlike the built-in
+/// `DragValue` which hardcodes `clip_text(false)`.
+pub fn slider_row(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    label: &str,
+    step: Option<f64>,
+    decimals: usize,
+) -> egui::Response {
+    const TEXT_FIELD_W: f32 = 48.0;
+
+    ui.horizontal(|ui: &mut egui::Ui| {
+        // Use the default slider_width so all tracks are the same length.
+        let mut slider = egui::Slider::new(value, range.clone()).show_value(false);
+        if let Some(s) = step {
+            slider = slider.step_by(s);
+        }
+        let slider_resp = ui.add(slider);
+
+        // Text field backed by frame-persistent temp data.
+        // While focused: preserve the user's typed text across frames.
+        // While not focused: show the formatted value.
+        let state_id = egui::Id::new(("slider_row", id_salt));
+        let stored: Option<String> = ui.data_mut(|d| d.get_temp(state_id));
+        let mut text_buf = stored.unwrap_or_else(|| format!("{:.*}", decimals, *value));
+
+        // Reserve a paint slot so the background is drawn behind the text.
+        let bg_idx = ui.painter().add(egui::Shape::Noop);
+
+        let te_resp = ui.add(
+            egui::TextEdit::singleline(&mut text_buf)
+                .desired_width(TEXT_FIELD_W)
+                .clip_text(true)
+                .frame(false),
+        );
+
+        // Fill the reserved slot with a DragValue-style background.
+        if ui.is_rect_visible(te_resp.rect) {
+            let bg = if te_resp.has_focus() {
+                ui.visuals().widgets.active.bg_fill
+            } else if te_resp.hovered() {
+                ui.visuals().widgets.hovered.bg_fill
+            } else {
+                ui.visuals().widgets.inactive.bg_fill
+            };
+            let cr = ui.visuals().widgets.inactive.corner_radius;
+            ui.painter().set(bg_idx, egui::Shape::rect_filled(te_resp.rect, cr, bg));
+        }
+
+        // Release focus on any press outside this field (click or drag start).
+        if te_resp.has_focus() && !te_resp.hovered()
+            && ui.input(|i| i.pointer.any_pressed())
+        {
+            te_resp.surrender_focus();
+        }
+
+        if te_resp.changed() || te_resp.lost_focus() {
+            if let Ok(v) = text_buf.parse::<f32>() {
+                *value = v.clamp(*range.start(), *range.end());
+            }
+        }
+
+        if te_resp.has_focus() {
+            ui.data_mut(|d| d.insert_temp(state_id, text_buf));
+        } else {
+            ui.data_mut(|d| d.remove::<String>(state_id));
+        }
+
+        ui.label(label);
+
+        slider_resp
+    })
+    .inner
+}
+
 // ── Truncated Text ──────────────────────────────────────────────────
 
 /// Paint single-line text at (`x`, vertical-centre of `rect`) with

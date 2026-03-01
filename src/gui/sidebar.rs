@@ -6,7 +6,7 @@ use practical_arcana_painter::types::{
 };
 
 use super::state::AppState;
-use super::widgets::{paint_icon, paint_truncated_text};
+use super::widgets::{paint_icon, paint_truncated_text, slider_row};
 
 pub const SECTION_INDENT: f32 = 8.0;
 
@@ -273,10 +273,7 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
                 });
 
         // Normal strength
-        ui.add(
-            egui::Slider::new(&mut state.project.settings.normal_strength, 0.0..=1.0)
-                .text("Normal Strength"),
-        );
+        slider_row(ui, "normal_strength", &mut state.project.settings.normal_strength, 0.0..=1.0, "Normal Strength", None, 2);
     });
 
     ui.separator();

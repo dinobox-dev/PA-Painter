@@ -5,7 +5,7 @@ use practical_arcana_painter::types::GuideType;
 
 use super::mesh_preview;
 use super::state::{AppState, GroupDimKey, GuideTool, MapMode, ViewportTab};
-use super::widgets::toolbar_icon_button;
+use super::widgets::{slider_row, toolbar_icon_button};
 
 /// Convert UV coordinate to screen position.
 pub fn uv_to_screen(uv: glam::Vec2, state: &AppState, viewport_rect: Rect) -> Pos2 {
@@ -1053,16 +1053,10 @@ fn draw_guide_popup(ui: &mut egui::Ui, state: &mut AppState, viewport_rect: Rect
             });
 
             // Influence
-            ui.add(
-                egui::Slider::new(&mut guide.influence, 0.02..=1.0)
-                    .text("Influence"),
-            );
+            slider_row(ui, "guide_influence", &mut guide.influence, 0.02..=1.0, "Influence", None, 2);
 
             // Strength
-            ui.add(
-                egui::Slider::new(&mut guide.strength, 0.0..=2.0)
-                    .text("Strength"),
-            );
+            slider_row(ui, "guide_strength", &mut guide.strength, 0.0..=2.0, "Strength", None, 2);
 
         });
 }
