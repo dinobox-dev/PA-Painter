@@ -773,7 +773,7 @@ pub fn show(
 
     if response.dragged_by(egui::PointerButton::Primary) {
         let delta = response.drag_delta();
-        state.mesh_preview.yaw -= delta.x * 0.01;
+        state.mesh_preview.yaw += delta.x * 0.01;
         state.mesh_preview.pitch += delta.y * 0.01;
         state.mesh_preview.pitch = state.mesh_preview.pitch.clamp(
             -std::f32::consts::FRAC_PI_2 + 0.01,
