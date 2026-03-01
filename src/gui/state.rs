@@ -148,6 +148,8 @@ pub struct AppState {
     pub texture_colors_hash: u64,
     /// Hash of loaded normal texture pixels for path cache invalidation.
     pub normal_tex_hash: u64,
+    /// Hash of loaded mesh geometry for generation staleness detection.
+    pub mesh_hash: u64,
 
     // ── Viewport ──
     pub viewport: ViewportState,
@@ -209,10 +211,11 @@ pub struct AppState {
     pub status_message: String,
 
     /// Snapshot of layers + settings + asset hashes at last generation — used to detect outdated results.
-    /// Tuple: (layers, output_settings, texture_colors_hash, normal_tex_hash).
+    /// Tuple: (layers, output_settings, texture_colors_hash, normal_tex_hash, mesh_hash).
     pub generation_snapshot: Option<(
         Vec<Layer>,
         practical_arcana_painter::types::OutputSettings,
+        u64,
         u64,
         u64,
     )>,
@@ -234,6 +237,7 @@ impl AppState {
             cached_texture_colors: None,
             texture_colors_hash: 0,
             normal_tex_hash: 0,
+            mesh_hash: 0,
             viewport: ViewportState::default(),
             viewport_tab: ViewportTab::Guide,
             map_mode: MapMode::Color,
@@ -324,11 +328,14 @@ impl AppState {
             }
             return None;
         }
-        if let Some((ref layers, ref settings, tex_hash, normal_hash)) = self.generation_snapshot {
+        if let Some((ref layers, ref settings, tex_hash, normal_hash, m_hash)) =
+            self.generation_snapshot
+        {
             if *layers != self.project.layers
                 || *settings != self.project.settings
                 || tex_hash != self.texture_colors_hash
                 || normal_hash != self.normal_tex_hash
+                || m_hash != self.mesh_hash
             {
                 return Some("Modified");
             }

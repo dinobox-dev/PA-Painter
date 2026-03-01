@@ -24,6 +24,20 @@ use super::textures;
 fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<(), String> {
     let mesh = load_mesh(mesh_path).map_err(|e| format!("Mesh load failed: {e}"))?;
     state.uv_edges = Some(extract_uv_edges(&mesh));
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for p in &mesh.positions {
+        p.x.to_bits().hash(&mut hasher);
+        p.y.to_bits().hash(&mut hasher);
+        p.z.to_bits().hash(&mut hasher);
+    }
+    for uv in &mesh.uvs {
+        uv.x.to_bits().hash(&mut hasher);
+        uv.y.to_bits().hash(&mut hasher);
+    }
+    mesh.indices.hash(&mut hasher);
+    state.mesh_hash = hasher.finish();
+
     state.loaded_mesh = Some(Arc::new(mesh));
     Ok(())
 }

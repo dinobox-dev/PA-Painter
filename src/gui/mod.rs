@@ -105,6 +105,7 @@ impl PainterApp {
             self.state.project.settings.clone(),
             self.state.texture_colors_hash,
             self.state.normal_tex_hash,
+            self.state.mesh_hash,
         ));
     }
 
