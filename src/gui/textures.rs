@@ -79,7 +79,8 @@ pub fn height_buffer_to_handle(
     )
 }
 
-/// Convert a normal map (Vec<[f32; 3]> with components in [-1,1]) to a texture.
+/// Convert a normal map (Vec<[f32; 3]> with components in [0,1]) to a texture.
+/// Values are already encoded: 0.5 = zero perturbation, matching PNG export format.
 pub fn normal_map_to_handle(
     ctx: &egui::Context,
     normals: &[[f32; 3]],
@@ -90,9 +91,9 @@ pub fn normal_map_to_handle(
         .iter()
         .map(|n| {
             egui::Color32::from_rgb(
-                ((n[0] * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0) as u8,
-                ((n[1] * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0) as u8,
-                ((n[2] * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0) as u8,
+                (n[0].clamp(0.0, 1.0) * 255.0) as u8,
+                (n[1].clamp(0.0, 1.0) * 255.0) as u8,
+                (n[2].clamp(0.0, 1.0) * 255.0) as u8,
             )
         })
         .collect();
