@@ -8,9 +8,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use practical_arcana_painter::asset_io::LoadedMesh;
 use practical_arcana_painter::compositing::{composite_layer, GlobalMaps};
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
-use practical_arcana_painter::output::{
-    blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
-};
+use practical_arcana_painter::output::{generate_normal_map, generate_normal_map_depicted_form};
 use practical_arcana_painter::path_placement::generate_paths_cancellable;
 use practical_arcana_painter::stroke_color::ColorTextureRef;
 use practical_arcana_painter::types::{
@@ -22,9 +20,7 @@ use practical_arcana_painter::uv_mask::UvMask;
 pub struct GenInput {
     pub layers: Vec<PaintLayer>,
     pub resolution: u32,
-    pub base_colors: Option<Arc<Vec<Color>>>,
-    pub base_w: u32,
-    pub base_h: u32,
+    /// Placeholder solid color for compositing (per-layer base in Commit 3).
     pub solid_color: Color,
     pub settings: OutputSettings,
     /// Mesh for on-thread computation of normal data and UV masks.
@@ -33,10 +29,6 @@ pub struct GenInput {
     pub cached_normals: Option<(u32, Arc<MeshNormalData>)>,
     /// Group names for visible layers (parallel to `layers`), used to build UV masks.
     pub layer_group_names: Vec<String>,
-    /// Base normal map pixels (linear RGBA [0,1]), if loaded.
-    pub base_normal_pixels: Option<Vec<[f32; 4]>>,
-    pub base_normal_w: u32,
-    pub base_normal_h: u32,
 }
 
 /// Output from a completed generation.
@@ -241,12 +233,8 @@ fn run_pipeline(
     stage.store(STAGE_PATHS, Ordering::Relaxed);
     set_progress(progress, p_paths);
 
-    let base_color = match &input.base_colors {
-        Some(colors) => {
-            BaseColorSource::textured(colors, input.base_w, input.base_h, input.solid_color)
-        }
-        None => BaseColorSource::solid(input.solid_color),
-    };
+    // Placeholder: always solid gray until per-layer base is implemented (Commit 3).
+    let base_color = BaseColorSource::solid(input.solid_color);
 
     let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 
@@ -359,20 +347,10 @@ fn run_pipeline(
     };
 
     // ── Stage 6: Normal blending ──
+    // Per-layer base normal blending will be added in Commit 3.
 
     stage.store(STAGE_BLENDING, Ordering::Relaxed);
     set_progress(progress, p_blending);
-
-    let mut normal_map = normal_map;
-    if let Some(ref base_pixels) = input.base_normal_pixels {
-        blend_normals_udn(
-            &mut normal_map,
-            base_pixels,
-            input.base_normal_w,
-            input.base_normal_h,
-            input.resolution,
-        );
-    }
 
     set_progress(progress, 1.0);
 

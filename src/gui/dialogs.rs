@@ -2,21 +2,18 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use practical_arcana_painter::asset_io::{extract_uv_edges, load_mesh, load_texture};
+use practical_arcana_painter::asset_io::{extract_uv_edges, load_mesh};
 use practical_arcana_painter::glb_export;
 use practical_arcana_painter::output::{
     export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
     normalize_height_map,
 };
-use practical_arcana_painter::project::{
-    load_project, save_project, utc_now_iso8601, BaseColor, Project,
-};
-use practical_arcana_painter::types::{pixels_to_colors, BackgroundMode, Layer, PaintValues};
+use practical_arcana_painter::project::{load_project, save_project, utc_now_iso8601, Project};
+use practical_arcana_painter::types::{BackgroundMode, Layer, PaintValues, TextureSource};
 
 use super::state::ReloadSummary;
 
 use super::state::AppState;
-use super::textures;
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -54,54 +51,11 @@ fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<bool, String> {
     Ok(changed)
 }
 
-/// Load a texture from the given path into app state.
-/// Load a texture and update state. Returns `Ok(true)` if content changed, `Ok(false)` if identical.
-fn apply_texture(
-    state: &mut AppState,
-    ctx: &eframe::egui::Context,
-    tex_path: &Path,
-) -> Result<bool, String> {
-    let tex = load_texture(tex_path).map_err(|e| format!("Texture load failed: {e}"))?;
-    let handle = textures::loaded_texture_to_handle(ctx, &tex, "base_color");
-    state.textures.base_texture = Some(handle);
-    let colors = pixels_to_colors(&tex.pixels);
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for c in &colors {
-        c.r.to_bits().hash(&mut hasher);
-        c.g.to_bits().hash(&mut hasher);
-        c.b.to_bits().hash(&mut hasher);
-        c.a.to_bits().hash(&mut hasher);
-    }
-    let new_hash = hasher.finish();
-    let changed = new_hash != state.texture_colors_hash;
-    state.texture_colors_hash = new_hash;
-    state.cached_texture_colors = Some(Arc::new(colors));
-    state.loaded_texture = Some(tex);
-    Ok(changed)
-}
-
-/// Load a normal map and update state. Returns `Ok(true)` if content changed, `Ok(false)` if identical.
-fn apply_normal(state: &mut AppState, normal_path: &Path) -> Result<bool, String> {
-    let tex = load_texture(normal_path).map_err(|e| format!("Normal load failed: {e}"))?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for p in &tex.pixels {
-        p[0].to_bits().hash(&mut hasher);
-        p[1].to_bits().hash(&mut hasher);
-        p[2].to_bits().hash(&mut hasher);
-        p[3].to_bits().hash(&mut hasher);
-    }
-    let new_hash = hasher.finish();
-    let changed = new_hash != state.normal_tex_hash;
-    state.normal_tex_hash = new_hash;
-    state.loaded_normal = Some(tex);
-    Ok(changed)
-}
-
 // ── Project Operations ─────────────────────────────────────────────
 
 /// Open a file dialog and load a .pap project.
 /// Returns true if a project was successfully loaded.
-pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
+pub fn open_project(state: &mut AppState, _ctx: &eframe::egui::Context) -> bool {
     let path = rfd::FileDialog::new()
         .add_filter("PAP Project", &["pap"])
         .pick_file();
@@ -118,21 +72,6 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
             let mesh_path = resolve_asset_path(&path, &project.mesh_ref.path);
             if let Err(e) = apply_mesh(state, &mesh_path) {
                 state.status_message = e;
-            }
-
-            // Load texture if referenced
-            if let Some(tex_path) = project.base_color.texture_path() {
-                let tex_file = resolve_asset_path(&path, tex_path);
-                if let Err(e) = apply_texture(state, ctx, &tex_file) {
-                    state.status_message = e;
-                }
-            }
-
-            // Load base normal if referenced
-            if let Some(ref normal_path) = project.base_normal {
-                let normal_file = resolve_asset_path(&path, normal_path);
-                let _ = apply_normal(state, &normal_file);
-                // Normal map is optional — silently skip if missing
             }
 
             // Select first layer if any
@@ -205,11 +144,6 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
             state.textures.normal = None;
             state.textures.stroke_id = None;
             state.textures.base_texture = None;
-            state.loaded_texture = None;
-            state.cached_texture_colors = None;
-            state.texture_colors_hash = 0;
-            state.loaded_normal = None;
-            state.normal_tex_hash = 0;
             state.reload_summary = None;
             state.path_overlay.clear();
             state.undo.clear();
@@ -292,6 +226,8 @@ pub fn reload_mesh(state: &mut AppState) {
                     order,
                     paint: PaintValues::default(),
                     guides: vec![],
+                    base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+                    base_normal: TextureSource::None,
                 });
             }
 
@@ -339,126 +275,6 @@ pub fn replace_mesh(state: &mut AppState) {
     state.project.mesh_ref.path = path.to_string_lossy().to_string();
     reload_mesh(state);
     state.status_message = format!("Mesh replaced: {}", path.display());
-}
-
-/// Open a file dialog to load (or replace) the base color texture.
-pub fn load_texture_dialog(state: &mut AppState, ctx: &eframe::egui::Context) {
-    let path = rfd::FileDialog::new()
-        .add_filter("Image", &["png", "jpg", "jpeg", "bmp", "tga"])
-        .set_title("Load base texture")
-        .pick_file();
-
-    let Some(tex_path) = path else {
-        return;
-    };
-
-    match apply_texture(state, ctx, &tex_path) {
-        Ok(changed) => {
-            state.project.base_color = BaseColor::Texture(tex_path.to_string_lossy().to_string());
-            if changed {
-                // Invalidate generated maps so viewport shows the new base texture
-                state.textures.color = None;
-                state.textures.height = None;
-                state.textures.normal = None;
-                state.textures.stroke_id = None;
-                state.generated = None;
-            }
-            state.dirty = true;
-            state.status_message = format!(
-                "Loaded texture: {}",
-                tex_path
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_default()
-            );
-        }
-        Err(e) => {
-            state.status_message = e;
-        }
-    }
-}
-
-/// Reload the base color texture from its current path.
-pub fn reload_texture(state: &mut AppState, ctx: &eframe::egui::Context) {
-    let Some(tex_path) = state
-        .project
-        .base_color
-        .texture_path()
-        .map(|s| s.to_string())
-    else {
-        state.status_message = "No texture to reload.".to_string();
-        return;
-    };
-    match apply_texture(state, ctx, Path::new(&tex_path)) {
-        Ok(changed) => {
-            if changed {
-                state.textures.color = None;
-                state.textures.height = None;
-                state.textures.normal = None;
-                state.textures.stroke_id = None;
-                state.generated = None;
-            }
-            state.status_message = "Texture reloaded.".to_string();
-        }
-        Err(e) => state.status_message = e,
-    }
-}
-
-/// Reload the base normal map from its current path.
-pub fn reload_normal(state: &mut AppState) {
-    let Some(ref normal_path) = state.project.base_normal.clone() else {
-        state.status_message = "No normal map to reload.".to_string();
-        return;
-    };
-    match apply_normal(state, Path::new(normal_path)) {
-        Ok(changed) => {
-            if changed {
-                state.textures.color = None;
-                state.textures.height = None;
-                state.textures.normal = None;
-                state.textures.stroke_id = None;
-                state.generated = None;
-            }
-            state.status_message = "Normal reloaded.".to_string();
-        }
-        Err(e) => state.status_message = e,
-    }
-}
-
-/// Open a file dialog to load (or replace) the base normal map.
-pub fn load_normal_dialog(state: &mut AppState) {
-    let path = rfd::FileDialog::new()
-        .add_filter("Image", &["png", "jpg", "jpeg", "bmp", "tga", "exr"])
-        .set_title("Load base normal map")
-        .pick_file();
-
-    let Some(tex_path) = path else {
-        return;
-    };
-
-    match apply_normal(state, &tex_path) {
-        Ok(changed) => {
-            state.project.base_normal = Some(tex_path.to_string_lossy().to_string());
-            if changed {
-                state.textures.color = None;
-                state.textures.height = None;
-                state.textures.normal = None;
-                state.textures.stroke_id = None;
-                state.generated = None;
-            }
-            state.dirty = true;
-            state.status_message = format!(
-                "Loaded normal: {}",
-                tex_path
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_default()
-            );
-        }
-        Err(e) => {
-            state.status_message = format!("Normal load failed: {e}");
-        }
-    }
 }
 
 /// Save the project to its current path, or show a Save As dialog.
@@ -605,6 +421,8 @@ fn create_layers_from_mesh(state: &AppState) -> Vec<Layer> {
             order: 0,
             paint: PaintValues::default(),
             guides: vec![],
+            base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+            base_normal: TextureSource::None,
         }]
     } else {
         group_names
@@ -617,6 +435,8 @@ fn create_layers_from_mesh(state: &AppState) -> Vec<Layer> {
                 order: i as i32,
                 paint: PaintValues::default(),
                 guides: vec![],
+                base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+                base_normal: TextureSource::None,
             })
             .collect()
     }

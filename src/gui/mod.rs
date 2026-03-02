@@ -53,16 +53,8 @@ impl PainterApp {
         let layers = self.state.project.paint_layers();
         let settings = self.state.project.settings.clone();
 
-        // All Arc clones below are O(1) pointer copies.
-        let base_colors = self.state.cached_texture_colors.clone();
-        let (base_w, base_h) = self
-            .state
-            .loaded_texture
-            .as_ref()
-            .map(|t| (t.width, t.height))
-            .unwrap_or((0, 0));
-        let sc = self.state.project.base_color.solid_color();
-        let solid_color = Color::from(sc);
+        // Placeholder: solid gray base color (per-layer base handled in Commit 3)
+        let solid_color = Color::rgb(0.5, 0.5, 0.5);
 
         let mesh = self.state.loaded_mesh.clone(); // Arc clone
         let cached_normals = self.state.cached_mesh_normals.clone(); // (u32, Arc) clone
@@ -77,34 +69,18 @@ impl PainterApp {
             .map(|l| l.group_name.clone())
             .collect();
 
-        // Base normal pixels (for UDN blending)
-        let (base_normal_pixels, base_normal_w, base_normal_h) = self
-            .state
-            .loaded_normal
-            .as_ref()
-            .map(|tex| (Some(tex.pixels.clone()), tex.width, tex.height))
-            .unwrap_or((None, 0, 0));
-
         self.state.generation.start(generation::GenInput {
             layers,
             resolution,
-            base_colors,
-            base_w,
-            base_h,
             solid_color,
             settings,
             mesh,
             cached_normals,
             layer_group_names,
-            base_normal_pixels,
-            base_normal_w,
-            base_normal_h,
         });
         self.state.generation_snapshot = Some((
             self.state.project.layers.clone(),
             self.state.project.settings.clone(),
-            self.state.texture_colors_hash,
-            self.state.normal_tex_hash,
             self.state.mesh_hash,
         ));
     }
@@ -300,23 +276,6 @@ impl eframe::App for PainterApp {
             self.state.group_dim_cache.invalidate();
             self.init_mesh_preview();
         }
-        if self.state.pending_load_texture {
-            self.state.pending_load_texture = false;
-            dialogs::load_texture_dialog(&mut self.state, ctx);
-        }
-        if self.state.pending_reload_texture {
-            self.state.pending_reload_texture = false;
-            dialogs::reload_texture(&mut self.state, ctx);
-        }
-        if self.state.pending_load_normal {
-            self.state.pending_load_normal = false;
-            dialogs::load_normal_dialog(&mut self.state);
-        }
-        if self.state.pending_reload_normal {
-            self.state.pending_reload_normal = false;
-            dialogs::reload_normal(&mut self.state);
-        }
-
         // ── Path overlay: async worker pattern ──
         // Poll for completed results first
         if let Some(poll_result) = self.state.path_worker.poll() {
@@ -346,12 +305,11 @@ impl eframe::App for PainterApp {
                             .settings
                             .seed
                             .wrapping_add(selected as u32);
-                        let hash = self.state.texture_colors_hash;
 
                         let stale = self
                             .state
                             .path_overlay
-                            .is_stale_for_layer(selected, layer, seed, hash);
+                            .is_stale_for_layer(selected, layer, seed);
 
                         if stale {
                             let needs_normal = layer.paint.normal_break_threshold.is_some();
@@ -368,20 +326,6 @@ impl eframe::App for PainterApp {
                                 layer_count: self.state.project.layers.len(),
                                 seed,
                                 resolution: BASE_RESOLUTION,
-                                color_data: self.state.cached_texture_colors.clone(),
-                                color_w: self
-                                    .state
-                                    .loaded_texture
-                                    .as_ref()
-                                    .map(|t| t.width)
-                                    .unwrap_or(0),
-                                color_h: self
-                                    .state
-                                    .loaded_texture
-                                    .as_ref()
-                                    .map(|t| t.height)
-                                    .unwrap_or(0),
-                                color_tex_hash: hash,
                                 cached_normals: if needs_normal {
                                     self.state.cached_mesh_normals.clone()
                                 } else {
@@ -395,7 +339,7 @@ impl eframe::App for PainterApp {
                             };
                             self.state
                                 .path_overlay
-                                .set_pending(selected, layer, seed, hash);
+                                .set_pending(selected, layer, seed);
                             self.state.path_worker.start(input);
                         }
                     }

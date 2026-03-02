@@ -147,15 +147,7 @@ pub struct AppState {
 
     // ── Loaded Assets ──
     pub loaded_mesh: Option<Arc<practical_arcana_painter::asset_io::LoadedMesh>>,
-    pub loaded_texture: Option<practical_arcana_painter::asset_io::LoadedTexture>,
-    pub loaded_normal: Option<practical_arcana_painter::asset_io::LoadedTexture>,
     pub uv_edges: Option<Vec<(Vec2, Vec2)>>,
-    /// Cached `pixels_to_colors` result for `loaded_texture`. Invalidated on texture reload.
-    pub cached_texture_colors: Option<Arc<Vec<practical_arcana_painter::types::Color>>>,
-    /// Hash of `cached_texture_colors` for path cache invalidation.
-    pub texture_colors_hash: u64,
-    /// Hash of loaded normal texture pixels for path cache invalidation.
-    pub normal_tex_hash: u64,
     /// Hash of loaded mesh geometry for generation staleness detection.
     pub mesh_hash: u64,
 
@@ -201,10 +193,6 @@ pub struct AppState {
     pub pending_generate: bool,
     pub pending_reload_mesh: bool,
     pub pending_replace_mesh: bool,
-    pub pending_load_texture: bool,
-    pub pending_reload_texture: bool,
-    pub pending_load_normal: bool,
-    pub pending_reload_normal: bool,
     /// Chain: auto-export to pre-selected path after next generation completes.
     pub post_gen_export_maps: Option<PathBuf>,
     pub post_gen_export_glb: Option<PathBuf>,
@@ -218,13 +206,10 @@ pub struct AppState {
     // ── Status ──
     pub status_message: String,
 
-    /// Snapshot of layers + settings + asset hashes at last generation — used to detect outdated results.
-    /// Tuple: (layers, output_settings, texture_colors_hash, normal_tex_hash, mesh_hash).
+    /// Snapshot of layers + settings + mesh hash at last generation — used to detect outdated results.
     pub generation_snapshot: Option<(
         Vec<Layer>,
         practical_arcana_painter::types::OutputSettings,
-        u64,
-        u64,
         u64,
     )>,
 
@@ -239,12 +224,7 @@ impl AppState {
             project_path: None,
             dirty: false,
             loaded_mesh: None,
-            loaded_texture: None,
-            loaded_normal: None,
             uv_edges: None,
-            cached_texture_colors: None,
-            texture_colors_hash: 0,
-            normal_tex_hash: 0,
             mesh_hash: 0,
             viewport: ViewportState::default(),
             viewport_tab: ViewportTab::Guide,
@@ -270,10 +250,6 @@ impl AppState {
             pending_generate: false,
             pending_reload_mesh: false,
             pending_replace_mesh: false,
-            pending_load_texture: false,
-            pending_reload_texture: false,
-            pending_load_normal: false,
-            pending_reload_normal: false,
             post_gen_export_maps: None,
             post_gen_export_glb: None,
             reload_summary: None,
@@ -289,8 +265,6 @@ impl AppState {
         UndoSnapshot {
             layers: self.project.layers.clone(),
             settings: self.project.settings.clone(),
-            base_color: self.project.base_color.clone(),
-            base_normal: self.project.base_normal.clone(),
             presets: self.project.presets.clone(),
         }
     }
@@ -299,8 +273,6 @@ impl AppState {
     pub fn apply_snapshot(&mut self, snap: UndoSnapshot) {
         self.project.layers = snap.layers;
         self.project.settings = snap.settings;
-        self.project.base_color = snap.base_color;
-        self.project.base_normal = snap.base_normal;
         self.project.presets = snap.presets;
         self.dirty = true;
 
@@ -336,13 +308,9 @@ impl AppState {
             }
             return None;
         }
-        if let Some((ref layers, ref settings, tex_hash, normal_hash, m_hash)) =
-            self.generation_snapshot
-        {
+        if let Some((ref layers, ref settings, m_hash)) = self.generation_snapshot {
             if *layers != self.project.layers
                 || *settings != self.project.settings
-                || tex_hash != self.texture_colors_hash
-                || normal_hash != self.normal_tex_hash
                 || m_hash != self.mesh_hash
             {
                 return Some("Modified");

@@ -5,6 +5,7 @@ use practical_arcana_painter::types::Color;
 
 /// Convert a LoadedTexture (linear float RGBA) to an egui TextureHandle.
 /// Applies linear → sRGB conversion for correct display.
+#[allow(dead_code)] // Will be used by per-layer texture picker (Commit 6).
 pub fn loaded_texture_to_handle(
     ctx: &egui::Context,
     tex: &LoadedTexture,

@@ -8,9 +8,8 @@ use practical_arcana_painter::asset_io::LoadedMesh;
 use practical_arcana_painter::brush_profile;
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::path_placement;
-use practical_arcana_painter::stroke_color::ColorTextureRef;
 use practical_arcana_painter::stroke_height;
-use practical_arcana_painter::types::{Color, Guide, Layer, PaintValues, StrokeParams};
+use practical_arcana_painter::types::{Guide, Layer, PaintValues, StrokeParams};
 
 // ── Caches ──────────────────────────────────────────────────────
 
@@ -89,15 +88,13 @@ pub fn update_stroke_cache(
 
 // ── Per-Layer Path Overlay Cache ────────────────────────────────
 
-/// Key for invalidation: paint values + seed + guides + color texture hash.
+/// Key for invalidation: paint values + seed + guides.
 /// Resolution is NOT included because path generation always uses BASE_RESOLUTION.
 #[derive(Clone, PartialEq)]
 struct LayerPathKey {
     paint: PaintValues,
     seed: u32,
     guides: Vec<Guide>,
-    /// Hash of the color texture data; changes when texture content is swapped or reloaded.
-    color_tex_hash: u64,
 }
 
 /// Cached path data for a single layer.
@@ -110,15 +107,10 @@ pub struct LayerPathCache {
 }
 
 impl LayerPathCache {
-    /// Check if cache is stale for the given layer state, seed, and color texture hash.
-    pub fn is_stale(&self, layer: &Layer, seed: u32, color_tex_hash: u64) -> bool {
+    /// Check if cache is stale for the given layer state and seed.
+    pub fn is_stale(&self, layer: &Layer, seed: u32) -> bool {
         match &self.key {
-            Some(k) => {
-                k.paint != layer.paint
-                    || k.seed != seed
-                    || k.guides != layer.guides
-                    || k.color_tex_hash != color_tex_hash
-            }
+            Some(k) => k.paint != layer.paint || k.seed != seed || k.guides != layer.guides,
             None => true,
         }
     }
@@ -171,13 +163,12 @@ impl PathOverlayCache {
         layer_index: usize,
         layer: &Layer,
         seed: u32,
-        color_tex_hash: u64,
     ) -> bool {
         // If the completed cache already matches, not stale.
         let cache_hit = self
             .caches
             .get(layer_index)
-            .is_some_and(|cache| !cache.is_stale(layer, seed, color_tex_hash));
+            .is_some_and(|cache| !cache.is_stale(layer, seed));
         if cache_hit {
             return false;
         }
@@ -188,7 +179,6 @@ impl PathOverlayCache {
                 && key.paint == layer.paint
                 && key.seed == seed
                 && key.guides == layer.guides
-                && key.color_tex_hash == color_tex_hash
             {
                 return false;
             }
@@ -198,20 +188,13 @@ impl PathOverlayCache {
     }
 
     /// Record that a worker has been started for the given layer params.
-    pub fn set_pending(
-        &mut self,
-        layer_index: usize,
-        layer: &Layer,
-        seed: u32,
-        color_tex_hash: u64,
-    ) {
+    pub fn set_pending(&mut self, layer_index: usize, layer: &Layer, seed: u32) {
         self.pending = Some((
             layer_index,
             LayerPathKey {
                 paint: layer.paint.clone(),
                 seed,
                 guides: layer.guides.clone(),
-                color_tex_hash,
             },
         ));
     }
@@ -227,7 +210,6 @@ impl PathOverlayCache {
                 paint: result.paint.clone(),
                 seed: result.seed,
                 guides: result.guides.clone(),
-                color_tex_hash: result.color_tex_hash,
             });
         }
         // Clear non-selected layers
@@ -250,10 +232,6 @@ pub struct PathOverlayInput {
     pub layer_count: usize,
     pub seed: u32,
     pub resolution: u32,
-    pub color_data: Option<Arc<Vec<Color>>>,
-    pub color_w: u32,
-    pub color_h: u32,
-    pub color_tex_hash: u64,
     /// Cached mesh normals from a previous computation. Reused if resolution matches.
     pub cached_normals: Option<(u32, Arc<MeshNormalData>)>,
     /// Mesh for on-demand normal computation when cache is cold.
@@ -268,7 +246,6 @@ pub struct PathOverlayResult {
     pub layer_index: usize,
     pub layer_count: usize,
     pub seed: u32,
-    pub color_tex_hash: u64,
     /// Copy of the layer's PaintValues + guides for cache key storage.
     pub paint: PaintValues,
     pub guides: Vec<Guide>,
@@ -363,18 +340,12 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
         return None;
     }
 
-    // Build color texture reference (borrows from Arc — valid for this scope)
-    let color_ref = input.color_data.as_ref().map(|data| ColorTextureRef {
-        data,
-        width: input.color_w,
-        height: input.color_h,
-    });
-
+    // No base color texture for path generation (per-layer base in Commit 3).
     let paint_layer = input.layer.to_paint_layer_with_seed(input.seed);
     let paths = path_placement::generate_paths_cancellable(
         &paint_layer,
         0,
-        color_ref.as_ref(),
+        None, // color_ref: per-layer base will be added in Commit 3
         normal_ref,
         None,
         Some(cancel),
@@ -424,7 +395,6 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
         layer_index: input.layer_index,
         layer_count: input.layer_count,
         seed: input.seed,
-        color_tex_hash: input.color_tex_hash,
         paint: input.layer.paint.clone(),
         guides: input.layer.guides.clone(),
         computed_normals: fresh_normals.map(|nd| (input.resolution, nd)),

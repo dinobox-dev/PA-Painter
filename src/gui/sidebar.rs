@@ -1,8 +1,7 @@
 use eframe::egui;
 
-use practical_arcana_painter::project::BaseColor;
 use practical_arcana_painter::types::{
-    BackgroundMode, Layer, NormalMode, PaintValues, ResolutionPreset,
+    BackgroundMode, Layer, NormalMode, PaintValues, ResolutionPreset, TextureSource,
 };
 
 use super::state::AppState;
@@ -183,88 +182,6 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
         if open {
             state.pending_replace_mesh = true;
         }
-
-        // ── Color row ──
-        let color_text = if let Some(tex_path) = state.project.base_color.texture_path() {
-            short_filename(tex_path).to_string()
-        } else {
-            "(solid)".to_string()
-        };
-        let has_texture = state.project.base_color.texture_path().is_some();
-        let (reload, open, clear) = draw_base_row(
-            ui,
-            "Color",
-            &color_text,
-            BaseRowIcons {
-                reload: has_texture,
-                open: true,
-                clear: has_texture,
-            },
-            "Reload texture",
-            "Load texture...",
-            "Clear texture",
-        );
-        if reload {
-            state.pending_reload_texture = true;
-        }
-        if open {
-            state.pending_load_texture = true;
-        }
-        if clear {
-            state.project.base_color = BaseColor::default();
-            state.loaded_texture = None;
-            state.cached_texture_colors = None;
-            state.texture_colors_hash = 0;
-            state.textures.color = None;
-            state.textures.height = None;
-            state.textures.normal = None;
-            state.textures.stroke_id = None;
-            state.generated = None;
-            state.dirty = true;
-        }
-
-        // ── Normal row ──
-        let has_normal = state.project.base_normal.is_some();
-        let normal_text = if let Some(ref normal_path) = state.project.base_normal {
-            short_filename(normal_path).to_string()
-        } else {
-            "(none)".to_string()
-        };
-        let open_tip = if has_normal {
-            "Replace normal..."
-        } else {
-            "Load normal..."
-        };
-        let (reload, open, clear) = draw_base_row(
-            ui,
-            "Normal",
-            &normal_text,
-            BaseRowIcons {
-                reload: has_normal,
-                open: true,
-                clear: has_normal,
-            },
-            "Reload normal",
-            open_tip,
-            "Clear normal",
-        );
-        if reload {
-            state.pending_reload_normal = true;
-        }
-        if open {
-            state.pending_load_normal = true;
-        }
-        if clear {
-            state.project.base_normal = None;
-            state.loaded_normal = None;
-            state.normal_tex_hash = 0;
-            state.textures.color = None;
-            state.textures.height = None;
-            state.textures.normal = None;
-            state.textures.stroke_id = None;
-            state.generated = None;
-            state.dirty = true;
-        }
     });
 
     ui.separator();
@@ -381,6 +298,8 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
                         order: 0, // bottom of stack; all orders reassigned below
                         paint: PaintValues::default(),
                         guides: vec![],
+                        base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+                        base_normal: TextureSource::None,
                     });
                     // Reassign: index 0 (top of UI) = highest order (painted last = on top)
                     let n = state.project.layers.len() as i32;

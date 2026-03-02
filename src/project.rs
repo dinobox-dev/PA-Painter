@@ -85,43 +85,11 @@ pub struct MeshRef {
     pub format: String,
 }
 
-/// Base color source for the project — either a solid color or a texture file.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum BaseColor {
-    Solid([f32; 3]),
-    Texture(String),
-}
-
-impl Default for BaseColor {
-    fn default() -> Self {
-        BaseColor::Solid([0.5, 0.5, 0.5])
-    }
-}
-
-impl BaseColor {
-    /// Returns the texture path if this is a Texture variant.
-    pub fn texture_path(&self) -> Option<&str> {
-        match self {
-            BaseColor::Texture(p) => Some(p.as_str()),
-            BaseColor::Solid(_) => None,
-        }
-    }
-
-    /// Returns the solid color, or a default gray for Texture variant.
-    pub fn solid_color(&self) -> [f32; 3] {
-        match self {
-            BaseColor::Solid(c) => *c,
-            BaseColor::Texture(_) => [0.5, 0.5, 0.5],
-        }
-    }
-}
-
 /// Snapshot of the state that was used to generate the cached paths.
 /// Compared against the current state to detect staleness.
 #[derive(Debug)]
 struct PathCacheKey {
     layers: Vec<Layer>,
-    base_color_key: String,
 }
 
 /// Full project state (in-memory representation).
@@ -129,8 +97,6 @@ struct PathCacheKey {
 pub struct Project {
     pub manifest: Manifest,
     pub mesh_ref: MeshRef,
-    pub base_color: BaseColor,
-    pub base_normal: Option<String>,
     pub layers: Vec<Layer>,
     pub presets: PresetLibrary,
     pub settings: OutputSettings,
@@ -156,8 +122,6 @@ impl Default for Project {
                 path: String::new(),
                 format: String::new(),
             },
-            base_color: BaseColor::default(),
-            base_normal: None,
             layers: Vec::new(),
             presets: PresetLibrary::default(),
             settings: OutputSettings::default(),
@@ -166,13 +130,6 @@ impl Default for Project {
             cached_paths: None,
             path_cache_key: None,
         }
-    }
-}
-
-fn base_color_cache_key(bc: &BaseColor) -> String {
-    match bc {
-        BaseColor::Solid(c) => format!("solid:{:.4},{:.4},{:.4}", c[0], c[1], c[2]),
-        BaseColor::Texture(p) => format!("tex:{}", p),
     }
 }
 
@@ -217,8 +174,7 @@ impl Project {
     pub fn cached_paths_if_valid(&self) -> Option<&[Vec<StrokePath>]> {
         let key = self.path_cache_key.as_ref()?;
         let paths = self.cached_paths.as_ref()?;
-        if key.layers == self.layers && key.base_color_key == base_color_cache_key(&self.base_color)
-        {
+        if key.layers == self.layers {
             Some(paths.as_slice())
         } else {
             None
@@ -230,7 +186,6 @@ impl Project {
     pub fn set_cached_paths(&mut self, paths: Vec<Vec<StrokePath>>) {
         self.path_cache_key = Some(PathCacheKey {
             layers: self.layers.clone(),
-            base_color_key: base_color_cache_key(&self.base_color),
         });
         self.cached_paths = Some(paths);
     }
@@ -323,19 +278,6 @@ pub fn save_project(project: &Project, path: &Path) -> Result<(), ProjectError> 
     zip.start_file("mesh_ref.json", options)?;
     zip.write_all(mesh_json.as_bytes())?;
 
-    // base_sources.json
-    #[derive(Serialize)]
-    struct BaseSources<'a> {
-        base_color: &'a BaseColor,
-        base_normal: &'a Option<String>,
-    }
-    let base_json = serde_json::to_string_pretty(&BaseSources {
-        base_color: &project.base_color,
-        base_normal: &project.base_normal,
-    })?;
-    zip.start_file("base_sources.json", options)?;
-    zip.write_all(base_json.as_bytes())?;
-
     // layer_stack.json
     let layers_json = serde_json::to_string_pretty(&project.layers)?;
     zip.start_file("layer_stack.json", options)?;
@@ -394,15 +336,6 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     // mesh_ref.json (required)
     let mesh_ref: MeshRef = read_json_entry(&mut archive, "mesh_ref.json")?;
 
-    // base_sources.json
-    #[derive(Deserialize)]
-    struct BaseSources {
-        base_color: BaseColor,
-        #[serde(default)]
-        base_normal: Option<String>,
-    }
-    let base: BaseSources = read_json_entry(&mut archive, "base_sources.json")?;
-
     // layer_stack.json
     let layers: Vec<Layer> = read_json_entry(&mut archive, "layer_stack.json")?;
 
@@ -421,8 +354,6 @@ pub fn load_project(path: &Path) -> Result<Project, ProjectError> {
     Ok(Project {
         manifest,
         mesh_ref,
-        base_color: base.base_color,
-        base_normal: base.base_normal,
         layers,
         presets,
         settings,
@@ -469,7 +400,7 @@ mod tests {
     use super::*;
     use crate::types::{
         Guide, GuideType, Layer, OutputSettings, PaintValues, PressureCurve, PressurePreset,
-        ResolutionPreset,
+        ResolutionPreset, TextureSource,
     };
     use glam::Vec2;
 
@@ -521,6 +452,8 @@ mod tests {
                 color_variation: 0.05,
             },
             guides,
+            base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+            base_normal: TextureSource::None,
         }
     }
 
@@ -528,8 +461,6 @@ mod tests {
         Project {
             manifest: make_manifest(),
             mesh_ref: make_mesh_ref(),
-            base_color: BaseColor::Texture("textures/base_color.png".to_string()),
-            base_normal: None,
             layers: vec![],
             presets: PresetLibrary::built_in(),
             settings: OutputSettings::default(),
@@ -544,8 +475,6 @@ mod tests {
         Project {
             manifest: make_manifest(),
             mesh_ref: make_mesh_ref(),
-            base_color: BaseColor::Texture("textures/base_color.png".to_string()),
-            base_normal: None,
             layers: vec![
                 make_test_layer("skin", 0, 3),
                 make_test_layer("armor", 1, 5),
@@ -693,10 +622,6 @@ mod tests {
         assert!(names.contains(&"manifest.json"), "missing manifest.json");
         assert!(names.contains(&"mesh_ref.json"), "missing mesh_ref.json");
         assert!(
-            names.contains(&"base_sources.json"),
-            "missing base_sources.json"
-        );
-        assert!(
             names.contains(&"layer_stack.json"),
             "missing layer_stack.json"
         );
@@ -739,48 +664,6 @@ mod tests {
         assert_eq!(loaded.settings.resolution_preset, ResolutionPreset::Ultra);
         assert_eq!(loaded.settings.resolution_preset.resolution(), 4096);
         assert_eq!(loaded.settings.normal_strength, 3.0);
-    }
-
-    #[test]
-    fn base_color_solid() {
-        let mut project = make_empty_project();
-        project.base_color = BaseColor::Solid([0.5, 0.3, 0.8]);
-
-        let path = temp_pap_path("solid_color.pap");
-        save_project(&project, &path).unwrap();
-        let loaded = load_project(&path).unwrap();
-
-        match loaded.base_color {
-            BaseColor::Solid(c) => assert_eq!(c, [0.5, 0.3, 0.8]),
-            _ => panic!("expected Solid base color"),
-        }
-    }
-
-    #[test]
-    fn base_color_texture() {
-        let mut project = make_empty_project();
-        project.base_color = BaseColor::Texture("textures/foo.png".to_string());
-
-        let path = temp_pap_path("texture_color.pap");
-        save_project(&project, &path).unwrap();
-        let loaded = load_project(&path).unwrap();
-
-        match loaded.base_color {
-            BaseColor::Texture(p) => assert_eq!(p, "textures/foo.png"),
-            _ => panic!("expected Texture base color"),
-        }
-    }
-
-    #[test]
-    fn base_normal_round_trip() {
-        let mut project = make_empty_project();
-        project.base_normal = Some("normals/base.png".to_string());
-
-        let path = temp_pap_path("base_normal.pap");
-        save_project(&project, &path).unwrap();
-        let loaded = load_project(&path).unwrap();
-
-        assert_eq!(loaded.base_normal, Some("normals/base.png".to_string()));
     }
 
     // ── Thumbnail Test ──

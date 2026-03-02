@@ -2,7 +2,9 @@
 
 use glam::Vec2;
 
-use crate::types::{Guide, GuideType, Layer, PaintLayer, PaintValues, StrokeParams};
+use crate::types::{
+    Guide, GuideType, Layer, PaintLayer, PaintValues, StrokeParams, TextureSource,
+};
 
 pub fn make_layer_with_order(order: i32) -> PaintLayer {
     PaintLayer {
@@ -33,6 +35,8 @@ pub fn make_project_layer_with_order(order: i32) -> Layer {
             influence: 1.5,
             strength: 1.0,
         }],
+        base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+        base_normal: TextureSource::None,
     }
 }
 

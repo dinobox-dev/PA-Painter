@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::process;
 
-use practical_arcana_painter::asset_io::{load_mesh, load_texture};
+use practical_arcana_painter::asset_io::load_mesh;
 use practical_arcana_painter::compositing::{composite_all_with_paths, generate_all_paths};
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::output::{export_all, ExportFormat};
 use practical_arcana_painter::project::load_project;
-use practical_arcana_painter::types::{pixels_to_colors, BaseColorSource, Color, NormalMode};
+use practical_arcana_painter::types::{BaseColorSource, Color, NormalMode};
 use practical_arcana_painter::uv_mask::UvMask;
 
 fn usage() -> ! {
@@ -91,33 +91,9 @@ fn main() {
     eprintln!("Resolution: {resolution}px");
     eprintln!("Layers: {}", project.layers.len());
 
-    // Load base color texture if referenced
-    let (base_colors, tw, th) = if let Some(tex_path) = project.base_color.texture_path() {
-        let tex_file = resolve_asset_path(&project_path, tex_path);
-        eprintln!("Loading texture: {}", tex_file.display());
-        match load_texture(&tex_file) {
-            Ok(tex) => {
-                let colors = pixels_to_colors(&tex.pixels);
-                (Some(colors), tex.width, tex.height)
-            }
-            Err(e) => {
-                eprintln!("Warning: failed to load texture: {e:?}");
-                (None, 0u32, 0u32)
-            }
-        }
-    } else {
-        (None, 0u32, 0u32)
-    };
-
-    let sc = {
-        let c = project.base_color.solid_color();
-        Color::rgb(c[0], c[1], c[2])
-    };
-
-    let base_color = match base_colors {
-        Some(ref colors) => BaseColorSource::textured(colors, tw, th, sc),
-        None => BaseColorSource::solid(sc),
-    };
+    // Placeholder: solid gray base color (per-layer base will be used in Commit 3).
+    let solid_color = Color::rgb(0.5, 0.5, 0.5);
+    let base_color = BaseColorSource::solid(solid_color);
 
     // Load mesh and compute normal data / build masks
     let mesh_file = resolve_asset_path(&project_path, &project.mesh_ref.path);

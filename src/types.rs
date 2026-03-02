@@ -6,6 +6,7 @@
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 // ── Color Types ──
 
@@ -125,6 +126,71 @@ impl<'a> BaseColorSource<'a> {
             tex_height: height,
             solid_color: fallback,
         }
+    }
+}
+
+// ── Texture Source ──
+
+/// Embedded texture data stored inside a project (in-memory representation).
+///
+/// `pixels` is wrapped in `Arc` so that undo snapshots (which clone `Layer`) only
+/// copy the reference count, not the image data.  `#[serde(skip)]` excludes
+/// the heavy pixel buffer from JSON; actual persistence uses PNG inside the ZIP.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddedTexture {
+    /// Display name (typically the original file name).
+    pub label: String,
+    /// Linear RGBA pixels.
+    #[serde(skip)]
+    pub pixels: Arc<Vec<[f32; 4]>>,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Compare by label + dimensions only (pixel data is too large).
+impl PartialEq for EmbeddedTexture {
+    fn eq(&self, other: &Self) -> bool {
+        self.label == other.label && self.width == other.width && self.height == other.height
+    }
+}
+
+/// Per-layer texture source for base color or base normal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TextureSource {
+    /// No texture assigned.  Color default → solid gray; Normal default → unused.
+    None,
+    /// Solid color (color layers only).
+    Solid([f32; 3]),
+    /// Reference to a GLB embedded material texture by index.
+    MeshMaterial(usize),
+    /// External file.  `Some` = loaded; `None` = slot reserved but file not yet chosen
+    /// (rendered as a checkerboard warning pattern).
+    File(Option<EmbeddedTexture>),
+}
+
+impl Default for TextureSource {
+    fn default() -> Self {
+        TextureSource::None
+    }
+}
+
+/// Generate a procedural 8×8 magenta/black checkerboard texture.
+/// Used as a visual warning for `TextureSource::File(None)` (unassigned file slot).
+pub fn checkerboard_warning_texture() -> EmbeddedTexture {
+    let size = 8u32;
+    let mut pixels = Vec::with_capacity((size * size) as usize);
+    let magenta = [1.0, 0.0, 1.0, 1.0];
+    let black = [0.0, 0.0, 0.0, 1.0];
+    for y in 0..size {
+        for x in 0..size {
+            pixels.push(if (x + y) % 2 == 0 { magenta } else { black });
+        }
+    }
+    EmbeddedTexture {
+        label: "__checkerboard__".to_string(),
+        pixels: Arc::new(pixels),
+        width: size,
+        height: size,
     }
 }
 
@@ -480,6 +546,10 @@ fn default_visible() -> bool {
     true
 }
 
+fn default_base_color_source() -> TextureSource {
+    TextureSource::Solid([0.5, 0.5, 0.5])
+}
+
 /// A paint layer binding a mesh group to paint settings and guides.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
@@ -494,6 +564,12 @@ pub struct Layer {
     pub paint: PaintValues,
     /// Direction guides for this layer.
     pub guides: Vec<Guide>,
+    /// Per-layer base color source.
+    #[serde(default = "default_base_color_source")]
+    pub base_color: TextureSource,
+    /// Per-layer base normal source.
+    #[serde(default)]
+    pub base_normal: TextureSource,
 }
 
 impl Layer {
@@ -961,6 +1037,36 @@ mod tests {
         let params = StrokeParams::default();
         let json = serde_json::to_string(&params).unwrap();
         let _: StrokeParams = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn texture_source_default_is_none() {
+        assert_eq!(TextureSource::default(), TextureSource::None);
+    }
+
+    #[test]
+    fn embedded_texture_partial_eq_ignores_pixels() {
+        let t1 = EmbeddedTexture {
+            label: "a.png".to_string(),
+            pixels: Arc::new(vec![[1.0; 4]]),
+            width: 1,
+            height: 1,
+        };
+        let t2 = EmbeddedTexture {
+            label: "a.png".to_string(),
+            pixels: Arc::new(vec![[0.0; 4]]),
+            width: 1,
+            height: 1,
+        };
+        assert_eq!(t1, t2, "PartialEq should compare label+dims only");
+    }
+
+    #[test]
+    fn checkerboard_dimensions() {
+        let cb = checkerboard_warning_texture();
+        assert_eq!(cb.width, 8);
+        assert_eq!(cb.height, 8);
+        assert_eq!(cb.pixels.len(), 64);
     }
 
     #[test]

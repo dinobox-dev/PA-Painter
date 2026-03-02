@@ -1,4 +1,3 @@
-use practical_arcana_painter::project::BaseColor;
 use practical_arcana_painter::types::{Layer, OutputSettings, PresetLibrary};
 
 /// Snapshot of undoable project state (excludes runtime caches).
@@ -6,8 +5,6 @@ use practical_arcana_painter::types::{Layer, OutputSettings, PresetLibrary};
 pub struct UndoSnapshot {
     pub layers: Vec<Layer>,
     pub settings: OutputSettings,
-    pub base_color: BaseColor,
-    pub base_normal: Option<String>,
     pub presets: PresetLibrary,
 }
 
