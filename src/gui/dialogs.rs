@@ -21,7 +21,8 @@ use super::textures;
 // ── Helpers ────────────────────────────────────────────────────────
 
 /// Load a mesh from the given path into app state.
-fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<(), String> {
+/// Returns `Ok(true)` if geometry changed (hash mismatch), `Ok(false)` if identical.
+fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<bool, String> {
     let mesh = load_mesh(mesh_path).map_err(|e| format!("Mesh load failed: {e}"))?;
     state.uv_edges = Some(extract_uv_edges(&mesh));
 
@@ -36,10 +37,21 @@ fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<(), String> {
         uv.y.to_bits().hash(&mut hasher);
     }
     mesh.indices.hash(&mut hasher);
-    state.mesh_hash = hasher.finish();
+    let new_hash = hasher.finish();
+    let changed = new_hash != state.mesh_hash;
+    state.mesh_hash = new_hash;
+
+    if changed {
+        state.textures.color = None;
+        state.textures.height = None;
+        state.textures.normal = None;
+        state.textures.stroke_id = None;
+        state.generated = None;
+        state.path_overlay.clear();
+    }
 
     state.loaded_mesh = Some(Arc::new(mesh));
-    Ok(())
+    Ok(changed)
 }
 
 /// Load a texture from the given path into app state.
@@ -140,6 +152,7 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
             state.textures.height = None;
             state.textures.normal = None;
             state.textures.stroke_id = None;
+            state.path_overlay.clear();
             state.undo.clear();
             true
         }
@@ -169,7 +182,7 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
 
     // Load the mesh
     match apply_mesh(state, &mesh_path) {
-        Ok(()) => {
+        Ok(_) => {
             // Auto-create layers from mesh groups
             project.layers = create_layers_from_mesh(state);
 
@@ -198,6 +211,7 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
             state.loaded_normal = None;
             state.normal_tex_hash = 0;
             state.reload_summary = None;
+            state.path_overlay.clear();
             state.undo.clear();
 
             let n = state.project.layers.len();
@@ -239,7 +253,7 @@ pub fn reload_mesh(state: &mut AppState) {
         .collect();
 
     match apply_mesh(state, &mesh_path) {
-        Ok(()) => {
+        Ok(_) => {
             // Determine new group names from reloaded mesh
             let new_groups: Vec<String> = state
                 .loaded_mesh

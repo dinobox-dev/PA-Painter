@@ -135,6 +135,12 @@ pub struct PathOverlayCache {
 }
 
 impl PathOverlayCache {
+    /// Discard all cached path data and pending state.
+    pub fn clear(&mut self) {
+        self.caches.clear();
+        self.pending = None;
+    }
+
     /// Sync cache vec length to match layer count.
     fn sync_layer_count(&mut self, count: usize) {
         if self.caches.len() > count {

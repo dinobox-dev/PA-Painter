@@ -178,10 +178,12 @@ impl PainterApp {
         }
         self.state.mesh_preview.fit_to_mesh(mesh);
 
-        // If we already have generated data, upload color and normal textures
+        // Sync GPU textures with current generation state
         if let Some(ref gen) = self.state.generated {
             mesh_preview::upload_color_texture(rs, &gen.color, gen.resolution as usize);
             mesh_preview::upload_normal_texture(rs, &gen.normal_map, gen.resolution as usize);
+        } else {
+            mesh_preview::reset_textures_to_placeholder(rs);
         }
     }
 }
