@@ -13,7 +13,7 @@ pub mod widgets;
 
 use eframe::egui;
 use eframe::egui_wgpu;
-use state::{AppState, GuideTool, MapMode, ViewportTab};
+use state::{AppState, GuideTool};
 
 use practical_arcana_painter::types::{Color, BASE_RESOLUTION};
 
@@ -239,48 +239,8 @@ impl eframe::App for PainterApp {
             self.state.viewport_tab = self.state.viewport_tab.next();
         }
 
-        // ── Number keys 1-4: context-dependent (no text focus) ──
-        {
-            let has_text_focus = ctx.wants_keyboard_input();
-            if !has_text_focus {
-                match self.state.viewport_tab {
-                    ViewportTab::Guide => {
-                        let tool_keys = [
-                            (egui::Key::Num1, GuideTool::Select),
-                            (egui::Key::Num2, GuideTool::AddDirectional),
-                            (egui::Key::Num3, GuideTool::AddRadial),
-                            (egui::Key::Num4, GuideTool::AddVortex),
-                        ];
-                        for (key, tool) in &tool_keys {
-                            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, *key)) {
-                                if self.state.guide_tool != *tool {
-                                    if *tool != GuideTool::Select {
-                                        self.state.selected_guide = None;
-                                    }
-                                    self.state.guide_tool = *tool;
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    ViewportTab::UvView => {
-                        let map_keys = [
-                            (egui::Key::Num1, MapMode::Color),
-                            (egui::Key::Num2, MapMode::Height),
-                            (egui::Key::Num3, MapMode::Normal),
-                            (egui::Key::Num4, MapMode::StrokeId),
-                        ];
-                        for (key, mode) in &map_keys {
-                            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, *key)) {
-                                self.state.map_mode = *mode;
-                                break;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+        // Number keys 1-4 are handled inside each strip function (viewport.rs)
+        // so that item definitions and shortcuts stay in a single place.
 
         // ── Undo: capture pre-frame snapshot AFTER undo/redo ──
         // This way the restore itself is invisible to the change tracker.

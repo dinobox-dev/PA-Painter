@@ -317,14 +317,19 @@ fn path_overlay_button(ui: &mut egui::Ui, selected: &mut Option<usize>) {
 fn strip_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 4.0;
     use egui_phosphor::fill::*;
+    let no_text = !ui.ctx().wants_keyboard_input();
     let maps = [
-        (MapMode::Color, "1", PALETTE, "Color"),
-        (MapMode::Height, "2", MOUNTAINS, "Height"),
-        (MapMode::Normal, "3", SPHERE, "Normal"),
-        (MapMode::StrokeId, "4", HASH, "Stroke ID"),
+        (MapMode::Color, egui::Key::Num1, "1", PALETTE, "Color"),
+        (MapMode::Height, egui::Key::Num2, "2", MOUNTAINS, "Height"),
+        (MapMode::Normal, egui::Key::Num3, "3", SPHERE, "Normal"),
+        (MapMode::StrokeId, egui::Key::Num4, "4", HASH, "Stroke ID"),
     ];
-    for (mode, num, icon, tooltip) in &maps {
-        if toolbar_icon_button(ui, state.map_mode == *mode, icon, num, tooltip) {
+    for (mode, key, num, icon, tooltip) in &maps {
+        let pressed = no_text
+            && ui
+                .ctx()
+                .input_mut(|i| i.consume_key(egui::Modifiers::NONE, *key));
+        if toolbar_icon_button(ui, state.map_mode == *mode, icon, num, tooltip) || pressed {
             state.map_mode = *mode;
         }
     }
@@ -337,16 +342,20 @@ fn strip_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
 fn strip_guide(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 4.0;
     use egui_phosphor::fill::*;
+    let no_text = !ui.ctx().wants_keyboard_input();
     let tools = [
-        (GuideTool::Select, "1", CURSOR, "Select"),
-        (GuideTool::AddDirectional, "2", COMPASS, "Directional"),
-        (GuideTool::AddRadial, "3", TARGET, "Radial"),
-        (GuideTool::AddVortex, "4", SPIRAL, "Vortex"),
+        (GuideTool::Select, egui::Key::Num1, "1", CURSOR, "Select"),
+        (GuideTool::AddDirectional, egui::Key::Num2, "2", COMPASS, "Directional"),
+        (GuideTool::AddRadial, egui::Key::Num3, "3", TARGET, "Radial"),
+        (GuideTool::AddVortex, egui::Key::Num4, "4", SPIRAL, "Vortex"),
     ];
-    for (tool, num, icon, tooltip) in &tools {
-        if toolbar_icon_button(ui, state.guide_tool == *tool, icon, num, tooltip)
-            && state.guide_tool != *tool
-        {
+    for (tool, key, num, icon, tooltip) in &tools {
+        let pressed = no_text
+            && ui
+                .ctx()
+                .input_mut(|i| i.consume_key(egui::Modifiers::NONE, *key));
+        let clicked = toolbar_icon_button(ui, state.guide_tool == *tool, icon, num, tooltip);
+        if (clicked || pressed) && state.guide_tool != *tool {
             if *tool != GuideTool::Select {
                 state.selected_guide = None;
             }
@@ -358,11 +367,39 @@ fn strip_guide(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
-    if ui.small_button("Reset Camera").clicked() {
-        if let Some(ref mesh) = state.loaded_mesh {
-            state.mesh_preview.fit_to_mesh(mesh);
+    ui.spacing_mut().item_spacing.x = 4.0;
+    use egui_phosphor::fill::*;
+    use super::state::OrbitTarget;
+    let no_text = !ui.ctx().wants_keyboard_input();
+
+    let targets = [
+        (OrbitTarget::Object, egui::Key::Num1, "1", CAMERA_ROTATE, "Camera"),
+        (OrbitTarget::Light, egui::Key::Num2, "2", SUN, "Light"),
+    ];
+    for (target, key, num, icon, tooltip) in &targets {
+        let pressed = no_text
+            && ui
+                .ctx()
+                .input_mut(|i| i.consume_key(egui::Modifiers::NONE, *key));
+        if toolbar_icon_button(ui, state.mesh_preview.orbit_target == *target, icon, num, tooltip)
+            || pressed
+        {
+            state.mesh_preview.orbit_target = *target;
         }
     }
+
+    ui.separator();
+
+    ui.add_space(4.0);
+    ui.label("Ambient");
+    ui.add_space(4.0);
+    ui.add(
+        egui::DragValue::new(&mut state.mesh_preview.ambient)
+            .range(0.0..=1.0)
+            .speed(0.01)
+            .fixed_decimals(2),
+    );
+    ui.add_space(4.0);
 }
 
 // ── UV View tab ─────────────────────────────────────────────────────

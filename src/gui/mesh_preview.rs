@@ -39,10 +39,12 @@ pub struct MeshPreviewState {
     pub center: Vec3,
     /// Ambient lighting strength (0.0–1.0).
     pub ambient: f32,
-    /// Light elevation angle in radians (0 = horizontal, π/2 = directly above).
-    pub light_elevation: f32,
-    /// Whether the lighting panel is expanded.
-    pub lighting_panel_open: bool,
+    /// Light yaw (horizontal angle) in radians — independent of camera.
+    pub light_yaw: f32,
+    /// Light pitch (vertical angle) in radians — independent of camera.
+    pub light_pitch: f32,
+    /// Current orbit target: Object (camera) or Light.
+    pub orbit_target: super::state::OrbitTarget,
     /// Whether GPU resources have been initialized.
     pub gpu_ready: bool,
     /// Texture ID registered with egui's wgpu renderer for zero-copy display.
@@ -57,8 +59,9 @@ impl Default for MeshPreviewState {
             distance: 3.0,
             center: Vec3::ZERO,
             ambient: 0.15,
-            light_elevation: 0.3,
-            lighting_panel_open: false,
+            light_yaw: 0.8,
+            light_pitch: 0.5,
+            orbit_target: super::state::OrbitTarget::default(),
             gpu_ready: false,
             rendered_texture_id: None,
         }
@@ -773,13 +776,28 @@ pub fn show(
 
     if response.dragged_by(egui::PointerButton::Primary) {
         let delta = response.drag_delta();
-        state.mesh_preview.yaw += delta.x * 0.01;
-        state.mesh_preview.pitch += delta.y * 0.01;
-        state.mesh_preview.pitch = state.mesh_preview.pitch.clamp(
-            -std::f32::consts::FRAC_PI_2 + 0.01,
-            std::f32::consts::FRAC_PI_2 - 0.01,
-        );
-        state.mesh_preview.yaw = state.mesh_preview.yaw.rem_euclid(std::f32::consts::TAU);
+        match state.mesh_preview.orbit_target {
+            super::state::OrbitTarget::Object => {
+                state.mesh_preview.yaw += delta.x * 0.01;
+                state.mesh_preview.pitch += delta.y * 0.01;
+                state.mesh_preview.pitch = state.mesh_preview.pitch.clamp(
+                    -std::f32::consts::FRAC_PI_2 + 0.01,
+                    std::f32::consts::FRAC_PI_2 - 0.01,
+                );
+                state.mesh_preview.yaw =
+                    state.mesh_preview.yaw.rem_euclid(std::f32::consts::TAU);
+            }
+            super::state::OrbitTarget::Light => {
+                state.mesh_preview.light_yaw -= delta.x * 0.01;
+                state.mesh_preview.light_pitch -= delta.y * 0.01;
+                state.mesh_preview.light_pitch = state.mesh_preview.light_pitch.clamp(
+                    -std::f32::consts::FRAC_PI_2 + 0.01,
+                    std::f32::consts::FRAC_PI_2 - 0.01,
+                );
+                state.mesh_preview.light_yaw =
+                    state.mesh_preview.light_yaw.rem_euclid(std::f32::consts::TAU);
+            }
+        }
     }
 
     if response.hovered() {
@@ -800,10 +818,14 @@ pub fn show(
     let model = Mat4::IDENTITY;
     let mvp = proj * view * model;
 
-    // Light from camera direction, elevated by light_elevation
-    let cam_dir = (eye - center).normalize();
-    let elev = state.mesh_preview.light_elevation;
-    let light_dir = (cam_dir + up * elev.tan().max(0.0)).normalize();
+    // Light direction from independent spherical coordinates
+    let ly = state.mesh_preview.light_yaw;
+    let lp = state.mesh_preview.light_pitch;
+    let light_dir = Vec3::new(
+        ly.cos() * lp.cos(),
+        lp.sin(),
+        ly.sin() * lp.cos(),
+    );
 
     let uniforms = Uniforms {
         mvp: mvp.to_cols_array_2d(),
@@ -924,127 +946,4 @@ pub fn show(
         );
     }
 
-    // Lighting controls overlay (styled to match view mode tabs)
-    draw_lighting_panel(ui, state, rect);
-}
-
-/// Draw lighting controls as a compact panel matching the view mode tab style.
-fn draw_lighting_panel(
-    ui: &mut egui::Ui,
-    state: &mut super::state::AppState,
-    viewport_rect: egui::Rect,
-) {
-    use egui::{Color32, Pos2, Rect, Sense, Vec2};
-
-    let tab_bg = Color32::from_rgba_unmultiplied(40, 40, 40, 180);
-    let tab_bg_active = Color32::from_rgba_unmultiplied(60, 60, 60, 220);
-    let text_dim = Color32::from_gray(160);
-    let rounding = 3.0;
-
-    // Toggle button: top-right, styled like a view mode tab
-    let btn_w = 56.0;
-    let btn_h = 24.0;
-    let btn_pos = Pos2::new(
-        viewport_rect.right() - btn_w - 8.0,
-        viewport_rect.top() + 8.0,
-    );
-    let btn_rect = Rect::from_min_size(btn_pos, Vec2::new(btn_w, btn_h));
-
-    let painter = ui.painter_at(viewport_rect);
-    let bg = if state.mesh_preview.lighting_panel_open {
-        tab_bg_active
-    } else {
-        tab_bg
-    };
-    painter.rect_filled(btn_rect, rounding, bg);
-    if state.mesh_preview.lighting_panel_open {
-        painter.rect_stroke(
-            btn_rect,
-            rounding,
-            egui::Stroke::new(1.0, Color32::from_gray(140)),
-            egui::StrokeKind::Outside,
-        );
-    }
-    painter.text(
-        btn_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "Light",
-        egui::FontId::proportional(12.0),
-        if state.mesh_preview.lighting_panel_open {
-            Color32::WHITE
-        } else {
-            text_dim
-        },
-    );
-
-    let btn_response = ui.interact(btn_rect, ui.id().with("light_toggle"), Sense::click());
-    if btn_response.clicked() {
-        state.mesh_preview.lighting_panel_open = !state.mesh_preview.lighting_panel_open;
-    }
-
-    // Expanded panel below the toggle button
-    if state.mesh_preview.lighting_panel_open {
-        let panel_w = 180.0;
-        let panel_x = viewport_rect.right() - panel_w - 8.0;
-        let panel_y = btn_rect.bottom() + 4.0;
-
-        egui::Area::new(egui::Id::new("mesh_lighting_panel"))
-            .fixed_pos(Pos2::new(panel_x, panel_y))
-            .order(egui::Order::Foreground)
-            .show(ui.ctx(), |ui: &mut egui::Ui| {
-                egui::Frame::NONE
-                    .fill(tab_bg_active)
-                    .corner_radius(rounding)
-                    .inner_margin(8.0)
-                    .stroke(egui::Stroke::new(1.0, Color32::from_gray(80)))
-                    .show(ui, |ui: &mut egui::Ui| {
-                        ui.set_width(panel_w - 16.0);
-                        ui.spacing_mut().slider_width = panel_w - 80.0;
-
-                        ui.horizontal(|ui: &mut egui::Ui| {
-                            ui.colored_label(text_dim, "Ambient");
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui: &mut egui::Ui| {
-                                    ui.add(
-                                        egui::DragValue::new(&mut state.mesh_preview.ambient)
-                                            .range(0.0..=1.0)
-                                            .speed(0.01)
-                                            .fixed_decimals(2),
-                                    );
-                                },
-                            );
-                        });
-
-                        ui.add(
-                            egui::Slider::new(&mut state.mesh_preview.ambient, 0.0..=1.0)
-                                .show_value(false),
-                        );
-
-                        ui.add_space(4.0);
-
-                        ui.horizontal(|ui: &mut egui::Ui| {
-                            ui.colored_label(text_dim, "Elevation");
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui: &mut egui::Ui| {
-                                    ui.add(
-                                        egui::DragValue::new(
-                                            &mut state.mesh_preview.light_elevation,
-                                        )
-                                        .range(0.0..=1.5)
-                                        .speed(0.01)
-                                        .fixed_decimals(2),
-                                    );
-                                },
-                            );
-                        });
-
-                        ui.add(
-                            egui::Slider::new(&mut state.mesh_preview.light_elevation, 0.0..=1.5)
-                                .show_value(false),
-                        );
-                    });
-            });
-    }
 }

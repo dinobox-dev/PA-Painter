@@ -50,6 +50,14 @@ impl ViewportTab {
     }
 }
 
+/// 3D viewport orbit target: camera vs light.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OrbitTarget {
+    #[default]
+    Object,
+    Light,
+}
+
 /// Guide editing tool (active only in the Guide tab).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GuideTool {
