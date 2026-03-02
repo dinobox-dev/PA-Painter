@@ -22,6 +22,22 @@ pub struct LoadedMesh {
     pub indices: Vec<u32>,
     /// Vertex groups (submeshes). Empty means whole mesh is one group.
     pub groups: Vec<MeshGroup>,
+    /// Per-primitive material info extracted from GLB/glTF.
+    /// Parallel to `groups` — `materials[i]` corresponds to `groups[i]`.
+    /// Empty for OBJ meshes.
+    pub materials: Vec<MeshMaterialInfo>,
+}
+
+/// Material information extracted from a GLB/glTF primitive.
+pub struct MeshMaterialInfo {
+    /// Material name (from glTF material, or generated).
+    pub name: String,
+    /// PBR base color factor (linear RGBA).
+    pub base_color_factor: [f32; 4],
+    /// Base color texture (sRGB source, stored as linear RGBA).
+    pub base_color_texture: Option<LoadedTexture>,
+    /// Normal map texture (linear source).
+    pub normal_texture: Option<LoadedTexture>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -210,17 +226,103 @@ fn load_obj(path: &Path) -> Result<LoadedMesh, MeshError> {
         uvs,
         indices,
         groups,
+        materials: vec![],
     })
 }
 
+/// Convert a glTF image to a LoadedTexture, applying sRGB → linear conversion.
+/// Used for base color textures which are stored in sRGB color space per glTF spec.
+fn gltf_image_to_texture_srgb(data: &gltf::image::Data) -> LoadedTexture {
+    let w = data.width;
+    let h = data.height;
+    let pixel_count = (w * h) as usize;
+    let mut pixels = Vec::with_capacity(pixel_count);
+
+    match data.format {
+        gltf::image::Format::R8G8B8 => {
+            for chunk in data.pixels.chunks_exact(3) {
+                pixels.push([
+                    srgb_to_linear(chunk[0] as f32 / 255.0),
+                    srgb_to_linear(chunk[1] as f32 / 255.0),
+                    srgb_to_linear(chunk[2] as f32 / 255.0),
+                    1.0,
+                ]);
+            }
+        }
+        gltf::image::Format::R8G8B8A8 => {
+            for chunk in data.pixels.chunks_exact(4) {
+                pixels.push([
+                    srgb_to_linear(chunk[0] as f32 / 255.0),
+                    srgb_to_linear(chunk[1] as f32 / 255.0),
+                    srgb_to_linear(chunk[2] as f32 / 255.0),
+                    chunk[3] as f32 / 255.0, // Alpha is linear
+                ]);
+            }
+        }
+        _ => {
+            // Unsupported format: fill with mid-gray
+            pixels.resize(pixel_count, [0.5, 0.5, 0.5, 1.0]);
+        }
+    }
+
+    LoadedTexture {
+        pixels,
+        width: w,
+        height: h,
+    }
+}
+
+/// Convert a glTF image to a LoadedTexture without gamma conversion.
+/// Used for normal maps which are stored in linear color space per glTF spec.
+fn gltf_image_to_texture_linear(data: &gltf::image::Data) -> LoadedTexture {
+    let w = data.width;
+    let h = data.height;
+    let pixel_count = (w * h) as usize;
+    let mut pixels = Vec::with_capacity(pixel_count);
+
+    match data.format {
+        gltf::image::Format::R8G8B8 => {
+            for chunk in data.pixels.chunks_exact(3) {
+                pixels.push([
+                    chunk[0] as f32 / 255.0,
+                    chunk[1] as f32 / 255.0,
+                    chunk[2] as f32 / 255.0,
+                    1.0,
+                ]);
+            }
+        }
+        gltf::image::Format::R8G8B8A8 => {
+            for chunk in data.pixels.chunks_exact(4) {
+                pixels.push([
+                    chunk[0] as f32 / 255.0,
+                    chunk[1] as f32 / 255.0,
+                    chunk[2] as f32 / 255.0,
+                    chunk[3] as f32 / 255.0,
+                ]);
+            }
+        }
+        _ => {
+            // Unsupported format: fill with flat normal (0.5, 0.5, 1.0)
+            pixels.resize(pixel_count, [0.5, 0.5, 1.0, 1.0]);
+        }
+    }
+
+    LoadedTexture {
+        pixels,
+        width: w,
+        height: h,
+    }
+}
+
 fn load_gltf(path: &Path) -> Result<LoadedMesh, MeshError> {
-    let (document, buffers, _) =
+    let (document, buffers, images) =
         gltf::import(path).map_err(|e| MeshError::ParseError(e.to_string()))?;
 
     let mut positions = Vec::new();
     let mut uvs = Vec::new();
     let mut indices = Vec::new();
     let mut groups = Vec::new();
+    let mut materials = Vec::new();
     let mut prim_idx = 0u32;
 
     for mesh in document.meshes() {
@@ -261,11 +363,33 @@ fn load_gltf(path: &Path) -> Result<LoadedMesh, MeshError> {
 
             let index_count = prim_indices.len() as u32;
 
-            let group_name = primitive
-                .material()
+            let material = primitive.material();
+            let group_name = material
                 .name()
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("primitive_{prim_idx}"));
+
+            // Extract material info
+            let pbr = material.pbr_metallic_roughness();
+            let base_color_factor = pbr.base_color_factor();
+            let base_color_texture = pbr
+                .base_color_texture()
+                .map(|info| gltf_image_to_texture_srgb(&images[info.texture().source().index()]));
+            let normal_texture = material
+                .normal_texture()
+                .map(|info| gltf_image_to_texture_linear(&images[info.texture().source().index()]));
+
+            let mat_name = material
+                .name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("material_{prim_idx}"));
+
+            materials.push(MeshMaterialInfo {
+                name: mat_name,
+                base_color_factor,
+                base_color_texture,
+                normal_texture,
+            });
 
             groups.push(MeshGroup {
                 name: group_name,
@@ -286,6 +410,7 @@ fn load_gltf(path: &Path) -> Result<LoadedMesh, MeshError> {
         uvs,
         indices,
         groups,
+        materials,
     })
 }
 
@@ -608,6 +733,7 @@ f 1 2 3
             ],
             indices: vec![0, 1, 2],
             groups: vec![],
+            materials: vec![],
         };
         let edges = extract_uv_edges(&mesh);
         assert_eq!(edges.len(), 3);
@@ -626,6 +752,7 @@ f 1 2 3
             ],
             indices: vec![0, 1, 2, 0, 2, 3],
             groups: vec![],
+            materials: vec![],
         };
         let edges = extract_uv_edges(&mesh);
         // 5 unique edges: 0-1, 1-2, 0-2, 2-3, 0-3
@@ -670,6 +797,7 @@ f 1 2 3
             uvs,
             indices,
             groups: vec![],
+            materials: vec![],
         };
         let edges = extract_uv_edges(&mesh);
         assert_eq!(edges.len(), 18);

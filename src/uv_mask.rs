@@ -184,6 +184,7 @@ mod tests {
                 index_offset: 0,
                 index_count: 3,
             }],
+            materials: vec![],
         };
         let group = mesh.groups[0].clone();
         (mesh, group)
@@ -212,6 +213,7 @@ mod tests {
                     index_count: 3,
                 },
             ],
+            materials: vec![],
         };
         let g0 = mesh.groups[0].clone();
         let g1 = mesh.groups[1].clone();
@@ -308,6 +310,7 @@ mod tests {
             uvs: vec![Vec2::ZERO; 3],
             indices: vec![0, 1, 2],
             groups: vec![],
+            materials: vec![],
         };
         let group = MeshGroup {
             name: "empty".to_string(),

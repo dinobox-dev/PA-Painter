@@ -558,6 +558,7 @@ mod tests {
             ],
             indices: vec![0, 1, 2],
             groups: vec![],
+            materials: vec![],
         }
     }
 
@@ -688,6 +689,7 @@ mod tests {
             uvs,
             indices,
             groups: vec![],
+            materials: vec![],
         }
     }
 

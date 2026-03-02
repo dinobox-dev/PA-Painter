@@ -337,6 +337,7 @@ mod tests {
             ],
             indices: vec![0, 1, 2],
             groups: vec![],
+            materials: vec![],
         }
     }
 
@@ -357,6 +358,7 @@ mod tests {
             ],
             indices: vec![0, 1, 2, 0, 2, 3],
             groups: vec![],
+            materials: vec![],
         }
     }
 
@@ -633,6 +635,7 @@ mod tests {
             ],
             indices: vec![0, 1, 2],
             groups: vec![],
+            materials: vec![],
         };
 
         let data = compute_mesh_normal_data(&mesh, 32);
