@@ -15,7 +15,7 @@ use eframe::egui;
 use eframe::egui_wgpu;
 use state::{AppState, GuideTool};
 
-use practical_arcana_painter::types::{Color, BASE_RESOLUTION};
+use practical_arcana_painter::types::BASE_RESOLUTION;
 
 /// Main GUI application.
 pub struct PainterApp {
@@ -53,26 +53,45 @@ impl PainterApp {
         let layers = self.state.project.paint_layers();
         let settings = self.state.project.settings.clone();
 
-        // Placeholder: solid gray base color (per-layer base handled in Commit 3)
-        let solid_color = Color::rgb(0.5, 0.5, 0.5);
-
         let mesh = self.state.loaded_mesh.clone(); // Arc clone
         let cached_normals = self.state.cached_mesh_normals.clone(); // (u32, Arc) clone
 
-        // Group names for visible layers — parallel to `layers` vec
-        let layer_group_names: Vec<String> = self
+        // Resolve per-layer base color and normal from TextureSource.
+        let materials: &[_] = mesh
+            .as_ref()
+            .map(|m| m.materials.as_slice())
+            .unwrap_or(&[]);
+        let visible_layers: Vec<&practical_arcana_painter::types::Layer> = self
             .state
             .project
             .layers
             .iter()
             .filter(|l| l.visible)
+            .collect();
+        let layer_base_colors: Vec<_> = visible_layers
+            .iter()
+            .map(|l| {
+                practical_arcana_painter::compositing::resolve_base_color(&l.base_color, materials)
+            })
+            .collect();
+        let layer_base_normals: Vec<_> = visible_layers
+            .iter()
+            .map(|l| {
+                practical_arcana_painter::compositing::resolve_base_normal(&l.base_normal, materials)
+            })
+            .collect();
+
+        // Group names for visible layers — parallel to `layers` vec
+        let layer_group_names: Vec<String> = visible_layers
+            .iter()
             .map(|l| l.group_name.clone())
             .collect();
 
         self.state.generation.start(generation::GenInput {
             layers,
             resolution,
-            solid_color,
+            layer_base_colors,
+            layer_base_normals,
             settings,
             mesh,
             cached_normals,

@@ -38,7 +38,7 @@ fn visual_highres_cpu() {
         let cpu_maps = compositing::composite_all(
             &[layer.clone()],
             res,
-            &BaseColorSource::solid(solid),
+            &[LayerBaseColor::solid(solid)],
             &settings,
             None,
             &[],

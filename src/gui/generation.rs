@@ -6,13 +6,16 @@ use std::time::{Duration, Instant};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use practical_arcana_painter::asset_io::LoadedMesh;
-use practical_arcana_painter::compositing::{composite_layer, GlobalMaps};
+use practical_arcana_painter::compositing::{composite_layer, fill_base_color_region, GlobalMaps};
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
-use practical_arcana_painter::output::{generate_normal_map, generate_normal_map_depicted_form};
+use practical_arcana_painter::output::{
+    blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
+};
 use practical_arcana_painter::path_placement::generate_paths_cancellable;
 use practical_arcana_painter::stroke_color::ColorTextureRef;
 use practical_arcana_painter::types::{
-    BaseColorSource, Color, NormalMode, OutputSettings, PaintLayer, StrokePath,
+    BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal, NormalMode,
+    OutputSettings, PaintLayer, StrokePath,
 };
 use practical_arcana_painter::uv_mask::UvMask;
 
@@ -20,8 +23,10 @@ use practical_arcana_painter::uv_mask::UvMask;
 pub struct GenInput {
     pub layers: Vec<PaintLayer>,
     pub resolution: u32,
-    /// Placeholder solid color for compositing (per-layer base in Commit 3).
-    pub solid_color: Color,
+    /// Per-layer base color data (parallel to `layers`).
+    pub layer_base_colors: Vec<LayerBaseColor>,
+    /// Per-layer base normal data for UDN blending (parallel to `layers`).
+    pub layer_base_normals: Vec<LayerBaseNormal>,
     pub settings: OutputSettings,
     /// Mesh for on-thread computation of normal data and UV masks.
     pub mesh: Option<Arc<LoadedMesh>>,
@@ -233,9 +238,6 @@ fn run_pipeline(
     stage.store(STAGE_PATHS, Ordering::Relaxed);
     set_progress(progress, p_paths);
 
-    // Placeholder: always solid gray until per-layer base is implemented (Commit 3).
-    let base_color = BaseColorSource::solid(input.solid_color);
-
     let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 
     let mut sorted: Vec<(usize, &PaintLayer)> = input.layers.iter().enumerate().collect();
@@ -246,10 +248,15 @@ fn run_pipeline(
     let mut all_paths: Vec<Vec<StrokePath>> = sorted
         .par_iter()
         .map(|&(layer_index, layer)| {
-            let tex_ref = base_color.texture.map(|data| ColorTextureRef {
+            let base = input
+                .layer_base_colors
+                .get(layer_index)
+                .map(|bc| bc.as_source())
+                .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+            let tex_ref = base.texture.map(|data| ColorTextureRef {
                 data,
-                width: base_color.tex_width,
-                height: base_color.tex_height,
+                width: base.tex_width,
+                height: base.tex_height,
             });
             let mask = mask_refs.get(layer_index).and_then(|m| *m);
             let result = generate_paths_cancellable(
@@ -284,21 +291,39 @@ fn run_pipeline(
     stage.store(STAGE_COMPOSITE, Ordering::Relaxed);
     set_progress(progress, p_composite);
 
+    // Initialize with neutral gray; per-layer base colors are painted into regions below.
+    let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
     let mut global = GlobalMaps::new(
         input.resolution,
-        &base_color,
+        &default_base,
         input.settings.normal_mode,
         input.settings.background_mode,
     );
 
+    // Fill per-layer base color into each layer's mask region (Opaque mode only).
+    if input.settings.background_mode != BackgroundMode::Transparent {
+        for &(layer_index, _) in &sorted {
+            if let Some(bc) = input.layer_base_colors.get(layer_index) {
+                let src = bc.as_source();
+                let mask = mask_refs.get(layer_index).and_then(|m| *m);
+                fill_base_color_region(&mut global, &src, mask);
+            }
+        }
+    }
+
     for (sorted_idx, &(layer_index, layer)) in sorted.iter().enumerate() {
+        let base = input
+            .layer_base_colors
+            .get(layer_index)
+            .map(|bc| bc.as_source())
+            .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
         let mask = mask_refs.get(layer_index).and_then(|m| *m);
         composite_layer(
             layer,
             layer_index as u32,
             &mut global,
             &input.settings,
-            &base_color,
+            &base,
             Some(&all_paths[sorted_idx]),
             normal_data,
             mask,
@@ -318,7 +343,7 @@ fn run_pipeline(
     stage.store(STAGE_NORMAL_MAP, Ordering::Relaxed);
     set_progress(progress, p_normal_map);
 
-    let normal_map = match input.settings.normal_mode {
+    let mut normal_map = match input.settings.normal_mode {
         NormalMode::DepictedForm => {
             if let Some(nd) = normal_data {
                 generate_normal_map_depicted_form(
@@ -346,11 +371,26 @@ fn run_pipeline(
         ),
     };
 
-    // ── Stage 6: Normal blending ──
-    // Per-layer base normal blending will be added in Commit 3.
+    // ── Stage 6: Per-layer UDN normal blending ──
 
     stage.store(STAGE_BLENDING, Ordering::Relaxed);
     set_progress(progress, p_blending);
+
+    for &(layer_index, _) in &sorted {
+        if let Some(bn) = input.layer_base_normals.get(layer_index) {
+            if let Some(ref pixels) = bn.pixels {
+                let mask = mask_refs.get(layer_index).and_then(|m| *m);
+                blend_normals_udn(
+                    &mut normal_map,
+                    pixels,
+                    bn.width,
+                    bn.height,
+                    input.resolution,
+                    mask,
+                );
+            }
+        }
+    }
 
     set_progress(progress, 1.0);
 

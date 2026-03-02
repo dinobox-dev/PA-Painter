@@ -701,7 +701,7 @@ mod tests {
             generate_normal_map, generate_normal_map_depicted_form, normalize_height_map,
         };
         use crate::types::{
-            BaseColorSource, Color as C, Guide, NormalMode, OutputSettings, PaintLayer,
+            Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings, PaintLayer,
             StrokeParams,
         };
 
@@ -748,7 +748,7 @@ mod tests {
             let maps = composite_all(
                 std::slice::from_ref(&layer),
                 res,
-                &BaseColorSource::solid(solid),
+                &[LayerBaseColor::solid(solid)],
                 &settings,
                 mesh_nd,
                 &[],
@@ -853,7 +853,7 @@ mod tests {
         use crate::object_normal::compute_mesh_normal_data;
         use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::types::{
-            BackgroundMode, BaseColorSource, Color as C, Guide, NormalMode, OutputSettings,
+            BackgroundMode, Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings,
             PaintLayer, StrokeParams,
         };
 
@@ -888,7 +888,7 @@ mod tests {
         let maps = composite_all(
             std::slice::from_ref(&layer),
             res,
-            &BaseColorSource::solid(solid),
+            &[LayerBaseColor::solid(solid)],
             &settings,
             Some(&nd),
             &[],
@@ -939,7 +939,7 @@ mod tests {
         use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::path_placement::generate_paths;
         use crate::types::{
-            BackgroundMode, BaseColorSource, Color as C, Guide, NormalMode, OutputSettings,
+            BackgroundMode, Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings,
             PaintLayer, StrokeParams,
         };
 
@@ -979,7 +979,7 @@ mod tests {
         let maps = composite_all_with_paths(
             std::slice::from_ref(&layer),
             res,
-            &BaseColorSource::solid(solid),
+            &[LayerBaseColor::solid(solid)],
             &settings,
             Some(&cached_paths),
             Some(&nd),

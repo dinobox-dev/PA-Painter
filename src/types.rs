@@ -129,6 +129,55 @@ impl<'a> BaseColorSource<'a> {
     }
 }
 
+/// Owned per-layer base color data for compositing.
+/// Thread-safe (`Send + 'static`) for use in worker threads.
+pub struct LayerBaseColor {
+    pub solid_color: Color,
+    pub texture: Option<Vec<Color>>,
+    pub tex_width: u32,
+    pub tex_height: u32,
+}
+
+impl LayerBaseColor {
+    /// Solid color with no texture.
+    pub fn solid(color: Color) -> Self {
+        Self {
+            solid_color: color,
+            texture: None,
+            tex_width: 0,
+            tex_height: 0,
+        }
+    }
+
+    /// Create a [`BaseColorSource`] reference borrowing from this owned data.
+    pub fn as_source(&self) -> BaseColorSource<'_> {
+        BaseColorSource {
+            texture: self.texture.as_deref(),
+            tex_width: self.tex_width,
+            tex_height: self.tex_height,
+            solid_color: self.solid_color,
+        }
+    }
+}
+
+/// Owned per-layer base normal data for UDN blending.
+pub struct LayerBaseNormal {
+    pub pixels: Option<Vec<[f32; 4]>>,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl LayerBaseNormal {
+    /// No base normal (identity blending).
+    pub fn none() -> Self {
+        Self {
+            pixels: None,
+            width: 0,
+            height: 0,
+        }
+    }
+}
+
 // ── Texture Source ──
 
 /// Embedded texture data stored inside a project (in-memory representation).

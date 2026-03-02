@@ -5,11 +5,14 @@
 
 use std::path::Path;
 
+use glam::Vec2;
+
 use crate::asset_io::linear_to_srgb;
 use crate::compositing::GlobalMaps;
 use crate::object_normal::MeshNormalData;
 use crate::stroke_color::hsv_to_rgb;
 use crate::types::{BackgroundMode, Color, HsvColor, NormalMode, OutputSettings};
+use crate::uv_mask::UvMask;
 
 // ── Error Type ──
 
@@ -180,16 +183,27 @@ pub fn blend_normals_udn(
     base_w: u32,
     base_h: u32,
     resolution: u32,
+    mask: Option<&UvMask>,
 ) {
     if base_w == 0 || base_h == 0 || base_normal_pixels.is_empty() {
         return;
     }
+
+    let res_f = resolution as f32;
 
     for y in 0..resolution {
         for x in 0..resolution {
             let idx = (y * resolution + x) as usize;
             if idx >= paint_normals.len() {
                 break;
+            }
+
+            // Skip pixels outside the layer's UV mask region
+            if let Some(m) = mask {
+                let uv = Vec2::new((x as f32 + 0.5) / res_f, (y as f32 + 0.5) / res_f);
+                if !m.sample(uv) {
+                    continue;
+                }
             }
 
             // Sample base normal (nearest-neighbor, UV mapping)
@@ -505,7 +519,7 @@ mod tests {
     use crate::asset_io::{linear_to_srgb, load_texture};
     use crate::compositing::composite_all;
     use crate::test_util::make_layer_with_order;
-    use crate::types::{BaseColorSource, Color, OutputSettings};
+    use crate::types::{Color, LayerBaseColor, OutputSettings};
 
     const EPS: f32 = 1e-4;
 
@@ -846,7 +860,7 @@ mod tests {
         let maps = composite_all(
             &[layer.clone()],
             res,
-            &BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)),
+            &[LayerBaseColor::solid(Color::rgb(0.5, 0.5, 0.5))],
             &settings,
             None,
             &[],
@@ -887,7 +901,7 @@ mod tests {
         let maps = composite_all(
             &[layer.clone()],
             res,
-            &BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)),
+            &[LayerBaseColor::solid(Color::rgb(0.5, 0.5, 0.5))],
             &settings,
             None,
             &[],
@@ -926,7 +940,7 @@ mod tests {
         let mut normals = vec![[0.6, 0.4, 1.0]; 4];
         let original = normals.clone();
         // No base pixels → function returns early, normals unchanged
-        blend_normals_udn(&mut normals, &[], 0, 0, 2);
+        blend_normals_udn(&mut normals, &[], 0, 0, 2, None);
         assert_eq!(normals, original);
     }
 
@@ -935,7 +949,7 @@ mod tests {
         // Flat detail (0.5, 0.5, X) should approximate base
         let base = vec![[0.7, 0.3, 0.9, 1.0]; 4]; // tilted base
         let mut normals = vec![[0.5, 0.5, 1.0]; 4]; // flat detail
-        blend_normals_udn(&mut normals, &base, 2, 2, 2);
+        blend_normals_udn(&mut normals, &base, 2, 2, 2, None);
         // base decoded: (0.4, -0.4, 0.8), detail decoded: (0, 0, _)
         // result: (0.4, -0.4, 0.8) normalized = same direction as base
         // re-encoded: should be close to base
@@ -957,7 +971,7 @@ mod tests {
     fn udn_unit_length() {
         let base = vec![[0.7, 0.3, 0.9, 1.0]; 16];
         let mut normals = vec![[0.6, 0.4, 0.9]; 16];
-        blend_normals_udn(&mut normals, &base, 4, 4, 4);
+        blend_normals_udn(&mut normals, &base, 4, 4, 4, None);
         for n in &normals {
             let dx = n[0] * 2.0 - 1.0;
             let dy = n[1] * 2.0 - 1.0;
@@ -972,7 +986,7 @@ mod tests {
         // A base tilted right + a detail tilted right should produce even more rightward tilt
         let base = vec![[0.6, 0.5, 0.9, 1.0]; 4]; // base tilted right (bx=0.2)
         let mut normals = vec![[0.6, 0.5, 0.9]; 4]; // detail tilted right (dx=0.2)
-        blend_normals_udn(&mut normals, &base, 2, 2, 2);
+        blend_normals_udn(&mut normals, &base, 2, 2, 2, None);
         // Combined should be more tilted right than either alone
         assert!(
             normals[0][0] > 0.6,

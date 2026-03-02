@@ -17,7 +17,8 @@ use crate::stroke_height::{
     compute_stroke_gradients, generate_stroke_height, StrokeGradientResult, StrokeHeightResult,
 };
 use crate::types::{
-    BackgroundMode, BaseColorSource, Color, NormalMode, OutputSettings, PaintLayer, StrokePath,
+    BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal, NormalMode,
+    OutputSettings, PaintLayer, StrokePath, TextureSource,
 };
 use crate::uv_mask::UvMask;
 
@@ -99,6 +100,129 @@ impl GlobalMaps {
             gradient_x,
             gradient_y,
             resolution,
+        }
+    }
+}
+
+/// Resolve a [`TextureSource`] into owned base color data for compositing.
+///
+/// Needs access to the mesh's material list for `MeshMaterial` variants.
+pub fn resolve_base_color(
+    source: &TextureSource,
+    materials: &[crate::asset_io::MeshMaterialInfo],
+) -> LayerBaseColor {
+    use crate::types::{checkerboard_warning_texture, pixels_to_colors};
+
+    match source {
+        TextureSource::None => LayerBaseColor::solid(Color::rgb(0.5, 0.5, 0.5)),
+        TextureSource::Solid(rgb) => LayerBaseColor::solid(Color::rgb(rgb[0], rgb[1], rgb[2])),
+        TextureSource::MeshMaterial(idx) => {
+            if let Some(mat) = materials.get(*idx) {
+                if let Some(ref tex) = mat.base_color_texture {
+                    let colors = pixels_to_colors(&tex.pixels);
+                    LayerBaseColor {
+                        solid_color: Color::from(mat.base_color_factor),
+                        texture: Some(colors),
+                        tex_width: tex.width,
+                        tex_height: tex.height,
+                    }
+                } else {
+                    let f = mat.base_color_factor;
+                    LayerBaseColor::solid(Color::rgb(f[0], f[1], f[2]))
+                }
+            } else {
+                LayerBaseColor::solid(Color::rgb(0.5, 0.5, 0.5))
+            }
+        }
+        TextureSource::File(Some(tex)) => {
+            if tex.pixels.is_empty() {
+                LayerBaseColor::solid(Color::rgb(0.5, 0.5, 0.5))
+            } else {
+                let colors = pixels_to_colors(&tex.pixels);
+                LayerBaseColor {
+                    solid_color: Color::rgb(0.5, 0.5, 0.5),
+                    texture: Some(colors),
+                    tex_width: tex.width,
+                    tex_height: tex.height,
+                }
+            }
+        }
+        TextureSource::File(None) => {
+            let cb = checkerboard_warning_texture();
+            let colors = pixels_to_colors(&cb.pixels);
+            LayerBaseColor {
+                solid_color: Color::rgb(1.0, 0.0, 1.0),
+                texture: Some(colors),
+                tex_width: cb.width,
+                tex_height: cb.height,
+            }
+        }
+    }
+}
+
+/// Resolve a [`TextureSource`] into owned base normal data for UDN blending.
+pub fn resolve_base_normal(
+    source: &TextureSource,
+    materials: &[crate::asset_io::MeshMaterialInfo],
+) -> LayerBaseNormal {
+    match source {
+        TextureSource::None | TextureSource::Solid(_) => LayerBaseNormal::none(),
+        TextureSource::MeshMaterial(idx) => {
+            if let Some(mat) = materials.get(*idx) {
+                if let Some(ref tex) = mat.normal_texture {
+                    LayerBaseNormal {
+                        pixels: Some(tex.pixels.clone()),
+                        width: tex.width,
+                        height: tex.height,
+                    }
+                } else {
+                    LayerBaseNormal::none()
+                }
+            } else {
+                LayerBaseNormal::none()
+            }
+        }
+        TextureSource::File(Some(tex)) => {
+            if tex.pixels.is_empty() {
+                LayerBaseNormal::none()
+            } else {
+                LayerBaseNormal {
+                    pixels: Some(tex.pixels.as_ref().clone()),
+                    width: tex.width,
+                    height: tex.height,
+                }
+            }
+        }
+        TextureSource::File(None) => LayerBaseNormal::none(),
+    }
+}
+
+/// Fill a region of the color map with a per-layer base color.
+///
+/// When `mask` is `None`, fills the entire map.
+/// Only call in [`BackgroundMode::Opaque`] — in Transparent mode the canvas stays clear.
+pub fn fill_base_color_region(
+    global: &mut GlobalMaps,
+    base_color: &BaseColorSource,
+    mask: Option<&UvMask>,
+) {
+    let res = global.resolution;
+    let res_f = res as f32;
+    for py in 0..res {
+        for px in 0..res {
+            if let Some(m) = mask {
+                let uv = Vec2::new((px as f32 + 0.5) / res_f, (py as f32 + 0.5) / res_f);
+                if !m.sample(uv) {
+                    continue;
+                }
+            }
+            let idx = (py * res + px) as usize;
+            global.color[idx] = if let Some(tex) = base_color.texture {
+                let uv = Vec2::new((px as f32 + 0.5) / res_f, (py as f32 + 0.5) / res_f);
+                sample_bilinear(tex, base_color.tex_width, base_color.tex_height, uv)
+            } else {
+                base_color.solid_color
+            };
         }
     }
 }
@@ -288,7 +412,7 @@ pub fn composite_stroke(
 /// across layers using rayon.
 pub fn generate_all_paths(
     layers: &[PaintLayer],
-    base_color: &BaseColorSource,
+    base_colors: &[LayerBaseColor],
     normal_data: Option<&MeshNormalData>,
     masks: &[Option<&UvMask>],
 ) -> Vec<Vec<StrokePath>> {
@@ -298,10 +422,14 @@ pub fn generate_all_paths(
     let mut all_paths: Vec<Vec<StrokePath>> = sorted
         .par_iter()
         .map(|&(layer_index, layer)| {
-            let tex_ref = base_color.texture.map(|data| ColorTextureRef {
+            let base = base_colors
+                .get(layer_index)
+                .map(|bc| bc.as_source())
+                .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+            let tex_ref = base.texture.map(|data| ColorTextureRef {
                 data,
-                width: base_color.tex_width,
-                height: base_color.tex_height,
+                width: base.tex_width,
+                height: base.tex_height,
             });
             let mask = masks.get(layer_index).and_then(|m| *m);
             generate_paths(
@@ -337,7 +465,7 @@ fn assign_unique_stroke_ids(all_paths: &mut [Vec<StrokePath>]) {
 pub fn composite_all(
     layers: &[PaintLayer],
     resolution: u32,
-    base_color: &BaseColorSource,
+    base_colors: &[LayerBaseColor],
     settings: &OutputSettings,
     normal_data: Option<&MeshNormalData>,
     masks: &[Option<&UvMask>],
@@ -345,7 +473,7 @@ pub fn composite_all(
     composite_all_with_paths(
         layers,
         resolution,
-        base_color,
+        base_colors,
         settings,
         None,
         normal_data,
@@ -362,15 +490,17 @@ pub fn composite_all(
 pub fn composite_all_with_paths(
     layers: &[PaintLayer],
     resolution: u32,
-    base_color: &BaseColorSource,
+    base_colors: &[LayerBaseColor],
     settings: &OutputSettings,
     cached_paths: Option<&[Vec<StrokePath>]>,
     normal_data: Option<&MeshNormalData>,
     masks: &[Option<&UvMask>],
 ) -> GlobalMaps {
+    // Initialize with neutral gray; per-layer base colors are painted into regions below.
+    let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
     let mut global = GlobalMaps::new(
         resolution,
-        base_color,
+        &default_base,
         settings.normal_mode,
         settings.background_mode,
     );
@@ -378,6 +508,17 @@ pub fn composite_all_with_paths(
     // Sort layers by order (ascending), preserving original index for stroke ID encoding
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
+
+    // Fill per-layer base color into each layer's mask region (in compositing order).
+    if settings.background_mode != BackgroundMode::Transparent {
+        for &(layer_index, _) in &sorted {
+            if let Some(bc) = base_colors.get(layer_index) {
+                let src = bc.as_source();
+                let mask = masks.get(layer_index).and_then(|m| *m);
+                fill_base_color_region(&mut global, &src, mask);
+            }
+        }
+    }
 
     // Phase A: Generate paths (parallel across layers when not cached)
     let mut generated;
@@ -387,10 +528,14 @@ pub fn composite_all_with_paths(
         generated = sorted
             .par_iter()
             .map(|&(layer_index, layer)| {
-                let tex_ref = base_color.texture.map(|data| ColorTextureRef {
+                let base = base_colors
+                    .get(layer_index)
+                    .map(|bc| bc.as_source())
+                    .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+                let tex_ref = base.texture.map(|data| ColorTextureRef {
                     data,
-                    width: base_color.tex_width,
-                    height: base_color.tex_height,
+                    width: base.tex_width,
+                    height: base.tex_height,
                 });
                 let mask = masks.get(layer_index).and_then(|m| *m);
                 generate_paths(
@@ -407,15 +552,18 @@ pub fn composite_all_with_paths(
     };
 
     // Phase B: Composite sequentially (preserves deterministic blending order)
-    for (sorted_idx, &(_, layer)) in sorted.iter().enumerate() {
-        let layer_index = sorted[sorted_idx].0;
+    for (sorted_idx, &(layer_index, layer)) in sorted.iter().enumerate() {
+        let base = base_colors
+            .get(layer_index)
+            .map(|bc| bc.as_source())
+            .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
         let mask = masks.get(layer_index).and_then(|m| *m);
         composite_layer(
             layer,
             layer_index as u32,
             &mut global,
             settings,
-            base_color,
+            &base,
             Some(&all_paths[sorted_idx]),
             normal_data,
             mask,
@@ -553,7 +701,7 @@ pub fn composite_layer(
 mod tests {
     use super::*;
     use crate::test_util::make_layer_with_order;
-    use crate::types::{BaseColorSource, NormalMode};
+    use crate::types::{BaseColorSource, LayerBaseColor, NormalMode};
 
     const EPS: f32 = 1e-4;
 
@@ -949,7 +1097,7 @@ mod tests {
         let maps = composite_all(
             &[layer],
             128,
-            &BaseColorSource::solid(Color::rgb(0.8, 0.6, 0.4)),
+            &[LayerBaseColor::solid(Color::rgb(0.8, 0.6, 0.4))],
             &settings,
             None,
             &[],
@@ -968,10 +1116,11 @@ mod tests {
         let settings = OutputSettings::default();
         let solid = Color::rgb(0.5, 0.5, 0.5);
 
+        let base = [LayerBaseColor::solid(solid)];
         let maps1 = composite_all(
             std::slice::from_ref(&layer),
             64,
-            &BaseColorSource::solid(solid),
+            &base,
             &settings,
             None,
             &[],
@@ -979,7 +1128,7 @@ mod tests {
         let maps2 = composite_all(
             &[layer],
             64,
-            &BaseColorSource::solid(solid),
+            &base,
             &settings,
             None,
             &[],
@@ -1003,7 +1152,7 @@ mod tests {
         let maps = composite_all(
             &[layer],
             256,
-            &BaseColorSource::solid(solid),
+            &[LayerBaseColor::solid(solid)],
             &settings,
             None,
             &[],
@@ -1112,7 +1261,12 @@ mod tests {
         let maps = composite_all(
             &[layer],
             256,
-            &BaseColorSource::textured(&tex, 4, 4, Color::WHITE),
+            &[LayerBaseColor {
+                solid_color: Color::WHITE,
+                texture: Some(tex),
+                tex_width: 4,
+                tex_height: 4,
+            }],
             &settings,
             None,
             &[],

@@ -2,11 +2,13 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use practical_arcana_painter::asset_io::load_mesh;
-use practical_arcana_painter::compositing::{composite_all_with_paths, generate_all_paths};
+use practical_arcana_painter::compositing::{
+    composite_all_with_paths, generate_all_paths, resolve_base_color,
+};
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::output::{export_all, ExportFormat};
 use practical_arcana_painter::project::load_project;
-use practical_arcana_painter::types::{BaseColorSource, Color, NormalMode};
+use practical_arcana_painter::types::NormalMode;
 use practical_arcana_painter::uv_mask::UvMask;
 
 fn usage() -> ! {
@@ -91,10 +93,6 @@ fn main() {
     eprintln!("Resolution: {resolution}px");
     eprintln!("Layers: {}", project.layers.len());
 
-    // Placeholder: solid gray base color (per-layer base will be used in Commit 3).
-    let solid_color = Color::rgb(0.5, 0.5, 0.5);
-    let base_color = BaseColorSource::solid(solid_color);
-
     // Load mesh and compute normal data / build masks
     let mesh_file = resolve_asset_path(&project_path, &project.mesh_ref.path);
     let loaded_mesh = match load_mesh(&mesh_file) {
@@ -134,17 +132,29 @@ fn main() {
     // Convert slots to paint layers for pipeline
     let layers = project.paint_layers();
 
+    // Resolve per-layer base color and normal from TextureSource.
+    let materials: &[_] = loaded_mesh
+        .as_ref()
+        .map(|m| m.materials.as_slice())
+        .unwrap_or(&[]);
+    let visible_layers: Vec<_> = project.layers.iter().filter(|l| l.visible).collect();
+    let layer_base_colors: Vec<_> = visible_layers
+        .iter()
+        .map(|l| resolve_base_color(&l.base_color, materials))
+        .collect();
+
     // Generate (with path cache)
     eprintln!("Generating...");
     if project.cached_paths_if_valid().is_none() {
-        let paths = generate_all_paths(&layers, &base_color, normal_data.as_ref(), &mask_refs);
+        let paths =
+            generate_all_paths(&layers, &layer_base_colors, normal_data.as_ref(), &mask_refs);
         project.set_cached_paths(paths);
     }
 
     let global = composite_all_with_paths(
         &layers,
         resolution,
-        &base_color,
+        &layer_base_colors,
         &project.settings,
         project.cached_paths.as_deref(),
         normal_data.as_ref(),

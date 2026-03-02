@@ -746,7 +746,7 @@ mod tests {
             export_normal_png, generate_normal_map, generate_normal_map_depicted_form,
         };
         use crate::types::{
-            BaseColorSource, Guide, NormalMode, OutputSettings, PaintLayer, StrokeParams,
+            Guide, LayerBaseColor, NormalMode, OutputSettings, PaintLayer, StrokeParams,
         };
 
         let fixtures = crate::test_fixtures_dir();
@@ -779,7 +779,7 @@ mod tests {
         let maps = composite_all(
             std::slice::from_ref(&layer),
             res,
-            &BaseColorSource::solid(solid),
+            &[LayerBaseColor::solid(solid)],
             &settings,
             Some(&nd),
             &[],
@@ -951,7 +951,7 @@ mod tests {
             export_normal_png, generate_normal_map_depicted_form, normalize_height_map,
         };
         use crate::types::{
-            BaseColorSource, Guide, NormalMode, OutputSettings, PaintLayer, StrokeParams,
+            Guide, LayerBaseColor, NormalMode, OutputSettings, PaintLayer, StrokeParams,
         };
 
         let fixtures = crate::test_fixtures_dir();
@@ -987,11 +987,11 @@ mod tests {
         };
         let solid = crate::types::Color::rgb(0.5, 0.4, 0.3);
 
-        let base_color = BaseColorSource::solid(solid);
+        let base_colors = vec![LayerBaseColor::solid(solid)];
         let maps_off = composite_all(
             std::slice::from_ref(&base_layer),
             res,
-            &base_color,
+            &base_colors,
             &settings,
             Some(&nd),
             &[],
@@ -999,7 +999,7 @@ mod tests {
         let maps_on = composite_all(
             std::slice::from_ref(&layer_on),
             res,
-            &base_color,
+            &base_colors,
             &settings,
             Some(&nd),
             &[],
