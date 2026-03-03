@@ -1,8 +1,12 @@
+use std::sync::Arc;
+
 use eframe::egui;
 
+use practical_arcana_painter::asset_io;
 use practical_arcana_painter::pressure::{evaluate_pressure, preset_to_custom};
 use practical_arcana_painter::types::{
-    CurveKnot, PaintPreset, PaintValues, PresetLibrary, PressureCurve,
+    CurveKnot, EmbeddedTexture, PaintPreset, PaintValues, PresetLibrary, PressureCurve,
+    TextureSource,
 };
 
 use super::preview::StrokePreviewCache;
@@ -54,6 +58,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     });
             });
         }
+
+        // Color source picker
+        show_color_source(ui, state, idx);
+
+        // Normal source picker
+        show_normal_source(ui, state, idx);
     });
 
     ui.separator();
@@ -842,5 +852,403 @@ fn draw_curve_knots_and_handles(
             ui.colored_label(hint_color, " / Right-click");
             ui.colored_label(egui::Color32::from_gray(150), "remove");
         });
+    }
+}
+
+// ── Texture Source Picker ───────────────────────────────────────
+
+/// Which mode a source picker button represents.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SourceMode {
+    Mesh,
+    File,
+    SolidOrNone, // Solid for color, None for normal
+}
+
+/// Draw a radio-style icon button. Returns true if clicked.
+fn source_button(
+    ui: &mut egui::Ui,
+    icon: &str,
+    tooltip: &str,
+    selected: bool,
+    enabled: bool,
+) -> bool {
+    let size = egui::Vec2::splat(20.0);
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if selected {
+            painter.rect_filled(rect, 3.0, ui.visuals().selection.bg_fill);
+        } else if resp.hovered() && enabled {
+            painter.rect_filled(rect, 3.0, ui.visuals().widgets.hovered.bg_fill);
+        }
+        let color = if !enabled {
+            ui.visuals()
+                .weak_text_color()
+                .gamma_multiply(super::widgets::DISABLED_OPACITY)
+        } else if selected {
+            ui.visuals().selection.stroke.color
+        } else {
+            ui.visuals().weak_text_color()
+        };
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            icon,
+            egui::FontId::proportional(13.0),
+            color,
+        );
+    }
+    let clicked = resp.clicked() && enabled;
+    resp.on_hover_text(tooltip);
+    clicked
+}
+
+/// Determine current SourceMode from a TextureSource value.
+fn current_mode(src: &TextureSource, is_color: bool) -> SourceMode {
+    match src {
+        TextureSource::MeshMaterial(_) => SourceMode::Mesh,
+        TextureSource::File(_) => SourceMode::File,
+        TextureSource::Solid(_) => SourceMode::SolidOrNone,
+        TextureSource::None => {
+            if is_color {
+                SourceMode::SolidOrNone
+            } else {
+                SourceMode::SolidOrNone
+            }
+        }
+    }
+}
+
+/// Color source picker: [Mesh][File][Solid] + context UI.
+fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
+    let has_color_textures = state
+        .loaded_mesh
+        .as_ref()
+        .is_some_and(|m| m.materials.iter().any(|mat| mat.base_color_texture.is_some()));
+
+    let mode = current_mode(&state.project.layers[layer_idx].base_color, true);
+
+    ui.horizontal(|ui: &mut egui::Ui| {
+        ui.label("Color");
+        ui.spacing_mut().item_spacing.x = 1.0;
+
+        // Mesh button
+        if source_button(
+            ui,
+            "\u{2b1a}", // ⬚
+            "Use mesh texture",
+            mode == SourceMode::Mesh,
+            has_color_textures,
+        ) {
+            state.project.layers[layer_idx].base_color = TextureSource::MeshMaterial(0);
+        }
+
+        // File button
+        if source_button(
+            ui,
+            "\u{1f4c2}", // 📂
+            "Load from file",
+            mode == SourceMode::File,
+            true,
+        ) {
+            if !matches!(
+                state.project.layers[layer_idx].base_color,
+                TextureSource::File(_)
+            ) {
+                state.project.layers[layer_idx].base_color = TextureSource::File(None);
+            }
+        }
+
+        // Solid button
+        if source_button(
+            ui,
+            "\u{1f3a8}", // 🎨
+            "Solid color",
+            mode == SourceMode::SolidOrNone,
+            true,
+        ) {
+            if !matches!(
+                state.project.layers[layer_idx].base_color,
+                TextureSource::Solid(_) | TextureSource::None
+            ) {
+                state.project.layers[layer_idx].base_color =
+                    TextureSource::Solid([0.5, 0.5, 0.5]);
+            }
+        }
+
+        ui.spacing_mut().item_spacing.x = 4.0;
+
+        // Context UI based on current mode
+        let mesh_ref = &state.loaded_mesh;
+        match &mut state.project.layers[layer_idx].base_color {
+            TextureSource::MeshMaterial(ref mut mat_idx) => {
+                show_material_combo(ui, mesh_ref, mat_idx, "color_mat_combo", true);
+            }
+            TextureSource::File(ref tex) => {
+                show_file_label(ui, tex);
+            }
+            TextureSource::Solid(ref mut rgb) => {
+                let mut color = egui::Color32::from_rgb(
+                    (rgb[0] * 255.0) as u8,
+                    (rgb[1] * 255.0) as u8,
+                    (rgb[2] * 255.0) as u8,
+                );
+                if ui.color_edit_button_srgba(&mut color).changed() {
+                    rgb[0] = color.r() as f32 / 255.0;
+                    rgb[1] = color.g() as f32 / 255.0;
+                    rgb[2] = color.b() as f32 / 255.0;
+                }
+            }
+            TextureSource::None => {
+                // Shouldn't happen for color — treat as solid gray
+                state.project.layers[layer_idx].base_color =
+                    TextureSource::Solid([0.5, 0.5, 0.5]);
+            }
+        }
+    });
+
+    // File open/replace/clear buttons on separate row when in File mode
+    if matches!(
+        state.project.layers[layer_idx].base_color,
+        TextureSource::File(_)
+    ) {
+        show_file_buttons(ui, &mut state.project.layers[layer_idx].base_color, "color");
+    }
+}
+
+/// Normal source picker: [Mesh][File][∅ None] + context UI.
+fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
+    let has_normal_textures = state
+        .loaded_mesh
+        .as_ref()
+        .is_some_and(|m| m.materials.iter().any(|mat| mat.normal_texture.is_some()));
+
+    let mode = current_mode(&state.project.layers[layer_idx].base_normal, false);
+
+    ui.horizontal(|ui: &mut egui::Ui| {
+        ui.label("Normal");
+        ui.spacing_mut().item_spacing.x = 1.0;
+
+        // Mesh button
+        if source_button(
+            ui,
+            "\u{2b1a}", // ⬚
+            "Use mesh normal map",
+            mode == SourceMode::Mesh,
+            has_normal_textures,
+        ) {
+            state.project.layers[layer_idx].base_normal = TextureSource::MeshMaterial(0);
+        }
+
+        // File button
+        if source_button(
+            ui,
+            "\u{1f4c2}", // 📂
+            "Load from file",
+            mode == SourceMode::File,
+            true,
+        ) {
+            if !matches!(
+                state.project.layers[layer_idx].base_normal,
+                TextureSource::File(_)
+            ) {
+                state.project.layers[layer_idx].base_normal = TextureSource::File(None);
+            }
+        }
+
+        // None button
+        if source_button(
+            ui,
+            "\u{2205}", // ∅
+            "No normal map",
+            mode == SourceMode::SolidOrNone,
+            true,
+        ) {
+            state.project.layers[layer_idx].base_normal = TextureSource::None;
+        }
+
+        ui.spacing_mut().item_spacing.x = 4.0;
+
+        // Context UI based on current mode
+        let mesh_ref = &state.loaded_mesh;
+        match &mut state.project.layers[layer_idx].base_normal {
+            TextureSource::MeshMaterial(ref mut mat_idx) => {
+                show_material_combo(ui, mesh_ref, mat_idx, "normal_mat_combo", false);
+            }
+            TextureSource::File(ref tex) => {
+                show_file_label(ui, tex);
+            }
+            TextureSource::None | TextureSource::Solid(_) => {
+                let weak = ui.visuals().weak_text_color();
+                ui.colored_label(weak, "(none)");
+            }
+        }
+    });
+
+    // File open/replace/clear buttons on separate row when in File mode
+    if matches!(
+        state.project.layers[layer_idx].base_normal,
+        TextureSource::File(_)
+    ) {
+        show_file_buttons(
+            ui,
+            &mut state.project.layers[layer_idx].base_normal,
+            "normal",
+        );
+    }
+}
+
+/// Material texture dropdown (ComboBox).
+fn show_material_combo(
+    ui: &mut egui::Ui,
+    loaded_mesh: &Option<Arc<practical_arcana_painter::asset_io::LoadedMesh>>,
+    mat_idx: &mut usize,
+    id_salt: &str,
+    is_color: bool,
+) {
+    let materials = loaded_mesh
+        .as_ref()
+        .map(|m| &m.materials[..])
+        .unwrap_or(&[]);
+
+    if materials.is_empty() {
+        let weak = ui.visuals().weak_text_color();
+        ui.colored_label(weak, "(no materials)");
+        return;
+    }
+
+    // Build display names
+    let names: Vec<String> = materials
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| {
+            if is_color {
+                m.base_color_texture.is_some()
+            } else {
+                m.normal_texture.is_some()
+            }
+        })
+        .map(|(i, m)| {
+            if m.name.is_empty() {
+                format!("Material {}", i)
+            } else {
+                m.name.clone()
+            }
+        })
+        .collect();
+
+    let valid_indices: Vec<usize> = materials
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| {
+            if is_color {
+                m.base_color_texture.is_some()
+            } else {
+                m.normal_texture.is_some()
+            }
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    if names.is_empty() {
+        let weak = ui.visuals().weak_text_color();
+        ui.colored_label(weak, "(no textures)");
+        return;
+    }
+
+    // Current selection text
+    let current_text = if *mat_idx < materials.len() {
+        let m = &materials[*mat_idx];
+        if m.name.is_empty() {
+            format!("Material {}", *mat_idx)
+        } else {
+            m.name.clone()
+        }
+    } else {
+        format!("Material {}", *mat_idx)
+    };
+
+    let combo_w = ui.available_width().min(140.0);
+    egui::ComboBox::from_id_salt(id_salt)
+        .selected_text(&current_text)
+        .width(combo_w)
+        .truncate()
+        .show_ui(ui, |ui: &mut egui::Ui| {
+            for (display_idx, &real_idx) in valid_indices.iter().enumerate() {
+                ui.selectable_value(mat_idx, real_idx, &names[display_idx]);
+            }
+        });
+}
+
+/// Show file label text (filename or "(no file)").
+fn show_file_label(ui: &mut egui::Ui, tex: &Option<EmbeddedTexture>) {
+    match tex {
+        Some(t) => {
+            let weak = ui.visuals().weak_text_color();
+            ui.colored_label(weak, &t.label);
+        }
+        None => {
+            let warn = egui::Color32::from_rgb(255, 180, 0);
+            ui.colored_label(warn, "(no file)");
+        }
+    }
+}
+
+/// File open/replace/clear buttons row.
+fn show_file_buttons(ui: &mut egui::Ui, source: &mut TextureSource, kind: &str) {
+    let has_file = matches!(source, TextureSource::File(Some(_)));
+
+    ui.horizontal(|ui: &mut egui::Ui| {
+        // Indent to align with context area
+        ui.add_space(52.0);
+
+        if has_file {
+            if ui.small_button("Replace").clicked() {
+                if let Some(tex) = pick_and_load_texture() {
+                    *source = TextureSource::File(Some(tex));
+                }
+            }
+            if ui.small_button("Clear").clicked() {
+                *source = TextureSource::File(None);
+            }
+        } else {
+            let label = if kind == "color" {
+                "Open image..."
+            } else {
+                "Open normal..."
+            };
+            if ui.small_button(label).clicked() {
+                if let Some(tex) = pick_and_load_texture() {
+                    *source = TextureSource::File(Some(tex));
+                }
+            }
+        }
+    });
+}
+
+/// Open a file dialog and load a texture, returning an EmbeddedTexture.
+fn pick_and_load_texture() -> Option<EmbeddedTexture> {
+    let path = rfd::FileDialog::new()
+        .add_filter("Image", &["png", "tga", "exr"])
+        .pick_file()?;
+
+    match asset_io::load_texture(&path) {
+        Ok(tex) => {
+            let label = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "texture".to_string());
+            Some(EmbeddedTexture {
+                label,
+                pixels: Arc::new(tex.pixels),
+                width: tex.width,
+                height: tex.height,
+            })
+        }
+        Err(e) => {
+            eprintln!("Failed to load texture: {e}");
+            None
+        }
     }
 }

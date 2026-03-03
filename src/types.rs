@@ -223,16 +223,20 @@ impl Default for TextureSource {
     }
 }
 
-/// Generate a procedural 8×8 magenta/black checkerboard texture.
+/// Generate a 256×256 magenta/black checkerboard warning texture (16px tiles).
 /// Used as a visual warning for `TextureSource::File(None)` (unassigned file slot).
+/// Higher resolution avoids bilinear-interpolation blur at tile edges.
 pub fn checkerboard_warning_texture() -> EmbeddedTexture {
-    let size = 8u32;
+    let size = 256u32;
+    let tile = 16u32;
     let mut pixels = Vec::with_capacity((size * size) as usize);
     let magenta = [1.0, 0.0, 1.0, 1.0];
-    let black = [0.0, 0.0, 0.0, 1.0];
+    let black = [0.15, 0.15, 0.15, 1.0];
     for y in 0..size {
         for x in 0..size {
-            pixels.push(if (x + y) % 2 == 0 { magenta } else { black });
+            let tx = x / tile;
+            let ty = y / tile;
+            pixels.push(if (tx + ty) % 2 == 0 { magenta } else { black });
         }
     }
     EmbeddedTexture {
@@ -1113,9 +1117,13 @@ mod tests {
     #[test]
     fn checkerboard_dimensions() {
         let cb = checkerboard_warning_texture();
-        assert_eq!(cb.width, 8);
-        assert_eq!(cb.height, 8);
-        assert_eq!(cb.pixels.len(), 64);
+        assert_eq!(cb.width, 256);
+        assert_eq!(cb.height, 256);
+        assert_eq!(cb.pixels.len(), 256 * 256);
+        // First tile (0,0) should be magenta
+        assert_eq!(cb.pixels[0], [1.0, 0.0, 1.0, 1.0]);
+        // Adjacent tile (16,0) should be dark gray
+        assert_eq!(cb.pixels[16], [0.15, 0.15, 0.15, 1.0]);
     }
 
     #[test]
