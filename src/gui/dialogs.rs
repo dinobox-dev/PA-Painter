@@ -337,7 +337,7 @@ pub fn reload_mesh(state: &mut AppState) {
 }
 
 /// Open a file dialog to pick a new mesh file, replacing the current one.
-/// Reuses the reload_mesh diff/summary logic.
+/// Loads the mesh first; only updates state on success.
 pub fn replace_mesh(state: &mut AppState) {
     let path = rfd::FileDialog::new()
         .add_filter("3D Mesh", &["glb", "gltf", "obj"])
@@ -348,15 +348,112 @@ pub fn replace_mesh(state: &mut AppState) {
         return;
     };
 
-    // Update mesh path, format, and bytes; then delegate to reload_mesh logic
-    state.project.mesh_ref.path = path.to_string_lossy().to_string();
-    state.project.mesh_ref.format = path
-        .extension()
-        .map(|e| e.to_string_lossy().to_string())
-        .unwrap_or_default();
-    state.project.mesh_bytes = std::fs::read(&path).ok();
-    reload_mesh(state);
-    state.status_message = format!("Mesh replaced: {}", path.display());
+    // Try loading the mesh first — only update state if it succeeds.
+    match apply_mesh(state, &path) {
+        Ok(_) => {
+            state.undo.clear();
+
+            state.project.mesh_ref.path = path.to_string_lossy().to_string();
+            state.project.mesh_ref.format = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_default();
+            state.project.mesh_bytes = std::fs::read(&path).ok();
+
+            // Determine new group names from replaced mesh
+            let new_groups: Vec<String> = state
+                .loaded_mesh
+                .as_ref()
+                .map(|m| m.groups.iter().map(|g| g.name.clone()).collect())
+                .unwrap_or_default();
+            let new_set: std::collections::HashSet<&str> =
+                new_groups.iter().map(|s| s.as_str()).collect();
+
+            // Check if new mesh has materials
+            let has_materials = state
+                .loaded_mesh
+                .as_ref()
+                .is_some_and(|m| !m.materials.is_empty());
+
+            let mut added = Vec::new();
+            let mut orphaned = Vec::new();
+            let mut kept = Vec::new();
+
+            // Collect existing non-__all__ group names
+            let old_groups: Vec<String> = state
+                .project
+                .layers
+                .iter()
+                .map(|l| l.group_name.clone())
+                .filter(|g| g != "__all__")
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+            let old_set: std::collections::HashSet<&str> =
+                old_groups.iter().map(|s| s.as_str()).collect();
+
+            for g in &old_groups {
+                if new_set.contains(g.as_str()) {
+                    kept.push(g.clone());
+                } else {
+                    orphaned.push(g.clone());
+                }
+            }
+            for g in &new_groups {
+                if !old_set.contains(g.as_str()) {
+                    added.push(g.clone());
+                }
+            }
+
+            // Add layers for new groups
+            for name in &added {
+                let order = state.project.layers.len() as i32;
+                state.project.layers.push(Layer {
+                    name: name.clone(),
+                    visible: true,
+                    group_name: name.clone(),
+                    order,
+                    paint: PaintValues::default(),
+                    guides: vec![],
+                    base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+                    base_normal: TextureSource::None,
+                });
+            }
+
+            // Remap orphaned layers to "__all__"
+            let orphan_set: std::collections::HashSet<&str> =
+                orphaned.iter().map(|s| s.as_str()).collect();
+            for layer in &mut state.project.layers {
+                if orphan_set.contains(layer.group_name.as_str()) {
+                    layer.group_name = "__all__".to_string();
+                }
+                // Reset MeshMaterial refs when new mesh has no materials (e.g. OBJ)
+                if !has_materials {
+                    if let TextureSource::MeshMaterial(_) = layer.base_color {
+                        layer.base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
+                    }
+                    if let TextureSource::MeshMaterial(_) = layer.base_normal {
+                        layer.base_normal = TextureSource::None;
+                    }
+                }
+            }
+
+            state.dirty = true;
+
+            if !added.is_empty() || !orphaned.is_empty() {
+                state.reload_summary = Some(ReloadSummary {
+                    kept,
+                    added,
+                    orphaned,
+                });
+            }
+
+            state.status_message = format!("Mesh replaced: {}", path.display());
+        }
+        Err(e) => {
+            state.status_message = e;
+        }
+    }
 }
 
 /// Save the project to its current path, or show a Save As dialog.

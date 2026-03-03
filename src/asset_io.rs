@@ -138,14 +138,18 @@ fn obj_load_options() -> tobj::LoadOptions {
 }
 
 fn load_obj(path: &Path) -> Result<LoadedMesh, MeshError> {
-    let (models, _) =
-        tobj::load_obj(path, &obj_load_options()).map_err(|e| MeshError::ParseError(e.to_string()))?;
-    build_mesh_from_obj(&models)
+    let raw = std::fs::read(path)
+        .map_err(|e| MeshError::ParseError(format!("Failed to open: {e}")))?;
+    load_obj_from_bytes(&raw)
 }
 
 fn load_obj_from_bytes(bytes: &[u8]) -> Result<LoadedMesh, MeshError> {
+    // OBJ files from some exporters (e.g. 3ds Max) may contain non-UTF-8
+    // comments (EUC-KR, Shift-JIS, etc.). tobj uses BufRead::lines() which
+    // requires valid UTF-8, so we sanitise first with lossy conversion.
+    let text = String::from_utf8_lossy(bytes);
     let (models, _) = tobj::load_obj_buf(
-        &mut Cursor::new(bytes),
+        &mut Cursor::new(text.as_bytes()),
         &obj_load_options(),
         |_| Ok((vec![], Default::default())),
     )
@@ -768,6 +772,18 @@ f 1 2 3
         let path = write_temp_file("nouv.obj", obj);
         let result = load_mesh(&path);
         assert!(matches!(result, Err(MeshError::NoUvChannel)));
+    }
+
+    #[test]
+    fn load_obj_non_utf8_comment() {
+        // Simulate EUC-KR encoded comment (common in 3ds Max exports)
+        let obj: &[u8] = b"# \xc7\xd1\xb1\xdb \xc5\xd7\xbd\xba\xc6\xae\n\
+            v 0.0 0.0 0.0\nv 1.0 0.0 0.0\nv 0.0 1.0 0.0\n\
+            vt 0.0 0.0\nvt 1.0 0.0\nvt 0.0 1.0\n\
+            f 1/1 2/2 3/3\n";
+        let mesh = load_obj_from_bytes(obj).unwrap();
+        assert_eq!(mesh.positions.len(), 3);
+        assert_eq!(mesh.indices.len(), 3);
     }
 
     #[test]

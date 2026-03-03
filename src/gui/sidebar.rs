@@ -156,9 +156,8 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
         };
 
         // ── Mesh row ──
-        let mesh_text = if let Some(ref mesh) = state.loaded_mesh {
-            let name = short_filename(&state.project.mesh_ref.path);
-            format!("{} ({} grp)", name, mesh.groups.len())
+        let mesh_text = if state.loaded_mesh.is_some() {
+            short_filename(&state.project.mesh_ref.path).to_string()
         } else {
             "(none)".to_string()
         };
@@ -181,6 +180,48 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
         }
         if open {
             state.pending_replace_mesh = true;
+        }
+
+        // ── Mesh info (read-only) ──
+        if let Some(ref mesh) = state.loaded_mesh {
+            let info_color = ui.visuals().weak_text_color();
+            let info_font = egui::FontId::proportional(11.0);
+            let info_label_w = 64.0;
+
+            let info_row = |ui: &mut egui::Ui, label: &str, value: &str| {
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::Vec2::new(row_w, 14.0),
+                    egui::Sense::hover(),
+                );
+                if ui.is_rect_visible(rect) {
+                    let p = ui.painter();
+                    p.text(
+                        egui::Pos2::new(rect.min.x, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        label,
+                        info_font.clone(),
+                        info_color,
+                    );
+                    p.text(
+                        egui::Pos2::new(rect.min.x + info_label_w, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        value,
+                        info_font.clone(),
+                        info_color,
+                    );
+                }
+            };
+
+            info_row(ui, "Vertices", &fmt_thousands(mesh.positions.len()));
+            info_row(ui, "Triangles", &fmt_thousands(mesh.indices.len() / 3));
+            info_row(ui, "Groups", &mesh.groups.len().to_string());
+
+            let n_textures = mesh.materials.iter().filter(|m| m.base_color_texture.is_some()).count();
+            let n_normals = mesh.materials.iter().filter(|m| m.normal_texture.is_some()).count();
+            if n_textures > 0 || n_normals > 0 {
+                info_row(ui, "Textures", &n_textures.to_string());
+                info_row(ui, "Normals", &n_normals.to_string());
+            }
         }
     });
 
@@ -653,6 +694,19 @@ fn seed_to_alpha(mut seed: u32) -> String {
 
 fn short_filename(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+/// Format a number with thousands separators (e.g. 12450 → "12,450").
+fn fmt_thousands(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result
 }
 
 const LAYER_ICON_SIZE: f32 = 18.0;
