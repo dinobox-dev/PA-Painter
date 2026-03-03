@@ -3,6 +3,7 @@
 
 use glam::{Vec2, Vec3};
 use std::collections::HashSet;
+use std::io::Cursor;
 use std::path::Path;
 
 use crate::types::MeshGroup;
@@ -119,22 +120,46 @@ pub fn load_mesh(path: &Path) -> Result<LoadedMesh, MeshError> {
     }
 }
 
-fn load_obj(path: &Path) -> Result<LoadedMesh, MeshError> {
-    let load_options = tobj::LoadOptions {
+/// Load a mesh from raw bytes. `format` should be `"obj"`, `"gltf"`, or `"glb"`.
+pub fn load_mesh_from_bytes(bytes: &[u8], format: &str) -> Result<LoadedMesh, MeshError> {
+    match format {
+        "obj" => load_obj_from_bytes(bytes),
+        "gltf" | "glb" => load_gltf_from_bytes(bytes),
+        other => Err(MeshError::UnsupportedFormat(other.to_string())),
+    }
+}
+
+fn obj_load_options() -> tobj::LoadOptions {
+    tobj::LoadOptions {
         triangulate: false, // We handle triangulation ourselves for shorter-diagonal split
         single_index: true,
         ..Default::default()
-    };
+    }
+}
 
+fn load_obj(path: &Path) -> Result<LoadedMesh, MeshError> {
     let (models, _) =
-        tobj::load_obj(path, &load_options).map_err(|e| MeshError::ParseError(e.to_string()))?;
+        tobj::load_obj(path, &obj_load_options()).map_err(|e| MeshError::ParseError(e.to_string()))?;
+    build_mesh_from_obj(&models)
+}
 
+fn load_obj_from_bytes(bytes: &[u8]) -> Result<LoadedMesh, MeshError> {
+    let (models, _) = tobj::load_obj_buf(
+        &mut Cursor::new(bytes),
+        &obj_load_options(),
+        |_| Ok((vec![], Default::default())),
+    )
+    .map_err(|e| MeshError::ParseError(e.to_string()))?;
+    build_mesh_from_obj(&models)
+}
+
+fn build_mesh_from_obj(models: &[tobj::Model]) -> Result<LoadedMesh, MeshError> {
     let mut positions = Vec::new();
     let mut uvs = Vec::new();
     let mut indices = Vec::new();
     let mut groups = Vec::new();
 
-    for model in &models {
+    for model in models {
         let mesh = &model.mesh;
 
         if mesh.texcoords.is_empty() {
@@ -317,7 +342,20 @@ fn gltf_image_to_texture_linear(data: &gltf::image::Data) -> LoadedTexture {
 fn load_gltf(path: &Path) -> Result<LoadedMesh, MeshError> {
     let (document, buffers, images) =
         gltf::import(path).map_err(|e| MeshError::ParseError(e.to_string()))?;
+    build_mesh_from_gltf(document, buffers, images)
+}
 
+fn load_gltf_from_bytes(bytes: &[u8]) -> Result<LoadedMesh, MeshError> {
+    let (document, buffers, images) =
+        gltf::import_slice(bytes).map_err(|e| MeshError::ParseError(e.to_string()))?;
+    build_mesh_from_gltf(document, buffers, images)
+}
+
+fn build_mesh_from_gltf(
+    document: gltf::Document,
+    buffers: Vec<gltf::buffer::Data>,
+    images: Vec<gltf::image::Data>,
+) -> Result<LoadedMesh, MeshError> {
     let mut positions = Vec::new();
     let mut uvs = Vec::new();
     let mut indices = Vec::new();
@@ -515,6 +553,100 @@ pub fn extract_uv_edges(mesh: &LoadedMesh) -> Vec<(Vec2, Vec2)> {
     }
 
     edges
+}
+
+// ---------------------------------------------------------------------------
+// PNG encode/decode helpers (for .pap asset embedding)
+// ---------------------------------------------------------------------------
+
+/// Encode linear RGBA pixels as an sRGB PNG (for base color textures).
+pub fn encode_pixels_as_srgb_png(pixels: &[[f32; 4]], width: u32, height: u32) -> Option<Vec<u8>> {
+    let rgba: Vec<u8> = pixels
+        .iter()
+        .flat_map(|p| {
+            [
+                (linear_to_srgb(p[0].clamp(0.0, 1.0)) * 255.0).round() as u8,
+                (linear_to_srgb(p[1].clamp(0.0, 1.0)) * 255.0).round() as u8,
+                (linear_to_srgb(p[2].clamp(0.0, 1.0)) * 255.0).round() as u8,
+                (p[3].clamp(0.0, 1.0) * 255.0).round() as u8,
+            ]
+        })
+        .collect();
+    let mut png = Vec::new();
+    {
+        let encoder = image::codecs::png::PngEncoder::new(Cursor::new(&mut png));
+        use image::ImageEncoder;
+        encoder
+            .write_image(&rgba, width, height, image::ExtendedColorType::Rgba8)
+            .ok()?;
+    }
+    Some(png)
+}
+
+/// Decode an sRGB PNG back into linear RGBA float pixels.
+pub fn decode_srgb_png_bytes(bytes: &[u8]) -> Result<(Vec<[f32; 4]>, u32, u32), TextureError> {
+    let img = image::load_from_memory(bytes)
+        .map_err(|e| TextureError::DecodeError(e.to_string()))?
+        .to_rgba8();
+    let width = img.width();
+    let height = img.height();
+    let pixels = img
+        .pixels()
+        .map(|p| {
+            [
+                srgb_to_linear(p[0] as f32 / 255.0),
+                srgb_to_linear(p[1] as f32 / 255.0),
+                srgb_to_linear(p[2] as f32 / 255.0),
+                p[3] as f32 / 255.0,
+            ]
+        })
+        .collect();
+    Ok((pixels, width, height))
+}
+
+/// Encode linear RGBA pixels as a linear (no gamma) PNG (for normal map textures).
+pub fn encode_pixels_as_linear_png(pixels: &[[f32; 4]], width: u32, height: u32) -> Option<Vec<u8>> {
+    let rgba: Vec<u8> = pixels
+        .iter()
+        .flat_map(|p| {
+            [
+                (p[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (p[1].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (p[2].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (p[3].clamp(0.0, 1.0) * 255.0).round() as u8,
+            ]
+        })
+        .collect();
+    let mut png = Vec::new();
+    {
+        let encoder = image::codecs::png::PngEncoder::new(Cursor::new(&mut png));
+        use image::ImageEncoder;
+        encoder
+            .write_image(&rgba, width, height, image::ExtendedColorType::Rgba8)
+            .ok()?;
+    }
+    Some(png)
+}
+
+/// Decode a linear (no gamma) PNG into float RGBA pixels.
+pub fn decode_linear_png_bytes(bytes: &[u8]) -> Result<(Vec<[f32; 4]>, u32, u32), TextureError> {
+    let img = image::load_from_memory(bytes)
+        .map_err(|e| TextureError::DecodeError(e.to_string()))?
+        .to_rgba8();
+    let width = img.width();
+    let height = img.height();
+    let pixels = img
+        .pixels()
+        .map(|p| {
+            [
+                p[0] as f32 / 255.0,
+                p[1] as f32 / 255.0,
+                p[2] as f32 / 255.0,
+                p[3] as f32 / 255.0,
+            ]
+        })
+        .collect();
+    Ok((pixels, width, height))
 }
 
 // ---------------------------------------------------------------------------

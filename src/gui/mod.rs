@@ -97,9 +97,9 @@ impl PainterApp {
             cached_normals,
             layer_group_names,
         });
-        self.state.generation_snapshot = Some((
-            self.state.project.layers.clone(),
-            self.state.project.settings.clone(),
+        self.state.generation_snapshot = Some(state::generation_state_hash(
+            &self.state.project.layers,
+            &self.state.project.settings,
             self.state.mesh_hash,
         ));
     }
@@ -146,6 +146,7 @@ impl PainterApp {
         }
         self.state.status_message = format!("Generated in {:.1}s", result.elapsed.as_secs_f32());
         self.state.generated = Some(result);
+        self.state.dirty = true;
 
         // Chain: auto-export to pre-selected path if requested via Generate & Export
         if let Some(dir) = self.state.post_gen_export_maps.take() {

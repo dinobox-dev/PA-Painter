@@ -84,25 +84,31 @@ fn main() {
 
     // Load project
     eprintln!("Loading project: {}", project_path.display());
-    let mut project = load_project(&project_path).unwrap_or_else(|e| {
+    let load_result = load_project(&project_path).unwrap_or_else(|e| {
         eprintln!("Error loading project: {e:?}");
         process::exit(1);
     });
+    let mut project = load_result.project;
 
     let resolution = resolution_override.unwrap_or(project.settings.resolution_preset.resolution());
     eprintln!("Resolution: {resolution}px");
     eprintln!("Layers: {}", project.layers.len());
 
-    // Load mesh and compute normal data / build masks
-    let mesh_file = resolve_asset_path(&project_path, &project.mesh_ref.path);
-    let loaded_mesh = match load_mesh(&mesh_file) {
-        Ok(mesh) => {
-            eprintln!("Loaded mesh: {} groups", mesh.groups.len());
-            Some(mesh)
-        }
-        Err(e) => {
-            eprintln!("Warning: failed to load mesh: {e}");
-            None
+    // Load mesh: prefer embedded, fall back to file path
+    let loaded_mesh = if let Some(mesh) = load_result.mesh {
+        eprintln!("Loaded mesh: {} groups", mesh.groups.len());
+        Some(mesh)
+    } else {
+        let mesh_file = resolve_asset_path(&project_path, &project.mesh_ref.path);
+        match load_mesh(&mesh_file) {
+            Ok(mesh) => {
+                eprintln!("Loaded mesh: {} groups", mesh.groups.len());
+                Some(mesh)
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to load mesh: {e}");
+                None
+            }
         }
     };
 

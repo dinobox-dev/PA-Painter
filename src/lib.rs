@@ -18,7 +18,8 @@
 //! use std::path::Path;
 //! use practical_arcana_painter::project::load_project;
 //!
-//! let project = load_project(Path::new("scene.pap")).unwrap();
+//! let result = load_project(Path::new("scene.pap")).unwrap();
+//! let project = result.project;
 //! // … see the CLI binary (src/main.rs) for a full usage example.
 //! ```
 //!

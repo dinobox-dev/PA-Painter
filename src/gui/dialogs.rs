@@ -2,18 +2,20 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use practical_arcana_painter::asset_io::{extract_uv_edges, load_mesh};
+use practical_arcana_painter::asset_io::{extract_uv_edges, load_mesh, LoadedMesh};
 use practical_arcana_painter::glb_export;
 use practical_arcana_painter::output::{
     export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
     normalize_height_map,
 };
-use practical_arcana_painter::project::{load_project, save_project, utc_now_iso8601, Project};
+use practical_arcana_painter::project::{
+    load_project, save_project, utc_now_iso8601, OutputCache, Project,
+};
 use practical_arcana_painter::types::{BackgroundMode, Layer, PaintValues, TextureSource};
 
 use super::state::ReloadSummary;
-
 use super::state::AppState;
+use super::textures;
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -51,11 +53,44 @@ fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<bool, String> {
     Ok(changed)
 }
 
+/// Apply an already-loaded mesh (e.g. from a .pap file) into app state.
+/// Returns `true` if geometry changed (hash mismatch), `false` if identical.
+fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool {
+    state.uv_edges = Some(extract_uv_edges(&mesh));
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for p in &mesh.positions {
+        p.x.to_bits().hash(&mut hasher);
+        p.y.to_bits().hash(&mut hasher);
+        p.z.to_bits().hash(&mut hasher);
+    }
+    for uv in &mesh.uvs {
+        uv.x.to_bits().hash(&mut hasher);
+        uv.y.to_bits().hash(&mut hasher);
+    }
+    mesh.indices.hash(&mut hasher);
+    let new_hash = hasher.finish();
+    let changed = new_hash != state.mesh_hash;
+    state.mesh_hash = new_hash;
+
+    if changed {
+        state.textures.color = None;
+        state.textures.height = None;
+        state.textures.normal = None;
+        state.textures.stroke_id = None;
+        state.generated = None;
+        state.path_overlay.clear();
+    }
+
+    state.loaded_mesh = Some(Arc::new(mesh));
+    changed
+}
+
 // ── Project Operations ─────────────────────────────────────────────
 
 /// Open a file dialog and load a .pap project.
 /// Returns true if a project was successfully loaded.
-pub fn open_project(state: &mut AppState, _ctx: &eframe::egui::Context) -> bool {
+pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
     let path = rfd::FileDialog::new()
         .add_filter("PAP Project", &["pap"])
         .pick_file();
@@ -65,24 +100,22 @@ pub fn open_project(state: &mut AppState, _ctx: &eframe::egui::Context) -> bool 
     };
 
     match load_project(&path) {
-        Ok(project) => {
+        Ok(result) => {
             state.status_message = format!("Loaded: {}", path.display());
 
-            // Load mesh if referenced
-            let mesh_path = resolve_asset_path(&path, &project.mesh_ref.path);
-            if let Err(e) = apply_mesh(state, &mesh_path) {
-                state.status_message = e;
+            // Apply embedded mesh if present
+            if let Some(mesh) = result.mesh {
+                apply_loaded_mesh(state, mesh);
             }
 
             // Select first layer if any
-            if !project.layers.is_empty() {
+            if !result.project.layers.is_empty() {
                 state.selected_layer = Some(0);
             }
 
-            state.project = project;
+            state.project = result.project;
             state.project_path = Some(path);
             state.dirty = false;
-            state.generated = None;
             state.generation_snapshot = None;
             state.generation.discard();
             state.post_gen_export_maps = None;
@@ -93,6 +126,39 @@ pub fn open_project(state: &mut AppState, _ctx: &eframe::egui::Context) -> bool 
             state.textures.stroke_id = None;
             state.path_overlay.clear();
             state.undo.clear();
+
+            // Restore cached generation output if present
+            if let Some(output) = result.output {
+                let pixel_count = output.color.len();
+                let r = output.resolution;
+                state.generation_snapshot = output.snapshot_hash;
+                state.generated = Some(super::generation::GenResult {
+                    color: output.color,
+                    height: output.height,
+                    normal_map: output.normal_map,
+                    stroke_id: vec![0; pixel_count],
+                    resolution: r,
+                    elapsed: std::time::Duration::ZERO,
+                    computed_normals: None,
+                });
+                // Create texture handles so UV View displays the maps
+                let gen = state.generated.as_ref().unwrap();
+                state.textures.color = Some(textures::color_buffer_to_handle(
+                    ctx, &gen.color, r, r, "loaded_color",
+                ));
+                state.textures.height = Some(textures::height_buffer_to_handle(
+                    ctx, &gen.height, r, "loaded_height",
+                ));
+                state.textures.normal = Some(textures::normal_map_to_handle(
+                    ctx, &gen.normal_map, r, "loaded_normal",
+                ));
+                state.textures.stroke_id = Some(textures::stroke_id_to_handle(
+                    ctx, &gen.stroke_id, r, "loaded_stroke_id",
+                ));
+            } else {
+                state.generated = None;
+            }
+
             true
         }
         Err(e) => {
@@ -118,6 +184,11 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
     // Reset to a fresh project
     let mut project = Project::default();
     project.mesh_ref.path = mesh_path.to_string_lossy().to_string();
+    project.mesh_ref.format = mesh_path
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    project.mesh_bytes = std::fs::read(&mesh_path).ok();
 
     // Load the mesh
     match apply_mesh(state, &mesh_path) {
@@ -188,6 +259,12 @@ pub fn reload_mesh(state: &mut AppState) {
 
     match apply_mesh(state, &mesh_path) {
         Ok(_) => {
+            // Mesh topology may have changed — undo past this point is invalid
+            state.undo.clear();
+
+            // Re-read bytes from disk for embedding
+            state.project.mesh_bytes = std::fs::read(&mesh_path).ok();
+
             // Determine new group names from reloaded mesh
             let new_groups: Vec<String> = state
                 .loaded_mesh
@@ -271,8 +348,13 @@ pub fn replace_mesh(state: &mut AppState) {
         return;
     };
 
-    // Update mesh path and delegate to reload_mesh logic
+    // Update mesh path, format, and bytes; then delegate to reload_mesh logic
     state.project.mesh_ref.path = path.to_string_lossy().to_string();
+    state.project.mesh_ref.format = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    state.project.mesh_bytes = std::fs::read(&path).ok();
     reload_mesh(state);
     state.status_message = format!("Mesh replaced: {}", path.display());
 }
@@ -296,7 +378,15 @@ pub fn save_project_action(state: &mut AppState) {
 
     state.project.manifest.modified_at = utc_now_iso8601();
 
-    match save_project(&state.project, &path) {
+    let output = state.generated.as_ref().map(|gen| OutputCache {
+        color: &gen.color,
+        height: &gen.height,
+        normal_map: &gen.normal_map,
+        resolution: gen.resolution,
+        snapshot_hash: state.generation_snapshot,
+    });
+
+    match save_project(&state.project, &path, output) {
         Ok(()) => {
             state.project_path = Some(path);
             state.dirty = false;
@@ -442,14 +532,3 @@ fn create_layers_from_mesh(state: &AppState) -> Vec<Layer> {
     }
 }
 
-fn resolve_asset_path(project_path: &Path, asset_path: &str) -> PathBuf {
-    let p = Path::new(asset_path);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        project_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join(asset_path)
-    }
-}

@@ -5,7 +5,7 @@ use eframe::egui;
 use glam::Vec2;
 
 use practical_arcana_painter::project::Project;
-use practical_arcana_painter::types::Layer;
+use practical_arcana_painter::types::{Layer, OutputSettings};
 
 use super::generation::{GenResult, GenerationManager};
 use super::mesh_preview::MeshPreviewState;
@@ -206,12 +206,8 @@ pub struct AppState {
     // ── Status ──
     pub status_message: String,
 
-    /// Snapshot of layers + settings + mesh hash at last generation — used to detect outdated results.
-    pub generation_snapshot: Option<(
-        Vec<Layer>,
-        practical_arcana_painter::types::OutputSettings,
-        u64,
-    )>,
+    /// Hash of (layers, settings, mesh_hash) at last generation — used to detect outdated results.
+    pub generation_snapshot: Option<u64>,
 
     // ── Undo/Redo ──
     pub undo: UndoHistory,
@@ -302,20 +298,32 @@ impl AppState {
     /// Whether current results don't reflect current settings.
     /// Returns a label describing the state, or None if up-to-date.
     pub fn stale_reason(&self) -> Option<&'static str> {
-        if self.generation_snapshot.is_none() {
+        let Some(saved) = self.generation_snapshot else {
             if !self.project.layers.is_empty() {
                 return Some("Not generated");
             }
             return None;
-        }
-        if let Some((ref layers, ref settings, m_hash)) = self.generation_snapshot {
-            if *layers != self.project.layers
-                || *settings != self.project.settings
-                || m_hash != self.mesh_hash
-            {
-                return Some("Modified");
-            }
+        };
+        let current = generation_state_hash(
+            &self.project.layers,
+            &self.project.settings,
+            self.mesh_hash,
+        );
+        if saved != current {
+            return Some("Modified");
         }
         None
     }
+}
+
+/// Compute a deterministic hash of project state relevant to generation output.
+/// Used to detect whether the output is stale without storing a full copy.
+pub fn generation_state_hash(layers: &[Layer], settings: &OutputSettings, mesh_hash: u64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    if let Ok(bytes) = serde_json::to_vec(&(layers, settings)) {
+        bytes.hash(&mut hasher);
+    }
+    mesh_hash.hash(&mut hasher);
+    hasher.finish()
 }
