@@ -4,8 +4,9 @@ use std::sync::Arc;
 use eframe::egui;
 use glam::Vec2;
 
+use practical_arcana_painter::asset_io::LoadedMesh;
 use practical_arcana_painter::project::Project;
-use practical_arcana_painter::types::{Layer, OutputSettings};
+use practical_arcana_painter::types::{Layer, OutputSettings, TextureSource};
 
 use super::generation::{GenResult, GenerationManager};
 use super::mesh_preview::MeshPreviewState;
@@ -109,6 +110,41 @@ pub struct DisplayTextures {
     pub base_texture: Option<egui::TextureHandle>,
 }
 
+/// Pending mesh load popup — shown after new project / replace mesh.
+/// Holds the proposed layer mappings for user confirmation.
+pub struct MeshLoadPopup {
+    /// Display file name.
+    pub filename: String,
+    /// Mesh info.
+    pub vertices: usize,
+    pub triangles: usize,
+    pub groups: usize,
+    /// Number of materials with color textures.
+    pub n_textures: usize,
+    /// Number of materials with normal textures.
+    pub n_normals: usize,
+    /// Whether MTL materials are available (OBJ only).
+    pub has_mtl: bool,
+    /// User toggle: use MTL materials or not.
+    pub use_mtl: bool,
+    /// Proposed mappings: (layer_name, base_color, base_normal, has_color_tex, has_normal_tex).
+    pub mappings: Vec<(String, TextureSource, TextureSource, bool, bool)>,
+    /// Mappings when MTL is disabled (all default).
+    pub mappings_no_mtl: Vec<(String, TextureSource, TextureSource, bool, bool)>,
+    /// Whether this is a replace-mesh operation (vs new project).
+    pub is_replace: bool,
+    /// Per-layer toggle: whether to create/apply this layer.
+    pub layer_enabled: Vec<bool>,
+    /// Loaded mesh, held here until user confirms (not yet applied to AppState).
+    pub pending_mesh: LoadedMesh,
+    /// Original file path.
+    pub pending_path: PathBuf,
+    /// File format string (e.g. "glb", "obj").
+    pub pending_format: String,
+    /// Raw mesh bytes for .pap embedding.
+    pub pending_bytes: Option<Vec<u8>>,
+}
+
 /// Summary of a mesh reload diff, shown as a dismissible window.
 pub struct ReloadSummary {
     pub kept: Vec<String>,
@@ -200,6 +236,9 @@ pub struct AppState {
     /// Mesh reload diff summary shown as a dismissible window.
     pub reload_summary: Option<ReloadSummary>,
 
+    /// Mesh load popup pending user confirmation.
+    pub mesh_load_popup: Option<MeshLoadPopup>,
+
     // ── Group Dim Overlay ──
     pub group_dim_cache: GroupDimCache,
 
@@ -249,6 +288,7 @@ impl AppState {
             post_gen_export_maps: None,
             post_gen_export_glb: None,
             reload_summary: None,
+            mesh_load_popup: None,
             group_dim_cache: GroupDimCache::default(),
             status_message: "Ready".to_string(),
             generation_snapshot: None,

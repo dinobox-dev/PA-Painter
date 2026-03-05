@@ -15,7 +15,7 @@ use eframe::egui;
 use eframe::egui_wgpu;
 use state::{AppState, GuideTool};
 
-use practical_arcana_painter::types::BASE_RESOLUTION;
+use practical_arcana_painter::types::{TextureSource, BASE_RESOLUTION};
 
 /// Main GUI application.
 pub struct PainterApp {
@@ -275,10 +275,7 @@ impl eframe::App for PainterApp {
         if self.state.pending_new {
             self.state.pending_new = false;
             dialogs::new_project(&mut self.state, ctx);
-            self.state.cached_mesh_normals = None;
-            self.state.path_worker.discard();
-            self.state.group_dim_cache.invalidate();
-            self.init_mesh_preview();
+            // State untouched — mesh held in popup until user confirms.
         }
         if self.state.pending_reload_mesh {
             self.state.pending_reload_mesh = false;
@@ -291,10 +288,7 @@ impl eframe::App for PainterApp {
         if self.state.pending_replace_mesh {
             self.state.pending_replace_mesh = false;
             dialogs::replace_mesh(&mut self.state);
-            self.state.cached_mesh_normals = None;
-            self.state.path_worker.discard();
-            self.state.group_dim_cache.invalidate();
-            self.init_mesh_preview();
+            // State untouched — mesh held in popup until user confirms.
         }
         // ── Path overlay: async worker pattern ──
         // Poll for completed results first
@@ -586,6 +580,268 @@ impl eframe::App for PainterApp {
             }
         });
 
+        // ── Mesh Load Popup ──
+        let mut apply_popup = false;
+        let mut dismiss_popup = false;
+        if let Some(ref mut popup) = self.state.mesh_load_popup {
+            use crate::gui::sidebar::fmt_thousands;
+
+            let popup_frame = egui::Frame {
+                inner_margin: egui::Margin::same(16),
+                outer_margin: egui::Margin::ZERO,
+                corner_radius: egui::CornerRadius::same(8),
+                shadow: egui::Shadow {
+                    offset: [0, 4],
+                    blur: 16,
+                    spread: 4,
+                    color: egui::Color32::from_black_alpha(80),
+                },
+                fill: ctx.style().visuals.window_fill,
+                stroke: egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+            };
+
+            egui::Window::new("mesh_load_popup")
+                .title_bar(false)
+                .collapsible(false)
+                .resizable(false)
+                .min_width(440.0)
+                .max_width(440.0)
+                .max_height(420.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .frame(popup_frame)
+                .show(ctx, |ui: &mut egui::Ui| {
+                    let weak = ui.visuals().weak_text_color();
+
+                    // ── Header ──
+                    ui.vertical_centered(|ui: &mut egui::Ui| {
+                        ui.strong(
+                            egui::RichText::new(if popup.is_replace {
+                                "Replace Mesh"
+                            } else {
+                                "New Project"
+                            })
+                            .size(15.0),
+                        );
+                    });
+                    ui.add_space(6.0);
+
+                    // ── Mesh Info Grid ──
+                    egui::Grid::new("mesh_info_grid")
+                        .num_columns(2)
+                        .spacing([12.0, 2.0])
+                        .show(ui, |ui: &mut egui::Ui| {
+                            ui.colored_label(weak, "File");
+                            ui.label(&popup.filename);
+                            ui.end_row();
+
+                            ui.colored_label(weak, "Vertices");
+                            ui.label(fmt_thousands(popup.vertices));
+                            ui.end_row();
+
+                            ui.colored_label(weak, "Triangles");
+                            ui.label(fmt_thousands(popup.triangles));
+                            ui.end_row();
+
+                            ui.colored_label(weak, "Groups");
+                            ui.label(popup.groups.to_string());
+                            ui.end_row();
+
+                            if popup.n_textures > 0 || popup.n_normals > 0 {
+                                ui.colored_label(weak, "Textures");
+                                ui.label(format!(
+                                    "{} color, {} normal",
+                                    popup.n_textures, popup.n_normals,
+                                ));
+                                ui.end_row();
+                            }
+                        });
+
+                    // MTL toggle (OBJ only)
+                    if popup.has_mtl {
+                        ui.add_space(6.0);
+                        ui.checkbox(&mut popup.use_mtl, "Use MTL materials");
+                    }
+
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    // ── Layer Mapping ──
+                    let mappings = if popup.has_mtl && !popup.use_mtl {
+                        &popup.mappings_no_mtl
+                    } else {
+                        &popup.mappings
+                    };
+
+                    ui.strong(egui::RichText::new("Import Layers").size(12.0));
+                    ui.add_space(4.0);
+
+                    let col_color = 110.0_f32;
+                    let col_normal = 110.0_f32;
+
+                    // Header row (outside scroll area)
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        // Select-all checkbox
+                        let all_on = popup.layer_enabled.iter().all(|&e| e);
+                        let any_on = popup.layer_enabled.iter().any(|&e| e);
+                        let mut toggle = all_on;
+                        let resp = ui.checkbox(&mut toggle, "");
+                        if !all_on && any_on {
+                            let center = resp.rect.center();
+                            ui.painter().line_segment(
+                                [
+                                    egui::pos2(center.x - 4.0, center.y),
+                                    egui::pos2(center.x + 4.0, center.y),
+                                ],
+                                egui::Stroke::new(2.0, ui.visuals().text_color()),
+                            );
+                        }
+                        if resp.changed() {
+                            for e in &mut popup.layer_enabled {
+                                *e = toggle;
+                            }
+                        }
+                        ui.colored_label(weak, "Layer");
+
+                        // Right-pinned Color / Normal headers (centered in slot)
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui: &mut egui::Ui| {
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(col_normal, ui.available_height()),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui: &mut egui::Ui| {
+                                        ui.colored_label(weak, "Normal");
+                                    },
+                                );
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(col_color, ui.available_height()),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui: &mut egui::Ui| {
+                                        ui.colored_label(weak, "Color");
+                                    },
+                                );
+                            },
+                        );
+                    });
+                    ui.separator();
+
+                    egui::ScrollArea::vertical()
+                        .max_height(200.0)
+                        .auto_shrink(false)
+                        .show(ui, |ui: &mut egui::Ui| {
+                            for (i, (name, color, normal, _has_tex, _has_nrm)) in
+                                mappings.iter().enumerate()
+                            {
+                                let row_rect = egui::Rect::from_min_size(
+                                    ui.cursor().min,
+                                    egui::vec2(ui.available_width(), 22.0),
+                                );
+                                if i % 2 == 0 {
+                                    ui.painter().rect_filled(
+                                        row_rect,
+                                        0.0,
+                                        ui.visuals().faint_bg_color,
+                                    );
+                                }
+
+                                let enabled = popup
+                                    .layer_enabled
+                                    .get(i)
+                                    .copied()
+                                    .unwrap_or(true);
+                                let text_color = if enabled {
+                                    ui.visuals().text_color()
+                                } else {
+                                    weak
+                                };
+
+                                ui.horizontal(|ui: &mut egui::Ui| {
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+
+                                    // Checkbox + layer name
+                                    if i < popup.layer_enabled.len() {
+                                        ui.checkbox(&mut popup.layer_enabled[i], "");
+                                    }
+                                    if enabled {
+                                        ui.strong(name);
+                                    } else {
+                                        ui.colored_label(weak, name);
+                                    }
+
+                                    // Color + Normal pinned to right
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui: &mut egui::Ui| {
+                                            ui.allocate_ui_with_layout(
+                                                egui::vec2(col_normal, ui.available_height()),
+                                                egui::Layout::left_to_right(egui::Align::Center),
+                                                |ui: &mut egui::Ui| {
+                                                    source_label_with_chip(
+                                                        ui, normal, text_color, weak,
+                                                    );
+                                                },
+                                            );
+                                            ui.allocate_ui_with_layout(
+                                                egui::vec2(col_color, ui.available_height()),
+                                                egui::Layout::left_to_right(egui::Align::Center),
+                                                |ui: &mut egui::Ui| {
+                                                    source_label_with_chip(
+                                                        ui, color, text_color, weak,
+                                                    );
+                                                },
+                                            );
+                                        },
+                                    );
+                                });
+                            }
+                        });
+
+                    ui.add_space(12.0);
+
+                    // ── Buttons (centered) ──
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        let btn_w = 80.0_f32;
+                        let gap = 12.0_f32;
+                        ui.spacing_mut().item_spacing.x = gap;
+                        let total = btn_w * 2.0 + gap;
+                        let pad = ((ui.available_width() - total) / 2.0).max(0.0);
+                        ui.add_space(pad);
+                        if ui
+                            .add(
+                                egui::Button::new("  OK  ")
+                                    .min_size(egui::Vec2::new(btn_w, 28.0)),
+                            )
+                            .clicked()
+                        {
+                            apply_popup = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new("Cancel")
+                                    .min_size(egui::Vec2::new(btn_w, 28.0)),
+                            )
+                            .clicked()
+                        {
+                            dismiss_popup = true;
+                        }
+                    });
+                });
+        }
+        if apply_popup {
+            dialogs::apply_mesh_load_popup(&mut self.state);
+            self.state.mesh_load_popup = None;
+            // Post-load cleanup (deferred until confirmation)
+            self.state.cached_mesh_normals = None;
+            self.state.path_worker.discard();
+            self.state.group_dim_cache.invalidate();
+            self.init_mesh_preview();
+        }
+        if dismiss_popup {
+            self.state.mesh_load_popup = None;
+        }
+
         // ── Reload Summary Window ──
         let mut dismiss_summary = false;
         if let Some(ref summary) = self.state.reload_summary {
@@ -635,5 +891,63 @@ impl eframe::App for PainterApp {
         self.state
             .undo
             .track_frame(&pre_frame, &post_frame, pointer_down);
+    }
+}
+
+/// Show a TextureSource as a compact visual in the popup.
+/// Solid → chip + hex, File → icon + name, MeshMaterial → icon + index.
+fn source_label_with_chip(
+    ui: &mut egui::Ui,
+    src: &TextureSource,
+    text_color: egui::Color32,
+    weak: egui::Color32,
+) {
+    use egui_phosphor::fill::{CUBE, FOLDER_OPEN};
+    match src {
+        TextureSource::Solid(rgb) => {
+            let srgb = [
+                (rgb[0].powf(1.0 / 2.2).clamp(0.0, 1.0) * 255.0) as u8,
+                (rgb[1].powf(1.0 / 2.2).clamp(0.0, 1.0) * 255.0) as u8,
+                (rgb[2].powf(1.0 / 2.2).clamp(0.0, 1.0) * 255.0) as u8,
+            ];
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let chip_size = egui::vec2(14.0, 14.0);
+            let (rect, _) =
+                ui.allocate_exact_size(chip_size, egui::Sense::hover());
+            ui.painter().rect_filled(
+                rect,
+                2.0,
+                egui::Color32::from_rgb(srgb[0], srgb[1], srgb[2]),
+            );
+            ui.painter().rect_stroke(
+                rect,
+                2.0,
+                egui::Stroke::new(1.0, weak),
+                egui::StrokeKind::Outside,
+            );
+            ui.colored_label(
+                text_color,
+                format!("#{:02X}{:02X}{:02X}", srgb[0], srgb[1], srgb[2]),
+            );
+        }
+        TextureSource::MeshMaterial(idx) => {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.colored_label(text_color, CUBE);
+            ui.colored_label(text_color, format!("[{idx}]"));
+        }
+        TextureSource::File(Some(tex)) => {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.colored_label(text_color, FOLDER_OPEN);
+            ui.colored_label(text_color, &tex.label);
+        }
+        TextureSource::File(None) => {
+            ui.colored_label(weak, "(no file)");
+        }
+        TextureSource::None => {
+            use egui_phosphor::fill::PROHIBIT;
+            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.colored_label(weak, PROHIBIT);
+            ui.colored_label(weak, "None");
+        }
     }
 }

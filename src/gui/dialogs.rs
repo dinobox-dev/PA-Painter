@@ -2,7 +2,9 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use practical_arcana_painter::asset_io::{extract_uv_edges, load_mesh, LoadedMesh};
+use practical_arcana_painter::asset_io::{
+    extract_uv_edges, load_mesh, LoadedMesh, MeshMaterialInfo,
+};
 use practical_arcana_painter::glb_export;
 use practical_arcana_painter::output::{
     export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
@@ -11,10 +13,11 @@ use practical_arcana_painter::output::{
 use practical_arcana_painter::project::{
     load_project, save_project, utc_now_iso8601, OutputCache, Project,
 };
-use practical_arcana_painter::types::{BackgroundMode, Layer, PaintValues, TextureSource};
+use practical_arcana_painter::types::{
+    BackgroundMode, EmbeddedTexture, Layer, PaintValues, TextureSource,
+};
 
-use super::state::ReloadSummary;
-use super::state::AppState;
+use super::state::{AppState, MeshLoadPopup, ReloadSummary};
 use super::textures;
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -169,8 +172,8 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
 }
 
 /// Create a new project by loading a mesh file.
-/// Opens a file dialog for mesh selection, then starts a fresh project.
-/// Auto-creates one layer per mesh group (or a single "__all__" layer if none).
+/// Opens a file dialog for mesh selection, loads the mesh into a pending popup.
+/// State is NOT modified until the user confirms (OK) — Cancel discards everything.
 pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
     let path = rfd::FileDialog::new()
         .add_filter("3D Mesh", &["glb", "gltf", "obj"])
@@ -181,58 +184,29 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
         return;
     };
 
-    // Reset to a fresh project
-    let mut project = Project::default();
-    project.mesh_ref.path = mesh_path.to_string_lossy().to_string();
-    project.mesh_ref.format = mesh_path
+    // Load mesh into temporary — do NOT apply to state yet.
+    let mesh = match load_mesh(&mesh_path) {
+        Ok(m) => m,
+        Err(e) => {
+            state.status_message = format!("Mesh load failed: {e}");
+            return;
+        }
+    };
+
+    let filename = mesh_path
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let format = mesh_path
         .extension()
         .map(|e| e.to_string_lossy().to_string())
         .unwrap_or_default();
-    project.mesh_bytes = std::fs::read(&mesh_path).ok();
+    let mesh_bytes = std::fs::read(&mesh_path).ok();
 
-    // Load the mesh
-    match apply_mesh(state, &mesh_path) {
-        Ok(_) => {
-            // Auto-create layers from mesh groups
-            project.layers = create_layers_from_mesh(state);
-
-            state.project = project;
-            state.project_path = None;
-            state.dirty = false;
-            state.selected_layer = if state.project.layers.is_empty() {
-                None
-            } else {
-                Some(0)
-            };
-            state.selected_guide = None;
-            state.generated = None;
-            state.generation_snapshot = None;
-            state.generation.discard();
-            state.post_gen_export_maps = None;
-            state.post_gen_export_glb = None;
-            state.textures.color = None;
-            state.textures.height = None;
-            state.textures.normal = None;
-            state.textures.stroke_id = None;
-            state.textures.base_texture = None;
-            state.reload_summary = None;
-            state.path_overlay.clear();
-            state.undo.clear();
-
-            let n = state.project.layers.len();
-            state.status_message = format!(
-                "New project — {} layers from {}",
-                n,
-                mesh_path
-                    .file_name()
-                    .map(|f| f.to_string_lossy().to_string())
-                    .unwrap_or_default()
-            );
-        }
-        Err(e) => {
-            state.status_message = e;
-        }
-    }
+    state.mesh_load_popup = Some(build_mesh_load_popup(
+        mesh, &filename, &format, mesh_path, mesh_bytes, false,
+    ));
+    state.status_message = format!("New project — {}", filename);
 }
 
 /// Reload mesh from the same path and diff groups against existing layers.
@@ -336,8 +310,8 @@ pub fn reload_mesh(state: &mut AppState) {
     }
 }
 
-/// Open a file dialog to pick a new mesh file, replacing the current one.
-/// Loads the mesh first; only updates state on success.
+/// Open a file dialog to pick a new mesh file for replacement.
+/// Loads the mesh into a pending popup — state is NOT modified until user confirms.
 pub fn replace_mesh(state: &mut AppState) {
     let path = rfd::FileDialog::new()
         .add_filter("3D Mesh", &["glb", "gltf", "obj"])
@@ -348,112 +322,28 @@ pub fn replace_mesh(state: &mut AppState) {
         return;
     };
 
-    // Try loading the mesh first — only update state if it succeeds.
-    match apply_mesh(state, &path) {
-        Ok(_) => {
-            state.undo.clear();
-
-            state.project.mesh_ref.path = path.to_string_lossy().to_string();
-            state.project.mesh_ref.format = path
-                .extension()
-                .map(|e| e.to_string_lossy().to_string())
-                .unwrap_or_default();
-            state.project.mesh_bytes = std::fs::read(&path).ok();
-
-            // Determine new group names from replaced mesh
-            let new_groups: Vec<String> = state
-                .loaded_mesh
-                .as_ref()
-                .map(|m| m.groups.iter().map(|g| g.name.clone()).collect())
-                .unwrap_or_default();
-            let new_set: std::collections::HashSet<&str> =
-                new_groups.iter().map(|s| s.as_str()).collect();
-
-            // Check if new mesh has materials
-            let has_materials = state
-                .loaded_mesh
-                .as_ref()
-                .is_some_and(|m| !m.materials.is_empty());
-
-            let mut added = Vec::new();
-            let mut orphaned = Vec::new();
-            let mut kept = Vec::new();
-
-            // Collect existing non-__all__ group names
-            let old_groups: Vec<String> = state
-                .project
-                .layers
-                .iter()
-                .map(|l| l.group_name.clone())
-                .filter(|g| g != "__all__")
-                .collect::<std::collections::HashSet<_>>()
-                .into_iter()
-                .collect();
-            let old_set: std::collections::HashSet<&str> =
-                old_groups.iter().map(|s| s.as_str()).collect();
-
-            for g in &old_groups {
-                if new_set.contains(g.as_str()) {
-                    kept.push(g.clone());
-                } else {
-                    orphaned.push(g.clone());
-                }
-            }
-            for g in &new_groups {
-                if !old_set.contains(g.as_str()) {
-                    added.push(g.clone());
-                }
-            }
-
-            // Add layers for new groups
-            for name in &added {
-                let order = state.project.layers.len() as i32;
-                state.project.layers.push(Layer {
-                    name: name.clone(),
-                    visible: true,
-                    group_name: name.clone(),
-                    order,
-                    paint: PaintValues::default(),
-                    guides: vec![],
-                    base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
-                    base_normal: TextureSource::None,
-                });
-            }
-
-            // Remap orphaned layers to "__all__"
-            let orphan_set: std::collections::HashSet<&str> =
-                orphaned.iter().map(|s| s.as_str()).collect();
-            for layer in &mut state.project.layers {
-                if orphan_set.contains(layer.group_name.as_str()) {
-                    layer.group_name = "__all__".to_string();
-                }
-                // Reset MeshMaterial refs when new mesh has no materials (e.g. OBJ)
-                if !has_materials {
-                    if let TextureSource::MeshMaterial(_) = layer.base_color {
-                        layer.base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
-                    }
-                    if let TextureSource::MeshMaterial(_) = layer.base_normal {
-                        layer.base_normal = TextureSource::None;
-                    }
-                }
-            }
-
-            state.dirty = true;
-
-            if !added.is_empty() || !orphaned.is_empty() {
-                state.reload_summary = Some(ReloadSummary {
-                    kept,
-                    added,
-                    orphaned,
-                });
-            }
-
-            state.status_message = format!("Mesh replaced: {}", path.display());
-        }
+    let mesh = match load_mesh(&path) {
+        Ok(m) => m,
         Err(e) => {
-            state.status_message = e;
+            state.status_message = format!("Mesh load failed: {e}");
+            return;
         }
-    }
+    };
+
+    let filename = path
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let format = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let mesh_bytes = std::fs::read(&path).ok();
+
+    state.mesh_load_popup = Some(build_mesh_load_popup(
+        mesh, &filename, &format, path, mesh_bytes, true,
+    ));
+    state.status_message = format!("Replace mesh — {}", filename);
 }
 
 /// Save the project to its current path, or show a Save As dialog.
@@ -591,41 +481,319 @@ pub fn export_glb_to(state: &mut AppState, path: &Path) {
     }
 }
 
-/// Create default layers from currently loaded mesh groups.
-/// One layer per group, or a single "__all__" if no groups.
-fn create_layers_from_mesh(state: &AppState) -> Vec<Layer> {
-    let group_names: Vec<String> = state
-        .loaded_mesh
-        .as_ref()
-        .map(|m| m.groups.iter().map(|g| g.name.clone()).collect())
-        .unwrap_or_default();
+// ── Auto-Mapping ──────────────────────────────────────────────────
 
-    if group_names.is_empty() {
-        vec![Layer {
-            name: "__all__".to_string(),
-            visible: true,
-            group_name: "__all__".to_string(),
-            order: 0,
-            paint: PaintValues::default(),
-            guides: vec![],
-            base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
-            base_normal: TextureSource::None,
-        }]
+/// Compute auto-mapped TextureSource for a material (GLB style: MeshMaterial refs).
+fn auto_map_glb(mat: &MeshMaterialInfo, idx: usize) -> (TextureSource, TextureSource) {
+    let color = if mat.base_color_texture.is_some() {
+        TextureSource::MeshMaterial(idx)
     } else {
-        group_names
+        let f = mat.base_color_factor;
+        if (f[0] - 1.0).abs() < 0.01 && (f[1] - 1.0).abs() < 0.01 && (f[2] - 1.0).abs() < 0.01 {
+            TextureSource::Solid([0.5, 0.5, 0.5])
+        } else {
+            TextureSource::Solid([f[0], f[1], f[2]])
+        }
+    };
+    let normal = if mat.normal_texture.is_some() {
+        TextureSource::MeshMaterial(idx)
+    } else {
+        TextureSource::None
+    };
+    (color, normal)
+}
+
+/// Compute auto-mapped TextureSource for an OBJ MTL material (File-based refs).
+fn auto_map_mtl(mat: &MeshMaterialInfo) -> (TextureSource, TextureSource) {
+    let color = if let Some(ref tex) = mat.base_color_texture {
+        TextureSource::File(Some(EmbeddedTexture {
+            label: mat.name.clone(),
+            pixels: Arc::new(tex.pixels.clone()),
+            width: tex.width,
+            height: tex.height,
+        }))
+    } else {
+        let f = mat.base_color_factor;
+        let default_diffuse = (f[0] - 0.8).abs() < 0.01
+            && (f[1] - 0.8).abs() < 0.01
+            && (f[2] - 0.8).abs() < 0.01;
+        if default_diffuse {
+            TextureSource::Solid([0.5, 0.5, 0.5])
+        } else {
+            TextureSource::Solid([f[0], f[1], f[2]])
+        }
+    };
+    let normal = if let Some(ref tex) = mat.normal_texture {
+        TextureSource::File(Some(EmbeddedTexture {
+            label: format!("{}_normal", mat.name),
+            pixels: Arc::new(tex.pixels.clone()),
+            width: tex.width,
+            height: tex.height,
+        }))
+    } else {
+        TextureSource::None
+    };
+    (color, normal)
+}
+
+/// Default mapping (no material info).
+fn default_mapping() -> (TextureSource, TextureSource) {
+    (TextureSource::Solid([0.5, 0.5, 0.5]), TextureSource::None)
+}
+
+/// Build proposed mappings for each layer from materials.
+/// `layer_names` are the group/layer names, `materials` from the mesh.
+/// `is_glb` determines whether to use MeshMaterial refs (GLB) or File refs (OBJ MTL).
+fn build_mappings(
+    layer_names: &[String],
+    materials: &[MeshMaterialInfo],
+    is_glb: bool,
+) -> Vec<(String, TextureSource, TextureSource, bool, bool)> {
+    layer_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let mat = materials.get(i);
+            let (color, normal) = if let Some(m) = mat {
+                if is_glb {
+                    auto_map_glb(m, i)
+                } else {
+                    auto_map_mtl(m)
+                }
+            } else {
+                default_mapping()
+            };
+            let has_color_tex = mat.is_some_and(|m| m.base_color_texture.is_some());
+            let has_normal_tex = mat.is_some_and(|m| m.normal_texture.is_some());
+            (name.clone(), color, normal, has_color_tex, has_normal_tex)
+        })
+        .collect()
+}
+
+/// Build a MeshLoadPopup holding the loaded mesh (not yet applied to state).
+fn build_mesh_load_popup(
+    mesh: LoadedMesh,
+    filename: &str,
+    format: &str,
+    path: PathBuf,
+    mesh_bytes: Option<Vec<u8>>,
+    is_replace: bool,
+) -> MeshLoadPopup {
+    let is_glb = format == "glb" || format == "gltf";
+    let has_mtl = !is_glb && !mesh.materials.is_empty();
+
+    let layer_names: Vec<String> = mesh.groups.iter().map(|g| g.name.clone()).collect();
+    let layer_names = if layer_names.is_empty() {
+        vec!["__all__".to_string()]
+    } else {
+        layer_names
+    };
+
+    let mappings = if !mesh.materials.is_empty() {
+        build_mappings(&layer_names, &mesh.materials, is_glb)
+    } else {
+        layer_names
+            .iter()
+            .map(|n| (n.clone(), default_mapping().0, default_mapping().1, false, false))
+            .collect()
+    };
+
+    let mappings_no_mtl = layer_names
+        .iter()
+        .map(|n| (n.clone(), default_mapping().0, default_mapping().1, false, false))
+        .collect();
+
+    let layer_count = mappings.len();
+    MeshLoadPopup {
+        filename: filename.to_string(),
+        vertices: mesh.positions.len(),
+        triangles: mesh.indices.len() / 3,
+        groups: mesh.groups.len(),
+        n_textures: mesh.materials.iter().filter(|m| m.base_color_texture.is_some()).count(),
+        n_normals: mesh.materials.iter().filter(|m| m.normal_texture.is_some()).count(),
+        has_mtl,
+        use_mtl: has_mtl,
+        mappings,
+        mappings_no_mtl,
+        is_replace,
+        layer_enabled: vec![true; layer_count],
+        pending_mesh: mesh,
+        pending_path: path,
+        pending_format: format.to_string(),
+        pending_bytes: mesh_bytes,
+    }
+}
+
+/// Apply the confirmed popup: load mesh into state, create/update layers.
+/// This is the ONLY place where state changes for new project / replace mesh.
+pub fn apply_mesh_load_popup(state: &mut AppState) {
+    let Some(popup) = state.mesh_load_popup.take() else {
+        return;
+    };
+
+    let active_mappings = if popup.has_mtl && !popup.use_mtl {
+        popup.mappings_no_mtl.clone()
+    } else {
+        popup.mappings.clone()
+    };
+
+    // Apply the loaded mesh to state
+    apply_loaded_mesh(state, popup.pending_mesh);
+
+    // Update mesh reference
+    state.project.mesh_ref.path = popup.pending_path.to_string_lossy().to_string();
+    state.project.mesh_ref.format = popup.pending_format;
+    state.project.mesh_bytes = popup.pending_bytes;
+
+    if popup.is_replace {
+        // ── Replace mesh ──
+        state.undo.clear();
+
+        // Group diff: compare new mesh groups vs existing layers
+        let new_groups: Vec<String> = state
+            .loaded_mesh
+            .as_ref()
+            .map(|m| m.groups.iter().map(|g| g.name.clone()).collect())
+            .unwrap_or_default();
+        let new_set: std::collections::HashSet<&str> =
+            new_groups.iter().map(|s| s.as_str()).collect();
+
+        let has_materials = state
+            .loaded_mesh
+            .as_ref()
+            .is_some_and(|m| !m.materials.is_empty());
+
+        let old_groups: Vec<String> = state
+            .project
+            .layers
+            .iter()
+            .map(|l| l.group_name.clone())
+            .filter(|g| g != "__all__")
+            .collect::<std::collections::HashSet<_>>()
             .into_iter()
-            .enumerate()
-            .map(|(i, name)| Layer {
+            .collect();
+        let old_set: std::collections::HashSet<&str> =
+            old_groups.iter().map(|s| s.as_str()).collect();
+
+        let mut kept = Vec::new();
+        let mut added = Vec::new();
+        let mut orphaned = Vec::new();
+        for g in &old_groups {
+            if new_set.contains(g.as_str()) {
+                kept.push(g.clone());
+            } else {
+                orphaned.push(g.clone());
+            }
+        }
+        for g in &new_groups {
+            if !old_set.contains(g.as_str()) {
+                added.push(g.clone());
+            }
+        }
+
+        // Add layers for new groups
+        for name in &added {
+            let order = state.project.layers.len() as i32;
+            state.project.layers.push(Layer {
                 name: name.clone(),
                 visible: true,
-                group_name: name,
-                order: i as i32,
+                group_name: name.clone(),
+                order,
                 paint: PaintValues::default(),
                 guides: vec![],
                 base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
                 base_normal: TextureSource::None,
-            })
-            .collect()
+            });
+        }
+
+        // Remap orphaned layers
+        let orphan_set: std::collections::HashSet<&str> =
+            orphaned.iter().map(|s| s.as_str()).collect();
+        for layer in &mut state.project.layers {
+            if orphan_set.contains(layer.group_name.as_str()) {
+                layer.group_name = "__all__".to_string();
+            }
+            if !has_materials {
+                if let TextureSource::MeshMaterial(_) = layer.base_color {
+                    layer.base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
+                }
+                if let TextureSource::MeshMaterial(_) = layer.base_normal {
+                    layer.base_normal = TextureSource::None;
+                }
+            }
+        }
+
+        // Apply material mappings (skip disabled)
+        for (i, (name, color, normal, _, _)) in active_mappings.iter().enumerate() {
+            if !popup.layer_enabled.get(i).copied().unwrap_or(true) {
+                continue;
+            }
+            if let Some(layer) = state.project.layers.iter_mut().find(|l| &l.group_name == name) {
+                if matches!(layer.base_color, TextureSource::Solid(c) if (c[0] - 0.5).abs() < 0.01 && (c[1] - 0.5).abs() < 0.01 && (c[2] - 0.5).abs() < 0.01)
+                    || matches!(layer.base_color, TextureSource::MeshMaterial(_))
+                {
+                    layer.base_color = color.clone();
+                }
+                if matches!(layer.base_normal, TextureSource::None | TextureSource::MeshMaterial(_))
+                {
+                    layer.base_normal = normal.clone();
+                }
+            }
+        }
+
+        if !added.is_empty() || !orphaned.is_empty() {
+            state.reload_summary = Some(ReloadSummary {
+                kept,
+                added,
+                orphaned,
+            });
+        }
+
+        state.dirty = true;
+    } else {
+        // ── New project ── reset everything, preserving mesh_ref set above
+        let mut new_project = Project::default();
+        std::mem::swap(&mut new_project.mesh_ref, &mut state.project.mesh_ref);
+        new_project.mesh_bytes = state.project.mesh_bytes.take();
+        state.project = new_project;
+        state.project_path = None;
+        state.dirty = false;
+        state.selected_guide = None;
+        state.generated = None;
+        state.generation_snapshot = None;
+        state.generation.discard();
+        state.post_gen_export_maps = None;
+        state.post_gen_export_glb = None;
+        state.textures.color = None;
+        state.textures.height = None;
+        state.textures.normal = None;
+        state.textures.stroke_id = None;
+        state.textures.base_texture = None;
+        state.reload_summary = None;
+        state.path_overlay.clear();
+        state.undo.clear();
+
+        // Create only enabled layers
+        for (i, (name, color, normal, _, _)) in active_mappings.iter().enumerate() {
+            if !popup.layer_enabled.get(i).copied().unwrap_or(true) {
+                continue;
+            }
+            state.project.layers.push(Layer {
+                name: name.clone(),
+                visible: true,
+                group_name: name.clone(),
+                order: state.project.layers.len() as i32,
+                paint: PaintValues::default(),
+                guides: vec![],
+                base_color: color.clone(),
+                base_normal: normal.clone(),
+            });
+        }
+        state.selected_layer = if state.project.layers.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
     }
 }
 

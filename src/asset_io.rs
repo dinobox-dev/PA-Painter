@@ -4,7 +4,7 @@
 use glam::{Vec2, Vec3};
 use std::collections::HashSet;
 use std::io::Cursor;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::types::MeshGroup;
 
@@ -140,7 +140,38 @@ fn obj_load_options() -> tobj::LoadOptions {
 fn load_obj(path: &Path) -> Result<LoadedMesh, MeshError> {
     let raw = std::fs::read(path)
         .map_err(|e| MeshError::ParseError(format!("Failed to open: {e}")))?;
-    load_obj_from_bytes(&raw)
+    let text = String::from_utf8_lossy(&raw);
+    let obj_dir = path.parent();
+
+    // Try loading MTL — graceful fallback on failure
+    let (models, raw_materials) = tobj::load_obj_buf(
+        &mut Cursor::new(text.as_bytes()),
+        &obj_load_options(),
+        |mtl_path| {
+            let full = if let Some(dir) = obj_dir {
+                dir.join(mtl_path)
+            } else {
+                mtl_path.into()
+            };
+            let raw = std::fs::read(&full).unwrap_or_default();
+            let mtl_text = String::from_utf8_lossy(&raw);
+            tobj::load_mtl_buf(&mut Cursor::new(mtl_text.as_bytes()))
+        },
+    )
+    .map_err(|e| MeshError::ParseError(e.to_string()))?;
+
+    let mut mesh = build_mesh_from_obj(&models)?;
+
+    // Convert MTL materials to MeshMaterialInfo
+    if let Ok(materials) = raw_materials {
+        mesh.materials = materials
+            .iter()
+            .enumerate()
+            .map(|(i, mat)| mtl_to_material_info(mat, i, obj_dir))
+            .collect();
+    }
+
+    Ok(mesh)
 }
 
 fn load_obj_from_bytes(bytes: &[u8]) -> Result<LoadedMesh, MeshError> {
@@ -257,6 +288,62 @@ fn build_mesh_from_obj(models: &[tobj::Model]) -> Result<LoadedMesh, MeshError> 
         groups,
         materials: vec![],
     })
+}
+
+/// Convert a tobj::Material to MeshMaterialInfo, loading texture files relative to `obj_dir`.
+fn mtl_to_material_info(
+    mat: &tobj::Material,
+    idx: usize,
+    obj_dir: Option<&Path>,
+) -> MeshMaterialInfo {
+    let name = if mat.name.is_empty() {
+        format!("Material {idx}")
+    } else {
+        mat.name.clone()
+    };
+
+    let diffuse = mat.diffuse.unwrap_or([0.8, 0.8, 0.8]);
+    let base_color_factor = [diffuse[0], diffuse[1], diffuse[2], 1.0];
+
+    let base_color_texture = mat.diffuse_texture.as_ref().and_then(|tex_path| {
+        let full = if let Some(dir) = obj_dir {
+            dir.join(tex_path)
+        } else {
+            PathBuf::from(tex_path)
+        };
+        match load_texture(&full) {
+            Ok(tex) => Some(tex),
+            Err(e) => {
+                eprintln!("MTL: failed to load diffuse texture '{}': {e}", full.display());
+                None
+            }
+        }
+    });
+
+    let normal_texture = mat
+        .normal_texture
+        .as_ref()
+        .and_then(|tex_path| {
+            let full = if let Some(dir) = obj_dir {
+                dir.join(tex_path)
+            } else {
+                PathBuf::from(tex_path)
+            };
+            match load_texture(&full) {
+                Ok(tex) => Some(tex),
+                Err(e) => {
+                    eprintln!("MTL: failed to load normal texture '{}': {e}", full.display());
+                    None
+                }
+            }
+        });
+
+    MeshMaterialInfo {
+        name,
+        base_color_factor,
+        base_color_texture,
+        normal_texture,
+    }
 }
 
 /// Convert a glTF image to a LoadedTexture, applying sRGB → linear conversion.

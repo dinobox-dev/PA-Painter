@@ -697,7 +697,7 @@ fn short_filename(path: &str) -> &str {
 }
 
 /// Format a number with thousands separators (e.g. 12450 → "12,450").
-fn fmt_thousands(n: usize) -> String {
+pub fn fmt_thousands(n: usize) -> String {
     let s = n.to_string();
     let mut result = String::with_capacity(s.len() + s.len() / 3);
     for (i, c) in s.chars().enumerate() {

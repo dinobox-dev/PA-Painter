@@ -920,12 +920,30 @@ fn current_mode(src: &TextureSource, is_color: bool) -> SourceMode {
     }
 }
 
+/// Find the material index for a layer's group_name.
+fn layer_material_index(state: &AppState, group_name: &str) -> Option<usize> {
+    let mesh = state.loaded_mesh.as_ref()?;
+    mesh.groups
+        .iter()
+        .position(|g| g.name == group_name)
+        .filter(|&i| i < mesh.materials.len())
+}
+
+/// Get the MeshMaterialInfo for a layer's group, if it exists.
+fn layer_material<'a>(
+    state: &'a AppState,
+    group_name: &str,
+) -> Option<&'a practical_arcana_painter::asset_io::MeshMaterialInfo> {
+    let mesh = state.loaded_mesh.as_ref()?;
+    let idx = mesh.groups.iter().position(|g| g.name == group_name)?;
+    mesh.materials.get(idx)
+}
+
 /// Color source picker: [Mesh][File][Solid] + context UI.
 fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
-    let has_color_textures = state
-        .loaded_mesh
-        .as_ref()
-        .is_some_and(|m| m.materials.iter().any(|mat| mat.base_color_texture.is_some()));
+    let group_name = state.project.layers[layer_idx].group_name.clone();
+    let has_color_textures = layer_material(state, &group_name)
+        .is_some_and(|mat| mat.base_color_texture.is_some());
 
     let mode = current_mode(&state.project.layers[layer_idx].base_color, true);
 
@@ -933,21 +951,23 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
         ui.label("Color");
         ui.spacing_mut().item_spacing.x = 1.0;
 
-        // Mesh button
+        use egui_phosphor::fill::{CUBE, FOLDER_OPEN, PALETTE};
+        // Mesh button — only enabled if this layer's material has a color texture
         if source_button(
             ui,
-            "\u{2b1a}", // ⬚
+            CUBE,
             "Use mesh texture",
             mode == SourceMode::Mesh,
             has_color_textures,
         ) {
-            state.project.layers[layer_idx].base_color = TextureSource::MeshMaterial(0);
+            let mat_idx = layer_material_index(state, &group_name).unwrap_or(0);
+            state.project.layers[layer_idx].base_color = TextureSource::MeshMaterial(mat_idx);
         }
 
         // File button
         if source_button(
             ui,
-            "\u{1f4c2}", // 📂
+            FOLDER_OPEN,
             "Load from file",
             mode == SourceMode::File,
             true,
@@ -963,7 +983,7 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
         // Solid button
         if source_button(
             ui,
-            "\u{1f3a8}", // 🎨
+            PALETTE,
             "Solid color",
             mode == SourceMode::SolidOrNone,
             true,
@@ -1019,10 +1039,9 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
 
 /// Normal source picker: [Mesh][File][∅ None] + context UI.
 fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
-    let has_normal_textures = state
-        .loaded_mesh
-        .as_ref()
-        .is_some_and(|m| m.materials.iter().any(|mat| mat.normal_texture.is_some()));
+    let group_name = state.project.layers[layer_idx].group_name.clone();
+    let has_normal_textures = layer_material(state, &group_name)
+        .is_some_and(|mat| mat.normal_texture.is_some());
 
     let mode = current_mode(&state.project.layers[layer_idx].base_normal, false);
 
@@ -1030,21 +1049,23 @@ fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
         ui.label("Normal");
         ui.spacing_mut().item_spacing.x = 1.0;
 
-        // Mesh button
+        use egui_phosphor::fill::{CUBE, FOLDER_OPEN, PROHIBIT};
+        // Mesh button — only enabled if this layer's material has a normal texture
         if source_button(
             ui,
-            "\u{2b1a}", // ⬚
+            CUBE,
             "Use mesh normal map",
             mode == SourceMode::Mesh,
             has_normal_textures,
         ) {
-            state.project.layers[layer_idx].base_normal = TextureSource::MeshMaterial(0);
+            let mat_idx = layer_material_index(state, &group_name).unwrap_or(0);
+            state.project.layers[layer_idx].base_normal = TextureSource::MeshMaterial(mat_idx);
         }
 
         // File button
         if source_button(
             ui,
-            "\u{1f4c2}", // 📂
+            FOLDER_OPEN,
             "Load from file",
             mode == SourceMode::File,
             true,
@@ -1060,7 +1081,7 @@ fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
         // None button
         if source_button(
             ui,
-            "\u{2205}", // ∅
+            PROHIBIT,
             "No normal map",
             mode == SourceMode::SolidOrNone,
             true,
