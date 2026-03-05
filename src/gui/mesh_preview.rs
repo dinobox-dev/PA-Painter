@@ -49,6 +49,8 @@ pub struct MeshPreviewState {
     pub gpu_ready: bool,
     /// Texture ID registered with egui's wgpu renderer for zero-copy display.
     pub rendered_texture_id: Option<egui::TextureId>,
+    /// Model transform that normalizes the mesh to a unit-scale centered at origin.
+    pub model_transform: Mat4,
 }
 
 impl Default for MeshPreviewState {
@@ -64,6 +66,7 @@ impl Default for MeshPreviewState {
             orbit_target: super::state::OrbitTarget::default(),
             gpu_ready: false,
             rendered_texture_id: None,
+            model_transform: Mat4::IDENTITY,
         }
     }
 }
@@ -78,19 +81,34 @@ impl MeshPreviewState {
     }
 
     /// Reset camera to fit the mesh bounding box.
+    ///
+    /// Computes a model transform that centers the mesh at the origin and
+    /// uniformly scales it so the bounding-box diagonal equals 2.0 world units.
+    /// The camera is then placed at a fixed distance that frames this
+    /// normalized geometry, making interaction (zoom, pan) consistent
+    /// regardless of the original model size.
     pub fn fit_to_mesh(&mut self, mesh: &LoadedMesh) {
         if mesh.positions.is_empty() {
             return;
         }
-        let mut min = mesh.positions[0];
-        let mut max = mesh.positions[0];
+        let mut bb_min = mesh.positions[0];
+        let mut bb_max = mesh.positions[0];
         for &p in &mesh.positions {
-            min = min.min(p);
-            max = max.max(p);
+            bb_min = bb_min.min(p);
+            bb_max = bb_max.max(p);
         }
-        self.center = (min + max) * 0.5;
-        let extent = (max - min).length();
-        self.distance = extent * 1.2;
+        let mesh_center = (bb_min + bb_max) * 0.5;
+        let extent = (bb_max - bb_min).length();
+
+        // Normalize: translate mesh center to origin, then scale so diagonal = 2.0
+        let scale = if extent > 1e-6 { 2.0 / extent } else { 1.0 };
+        self.model_transform =
+            Mat4::from_scale(Vec3::splat(scale))
+                * Mat4::from_translation(-mesh_center);
+
+        // Camera orbits the origin at a fixed distance (works for any model now)
+        self.center = Vec3::ZERO;
+        self.distance = 3.0;
         self.yaw = 0.5;
         self.pitch = 0.3;
     }
@@ -856,7 +874,7 @@ pub fn show(
     let view = Mat4::look_at_rh(eye, center, up);
     let aspect = w as f32 / h as f32;
     let proj = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, 0.01, 200.0);
-    let model = Mat4::IDENTITY;
+    let model = state.mesh_preview.model_transform;
     let mvp = proj * view * model;
 
     // Light direction from independent spherical coordinates
