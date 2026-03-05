@@ -45,6 +45,9 @@ pub struct MeshPreviewState {
     pub light_pitch: f32,
     /// Current orbit target: Object (camera) or Light.
     pub orbit_target: super::state::OrbitTarget,
+    /// Temporary orbit target override (e.g. middle-click camera while in Light mode).
+    /// Active only while the override input is held; cleared on release.
+    pub orbit_target_override: Option<super::state::OrbitTarget>,
     /// Whether GPU resources have been initialized.
     pub gpu_ready: bool,
     /// Texture ID registered with egui's wgpu renderer for zero-copy display.
@@ -64,6 +67,7 @@ impl Default for MeshPreviewState {
             light_yaw: 0.8,
             light_pitch: 0.5,
             orbit_target: super::state::OrbitTarget::default(),
+            orbit_target_override: None,
             gpu_ready: false,
             rendered_texture_id: None,
             model_transform: Mat4::IDENTITY,
@@ -833,9 +837,30 @@ pub fn show(
     // Handle orbit interaction
     let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
 
-    if response.dragged_by(egui::PointerButton::Primary) {
+    // Middle-drag or Alt+left-drag: temporarily override to camera orbit (spring-loaded tool)
+    let alt_held = ui.input(|i| i.modifiers.alt);
+    let middle_dragging = response.dragged_by(egui::PointerButton::Middle)
+        || (response.dragged_by(egui::PointerButton::Primary) && alt_held);
+    if middle_dragging {
+        state.mesh_preview.orbit_target_override = Some(super::state::OrbitTarget::Object);
+    } else if state.mesh_preview.orbit_target_override.is_some() {
+        state.mesh_preview.orbit_target_override = None;
+    }
+
+    // Resolve effective orbit target (override takes precedence)
+    let effective_target = state.mesh_preview.orbit_target_override
+        .unwrap_or(state.mesh_preview.orbit_target);
+
+    // Primary drag: use effective target; middle drag: always camera orbit
+    let dragging_primary = response.dragged_by(egui::PointerButton::Primary);
+    if dragging_primary || middle_dragging {
         let delta = response.drag_delta();
-        match state.mesh_preview.orbit_target {
+        let target = if middle_dragging {
+            super::state::OrbitTarget::Object
+        } else {
+            effective_target
+        };
+        match target {
             super::state::OrbitTarget::Object => {
                 state.mesh_preview.yaw += delta.x * 0.01;
                 state.mesh_preview.pitch += delta.y * 0.01;

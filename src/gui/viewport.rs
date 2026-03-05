@@ -376,15 +376,19 @@ fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
         (OrbitTarget::Object, egui::Key::Num1, "1", CAMERA_ROTATE, "Camera"),
         (OrbitTarget::Light, egui::Key::Num2, "2", SUN, "Light"),
     ];
+    // Effective target reflects temporary override (e.g. middle-click camera)
+    let effective_target = state.mesh_preview.orbit_target_override
+        .unwrap_or(state.mesh_preview.orbit_target);
     for (target, key, num, icon, tooltip) in &targets {
         let pressed = no_text
             && ui
                 .ctx()
                 .input_mut(|i| i.consume_key(egui::Modifiers::NONE, *key));
-        if toolbar_icon_button(ui, state.mesh_preview.orbit_target == *target, icon, num, tooltip)
+        if toolbar_icon_button(ui, effective_target == *target, icon, num, tooltip)
             || pressed
         {
             state.mesh_preview.orbit_target = *target;
+            state.mesh_preview.orbit_target_override = None;
         }
     }
 
