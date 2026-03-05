@@ -332,11 +332,11 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
                     );
                 }
                 if resp.on_hover_text("Add Layer").clicked() && has_mesh {
-                    state.project.layers.push(Layer {
+                    state.project.layers.insert(0, Layer {
                         name: "__all__".to_string(),
                         visible: true,
                         group_name: "__all__".to_string(),
-                        order: 0, // bottom of stack; all orders reassigned below
+                        order: 0, // reassigned below
                         paint: PaintValues::default(),
                         guides: vec![],
                         base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
@@ -347,7 +347,7 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
                     for (i, layer) in state.project.layers.iter_mut().enumerate() {
                         layer.order = n - 1 - i as i32;
                     }
-                    state.selected_layer = Some(state.project.layers.len() - 1);
+                    state.selected_layer = Some(0);
                     state.selected_guide = None;
                 }
             },
