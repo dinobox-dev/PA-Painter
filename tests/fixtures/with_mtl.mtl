@@ -1,0 +1,9 @@
+# Test MTL file — 3 materials with varying properties
+newmtl Red
+Kd 0.8 0.1 0.1
+
+newmtl Blue
+Kd 0.1 0.1 0.9
+
+newmtl Default
+# No Kd — uses tobj default (0.8 0.8 0.8)

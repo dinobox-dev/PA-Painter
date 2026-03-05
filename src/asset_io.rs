@@ -874,6 +874,49 @@ f 1 2 3
     }
 
     #[test]
+    fn load_obj_many_groups() {
+        let path = Path::new("tests/fixtures/many_groups.obj");
+        let mesh = load_mesh(path).unwrap();
+        assert_eq!(mesh.groups.len(), 20);
+        assert_eq!(mesh.indices.len(), 20 * 3);
+        assert!(mesh.groups[0].name.starts_with("group_"));
+        assert_eq!(mesh.groups[19].name, "group_20");
+    }
+
+    #[test]
+    fn load_obj_with_mtl() {
+        let path = Path::new("tests/fixtures/with_mtl.obj");
+        let mesh = load_mesh(path).unwrap();
+        assert_eq!(mesh.groups.len(), 3);
+        assert_eq!(mesh.materials.len(), 3);
+
+        // Red material
+        let red = &mesh.materials[0];
+        assert_eq!(red.name, "Red");
+        assert!((red.base_color_factor[0] - 0.8).abs() < 0.01);
+        assert!((red.base_color_factor[1] - 0.1).abs() < 0.01);
+        assert!(red.base_color_texture.is_none());
+        assert!(red.normal_texture.is_none());
+
+        // Blue material
+        let blue = &mesh.materials[1];
+        assert_eq!(blue.name, "Blue");
+        assert!((blue.base_color_factor[2] - 0.9).abs() < 0.01);
+
+        // Default material
+        let def = &mesh.materials[2];
+        assert_eq!(def.name, "Default");
+        assert!((def.base_color_factor[0] - 0.8).abs() < 0.01);
+    }
+
+    #[test]
+    fn load_obj_without_mtl_file() {
+        let path = Path::new("tests/fixtures/many_groups.obj");
+        let mesh = load_mesh(path).unwrap();
+        assert!(mesh.materials.is_empty());
+    }
+
+    #[test]
     fn load_unsupported_mesh_format() {
         let path = Path::new("model.fbx");
         let result = load_mesh(path);

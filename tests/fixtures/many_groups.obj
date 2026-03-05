@@ -1,0 +1,51 @@
+# Test OBJ with 20 groups — one triangle each
+# Used to test mesh load popup scrolling
+
+v 0.0 0.0 0.0
+v 1.0 0.0 0.0
+v 0.5 1.0 0.0
+
+vt 0.0 0.0
+vt 1.0 0.0
+vt 0.5 1.0
+
+g group_01
+f 1/1 2/2 3/3
+g group_02
+f 1/1 2/2 3/3
+g group_03
+f 1/1 2/2 3/3
+g group_04
+f 1/1 2/2 3/3
+g group_05
+f 1/1 2/2 3/3
+g group_06
+f 1/1 2/2 3/3
+g group_07
+f 1/1 2/2 3/3
+g group_08
+f 1/1 2/2 3/3
+g group_09
+f 1/1 2/2 3/3
+g group_10
+f 1/1 2/2 3/3
+g group_11
+f 1/1 2/2 3/3
+g group_12
+f 1/1 2/2 3/3
+g group_13
+f 1/1 2/2 3/3
+g group_14
+f 1/1 2/2 3/3
+g group_15
+f 1/1 2/2 3/3
+g group_16
+f 1/1 2/2 3/3
+g group_17
+f 1/1 2/2 3/3
+g group_18
+f 1/1 2/2 3/3
+g group_19
+f 1/1 2/2 3/3
+g group_20
+f 1/1 2/2 3/3

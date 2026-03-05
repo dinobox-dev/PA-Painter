@@ -1,0 +1,22 @@
+# Test OBJ with MTL materials — 3 groups, 3 materials
+mtllib with_mtl.mtl
+
+v 0.0 0.0 0.0
+v 1.0 0.0 0.0
+v 0.5 1.0 0.0
+
+vt 0.0 0.0
+vt 1.0 0.0
+vt 0.5 1.0
+
+g Body
+usemtl Red
+f 1/1 2/2 3/3
+
+g Cloth
+usemtl Blue
+f 1/1 2/2 3/3
+
+g Accessory
+usemtl Default
+f 1/1 2/2 3/3

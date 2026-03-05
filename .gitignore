@@ -5,6 +5,7 @@
 # Project files
 *.pap
 *.obj
+!tests/fixtures/*.obj
 output/
 
 # IDE
