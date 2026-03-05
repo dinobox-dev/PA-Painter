@@ -306,7 +306,13 @@ fn mtl_to_material_info(
 
     let has_explicit_color = mat.diffuse.is_some() || mat.diffuse_texture.is_some();
     let diffuse = mat.diffuse.unwrap_or([0.8, 0.8, 0.8]);
-    let base_color_factor = [diffuse[0], diffuse[1], diffuse[2], 1.0];
+    // MTL Kd values are in sRGB space; convert to linear to match GLB convention.
+    let base_color_factor = [
+        diffuse[0].powf(2.2),
+        diffuse[1].powf(2.2),
+        diffuse[2].powf(2.2),
+        1.0,
+    ];
 
     let base_color_texture = mat.diffuse_texture.as_ref().and_then(|tex_path| {
         let full = if let Some(dir) = obj_dir {
@@ -901,23 +907,23 @@ f 1 2 3
         assert_eq!(mesh.groups.len(), 3);
         assert_eq!(mesh.materials.len(), 3);
 
-        // Red material
+        // Red material — Kd 0.8 0.1 0.1 (sRGB) → linear via powf(2.2)
         let red = &mesh.materials[0];
         assert_eq!(red.name, "Red");
-        assert!((red.base_color_factor[0] - 0.8).abs() < 0.01);
-        assert!((red.base_color_factor[1] - 0.1).abs() < 0.01);
+        assert!((red.base_color_factor[0] - 0.8_f32.powf(2.2)).abs() < 0.01);
+        assert!((red.base_color_factor[1] - 0.1_f32.powf(2.2)).abs() < 0.01);
         assert!(red.base_color_texture.is_none());
         assert!(red.normal_texture.is_none());
 
-        // Blue material
+        // Blue material — Kd 0.1 0.1 0.9 (sRGB) → linear
         let blue = &mesh.materials[1];
         assert_eq!(blue.name, "Blue");
-        assert!((blue.base_color_factor[2] - 0.9).abs() < 0.01);
+        assert!((blue.base_color_factor[2] - 0.9_f32.powf(2.2)).abs() < 0.01);
 
-        // Default material
+        // Default material — tobj default 0.8 0.8 0.8 (sRGB) → linear
         let def = &mesh.materials[2];
         assert_eq!(def.name, "Default");
-        assert!((def.base_color_factor[0] - 0.8).abs() < 0.01);
+        assert!((def.base_color_factor[0] - 0.8_f32.powf(2.2)).abs() < 0.01);
     }
 
     #[test]
