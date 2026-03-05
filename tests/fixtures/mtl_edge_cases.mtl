@@ -1,0 +1,9 @@
+# MTL edge case: explicit Kd matching tobj default, plus other materials
+newmtl ExplicitGray
+Kd 0.737 0.737 0.737
+
+newmtl Red
+Kd 0.9 0.1 0.1
+
+newmtl NoKd
+# No Kd line — tobj default (0.8 0.8 0.8)

@@ -1,0 +1,22 @@
+# OBJ edge case: ExplicitGray has Kd 0.8 matching default, NoKd has no Kd at all
+mtllib mtl_edge_cases.mtl
+
+v 0.0 0.0 0.0
+v 1.0 0.0 0.0
+v 0.5 1.0 0.0
+
+vt 0.0 0.0
+vt 1.0 0.0
+vt 0.5 1.0
+
+g ExplicitGray
+usemtl ExplicitGray
+f 1/1 2/2 3/3
+
+g Red
+usemtl Red
+f 1/1 2/2 3/3
+
+g NoKd
+usemtl NoKd
+f 1/1 2/2 3/3

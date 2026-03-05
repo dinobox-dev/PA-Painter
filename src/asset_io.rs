@@ -35,6 +35,8 @@ pub struct MeshMaterialInfo {
     pub name: String,
     /// PBR base color factor (linear RGBA).
     pub base_color_factor: [f32; 4],
+    /// Whether the color factor was explicitly specified (vs. format default).
+    pub has_explicit_color: bool,
     /// Base color texture (sRGB source, stored as linear RGBA).
     pub base_color_texture: Option<LoadedTexture>,
     /// Normal map texture (linear source).
@@ -302,6 +304,7 @@ fn mtl_to_material_info(
         mat.name.clone()
     };
 
+    let has_explicit_color = mat.diffuse.is_some() || mat.diffuse_texture.is_some();
     let diffuse = mat.diffuse.unwrap_or([0.8, 0.8, 0.8]);
     let base_color_factor = [diffuse[0], diffuse[1], diffuse[2], 1.0];
 
@@ -341,6 +344,7 @@ fn mtl_to_material_info(
     MeshMaterialInfo {
         name,
         base_color_factor,
+        has_explicit_color,
         base_color_texture,
         normal_texture,
     }
@@ -513,9 +517,16 @@ fn build_mesh_from_gltf(
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("material_{prim_idx}"));
 
+            let f = base_color_factor;
+            let is_glb_default = (f[0] - 1.0).abs() < 0.01
+                && (f[1] - 1.0).abs() < 0.01
+                && (f[2] - 1.0).abs() < 0.01;
+            let has_explicit_color =
+                base_color_texture.is_some() || !is_glb_default;
             materials.push(MeshMaterialInfo {
                 name: mat_name,
                 base_color_factor,
+                has_explicit_color,
                 base_color_texture,
                 normal_texture,
             });

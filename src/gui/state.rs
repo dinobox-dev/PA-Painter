@@ -110,6 +110,16 @@ pub struct DisplayTextures {
     pub base_texture: Option<egui::TextureHandle>,
 }
 
+/// A single layer's proposed mapping in the mesh load popup.
+#[derive(Clone)]
+pub struct LayerMapping {
+    pub name: String,
+    pub base_color: TextureSource,
+    pub base_normal: TextureSource,
+    /// Whether this is a fallback default (no material info).
+    pub is_default: bool,
+}
+
 /// Pending mesh load popup — shown after new project / replace mesh.
 /// Holds the proposed layer mappings for user confirmation.
 pub struct MeshLoadPopup {
@@ -127,10 +137,10 @@ pub struct MeshLoadPopup {
     pub has_mtl: bool,
     /// User toggle: use MTL materials or not.
     pub use_mtl: bool,
-    /// Proposed mappings: (layer_name, base_color, base_normal, has_color_tex, has_normal_tex).
-    pub mappings: Vec<(String, TextureSource, TextureSource, bool, bool)>,
+    /// Proposed layer mappings.
+    pub mappings: Vec<LayerMapping>,
     /// Mappings when MTL is disabled (all default).
-    pub mappings_no_mtl: Vec<(String, TextureSource, TextureSource, bool, bool)>,
+    pub mappings_no_mtl: Vec<LayerMapping>,
     /// Whether this is a replace-mesh operation (vs new project).
     pub is_replace: bool,
     /// Per-layer toggle: whether to create/apply this layer.

@@ -731,9 +731,7 @@ impl eframe::App for PainterApp {
                         .max_height(200.0)
                         .auto_shrink(false)
                         .show(ui, |ui: &mut egui::Ui| {
-                            for (i, (name, color, normal, _has_tex, _has_nrm)) in
-                                mappings.iter().enumerate()
-                            {
+                            for (i, lm) in mappings.iter().enumerate() {
                                 let row_rect = egui::Rect::from_min_size(
                                     ui.cursor().min,
                                     egui::vec2(ui.available_width(), 22.0),
@@ -765,9 +763,9 @@ impl eframe::App for PainterApp {
                                         ui.checkbox(&mut popup.layer_enabled[i], "");
                                     }
                                     if enabled {
-                                        ui.strong(name);
+                                        ui.strong(&lm.name);
                                     } else {
-                                        ui.colored_label(weak, name);
+                                        ui.colored_label(weak, &lm.name);
                                     }
 
                                     // Color + Normal pinned to right
@@ -779,7 +777,11 @@ impl eframe::App for PainterApp {
                                                 egui::Layout::left_to_right(egui::Align::Center),
                                                 |ui: &mut egui::Ui| {
                                                     source_label_with_chip(
-                                                        ui, normal, text_color, weak,
+                                                        ui,
+                                                        &lm.base_normal,
+                                                        text_color,
+                                                        weak,
+                                                        lm.is_default,
                                                     );
                                                 },
                                             );
@@ -788,7 +790,11 @@ impl eframe::App for PainterApp {
                                                 egui::Layout::left_to_right(egui::Align::Center),
                                                 |ui: &mut egui::Ui| {
                                                     source_label_with_chip(
-                                                        ui, color, text_color, weak,
+                                                        ui,
+                                                        &lm.base_color,
+                                                        text_color,
+                                                        weak,
+                                                        lm.is_default,
                                                     );
                                                 },
                                             );
@@ -896,13 +902,21 @@ impl eframe::App for PainterApp {
 
 /// Show a TextureSource as a compact visual in the popup.
 /// Solid → chip + hex, File → icon + name, MeshMaterial → icon + index.
+/// When `is_default` is true, shows "Default" instead of details.
 fn source_label_with_chip(
     ui: &mut egui::Ui,
     src: &TextureSource,
     text_color: egui::Color32,
     weak: egui::Color32,
+    is_default: bool,
 ) {
     use egui_phosphor::fill::{CUBE, FOLDER_OPEN};
+
+    if is_default {
+        ui.colored_label(weak, "Default");
+        return;
+    }
+
     match src {
         TextureSource::Solid(rgb) => {
             let srgb = [

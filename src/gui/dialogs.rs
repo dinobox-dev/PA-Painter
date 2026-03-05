@@ -17,7 +17,7 @@ use practical_arcana_painter::types::{
     BackgroundMode, EmbeddedTexture, Layer, PaintValues, TextureSource,
 };
 
-use super::state::{AppState, MeshLoadPopup, ReloadSummary};
+use super::state::{AppState, LayerMapping, MeshLoadPopup, ReloadSummary};
 use super::textures;
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -484,27 +484,27 @@ pub fn export_glb_to(state: &mut AppState, path: &Path) {
 // ── Auto-Mapping ──────────────────────────────────────────────────
 
 /// Compute auto-mapped TextureSource for a material (GLB style: MeshMaterial refs).
-fn auto_map_glb(mat: &MeshMaterialInfo, idx: usize) -> (TextureSource, TextureSource) {
+/// Returns (color, normal, is_default).
+fn auto_map_glb(mat: &MeshMaterialInfo, idx: usize) -> (TextureSource, TextureSource, bool) {
     let color = if mat.base_color_texture.is_some() {
         TextureSource::MeshMaterial(idx)
-    } else {
+    } else if mat.has_explicit_color {
         let f = mat.base_color_factor;
-        if (f[0] - 1.0).abs() < 0.01 && (f[1] - 1.0).abs() < 0.01 && (f[2] - 1.0).abs() < 0.01 {
-            TextureSource::Solid([0.5, 0.5, 0.5])
-        } else {
-            TextureSource::Solid([f[0], f[1], f[2]])
-        }
+        TextureSource::Solid([f[0], f[1], f[2]])
+    } else {
+        TextureSource::Solid([0.5, 0.5, 0.5])
     };
     let normal = if mat.normal_texture.is_some() {
         TextureSource::MeshMaterial(idx)
     } else {
         TextureSource::None
     };
-    (color, normal)
+    let is_default = !mat.has_explicit_color && mat.normal_texture.is_none();
+    (color, normal, is_default)
 }
 
-/// Compute auto-mapped TextureSource for an OBJ MTL material (File-based refs).
-fn auto_map_mtl(mat: &MeshMaterialInfo) -> (TextureSource, TextureSource) {
+/// Returns (color, normal, is_default).
+fn auto_map_mtl(mat: &MeshMaterialInfo) -> (TextureSource, TextureSource, bool) {
     let color = if let Some(ref tex) = mat.base_color_texture {
         TextureSource::File(Some(EmbeddedTexture {
             label: mat.name.clone(),
@@ -512,16 +512,11 @@ fn auto_map_mtl(mat: &MeshMaterialInfo) -> (TextureSource, TextureSource) {
             width: tex.width,
             height: tex.height,
         }))
-    } else {
+    } else if mat.has_explicit_color {
         let f = mat.base_color_factor;
-        let default_diffuse = (f[0] - 0.8).abs() < 0.01
-            && (f[1] - 0.8).abs() < 0.01
-            && (f[2] - 0.8).abs() < 0.01;
-        if default_diffuse {
-            TextureSource::Solid([0.5, 0.5, 0.5])
-        } else {
-            TextureSource::Solid([f[0], f[1], f[2]])
-        }
+        TextureSource::Solid([f[0], f[1], f[2]])
+    } else {
+        TextureSource::Solid([0.5, 0.5, 0.5])
     };
     let normal = if let Some(ref tex) = mat.normal_texture {
         TextureSource::File(Some(EmbeddedTexture {
@@ -533,7 +528,10 @@ fn auto_map_mtl(mat: &MeshMaterialInfo) -> (TextureSource, TextureSource) {
     } else {
         TextureSource::None
     };
-    (color, normal)
+    let is_default = !mat.has_explicit_color
+        && mat.base_color_texture.is_none()
+        && mat.normal_texture.is_none();
+    (color, normal, is_default)
 }
 
 /// Default mapping (no material info).
@@ -548,26 +546,38 @@ fn build_mappings(
     layer_names: &[String],
     materials: &[MeshMaterialInfo],
     is_glb: bool,
-) -> Vec<(String, TextureSource, TextureSource, bool, bool)> {
+) -> Vec<LayerMapping> {
     layer_names
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            let mat = materials.get(i);
-            let (color, normal) = if let Some(m) = mat {
-                if is_glb {
+            if let Some(m) = materials.get(i) {
+                let (color, normal, is_default) = if is_glb {
                     auto_map_glb(m, i)
                 } else {
                     auto_map_mtl(m)
+                };
+                LayerMapping {
+                    name: name.clone(),
+                    base_color: color,
+                    base_normal: normal,
+                    is_default,
                 }
             } else {
-                default_mapping()
-            };
-            let has_color_tex = mat.is_some_and(|m| m.base_color_texture.is_some());
-            let has_normal_tex = mat.is_some_and(|m| m.normal_texture.is_some());
-            (name.clone(), color, normal, has_color_tex, has_normal_tex)
+                default_layer_mapping(name)
+            }
         })
         .collect()
+}
+
+fn default_layer_mapping(name: &str) -> LayerMapping {
+    let (color, normal) = default_mapping();
+    LayerMapping {
+        name: name.to_string(),
+        base_color: color,
+        base_normal: normal,
+        is_default: true,
+    }
 }
 
 /// Build a MeshLoadPopup holding the loaded mesh (not yet applied to state).
@@ -592,15 +602,12 @@ fn build_mesh_load_popup(
     let mappings = if !mesh.materials.is_empty() {
         build_mappings(&layer_names, &mesh.materials, is_glb)
     } else {
-        layer_names
-            .iter()
-            .map(|n| (n.clone(), default_mapping().0, default_mapping().1, false, false))
-            .collect()
+        layer_names.iter().map(|n| default_layer_mapping(n)).collect()
     };
 
     let mappings_no_mtl = layer_names
         .iter()
-        .map(|n| (n.clone(), default_mapping().0, default_mapping().1, false, false))
+        .map(|n| default_layer_mapping(n))
         .collect();
 
     let layer_count = mappings.len();
@@ -724,19 +731,19 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
         }
 
         // Apply material mappings (skip disabled)
-        for (i, (name, color, normal, _, _)) in active_mappings.iter().enumerate() {
+        for (i, lm) in active_mappings.iter().enumerate() {
             if !popup.layer_enabled.get(i).copied().unwrap_or(true) {
                 continue;
             }
-            if let Some(layer) = state.project.layers.iter_mut().find(|l| &l.group_name == name) {
+            if let Some(layer) = state.project.layers.iter_mut().find(|l| l.group_name == lm.name) {
                 if matches!(layer.base_color, TextureSource::Solid(c) if (c[0] - 0.5).abs() < 0.01 && (c[1] - 0.5).abs() < 0.01 && (c[2] - 0.5).abs() < 0.01)
                     || matches!(layer.base_color, TextureSource::MeshMaterial(_))
                 {
-                    layer.base_color = color.clone();
+                    layer.base_color = lm.base_color.clone();
                 }
                 if matches!(layer.base_normal, TextureSource::None | TextureSource::MeshMaterial(_))
                 {
-                    layer.base_normal = normal.clone();
+                    layer.base_normal = lm.base_normal.clone();
                 }
             }
         }
@@ -774,19 +781,19 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
         state.undo.clear();
 
         // Create only enabled layers
-        for (i, (name, color, normal, _, _)) in active_mappings.iter().enumerate() {
+        for (i, lm) in active_mappings.iter().enumerate() {
             if !popup.layer_enabled.get(i).copied().unwrap_or(true) {
                 continue;
             }
             state.project.layers.push(Layer {
-                name: name.clone(),
+                name: lm.name.clone(),
                 visible: true,
-                group_name: name.clone(),
+                group_name: lm.name.clone(),
                 order: state.project.layers.len() as i32,
                 paint: PaintValues::default(),
                 guides: vec![],
-                base_color: color.clone(),
-                base_normal: normal.clone(),
+                base_color: lm.base_color.clone(),
+                base_normal: lm.base_normal.clone(),
             });
         }
         state.selected_layer = if state.project.layers.is_empty() {
