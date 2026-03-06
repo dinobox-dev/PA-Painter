@@ -66,6 +66,24 @@ pub fn generate_brush_profile(width: usize, seed: u32) -> Vec<f32> {
     density
 }
 
+/// Apply per-stroke jitter to a base brush profile using Perlin noise.
+///
+/// Each stroke gets a unique `seed` so bristle patterns vary slightly.
+/// `amount` controls jitter strength (0.0 = no change, typical ≈ 0.15).
+pub fn jitter_brush_profile(base: &[f32], seed: u32, amount: f32) -> Vec<f32> {
+    if amount <= 0.0 || base.is_empty() {
+        return base.to_vec();
+    }
+    let perlin = Perlin::new(seed);
+    base.iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            let noise = perlin.get([i as f64 * 0.5, seed as f64 * 0.1]) as f32;
+            (v + noise * amount).clamp(0.0, 1.0)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

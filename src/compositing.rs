@@ -6,7 +6,7 @@
 use glam::Vec2;
 use rayon::prelude::*;
 
-use crate::brush_profile::generate_brush_profile;
+use crate::brush_profile::{generate_brush_profile, jitter_brush_profile};
 use crate::math::{lerp, lerp_color, perpendicular, smoothstep};
 use crate::object_normal::{try_sample_object_normal, MeshNormalData};
 use crate::path_placement::generate_paths;
@@ -692,8 +692,9 @@ pub fn composite_layer(
         .enumerate()
         .map(|(i, path)| {
             let stroke_length_px = (path.arc_length() * resolution as f32).ceil() as usize;
+            let jittered = jitter_brush_profile(&brush_profile, scaled.seed + i as u32, 0.15);
             let height = generate_stroke_height(
-                &brush_profile,
+                &jittered,
                 stroke_length_px,
                 &scaled,
                 scaled.seed + i as u32,
