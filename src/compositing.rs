@@ -404,12 +404,31 @@ pub fn composite_stroke(
                 let idx = (gy * res + gx) as usize;
 
                 let prev_h = global.height[idx];
-                global.height[idx] = h.max(prev_h);
+                // Wet-on-wet height yielding: same formula as color mixing
+                // (wet_on_wet × prev_h) so thick wet paint resists more.
+                let new_h = if h >= prev_h {
+                    h
+                } else {
+                    let yield_ratio = appearance.wet_on_wet * prev_h.min(1.0);
+                    lerp(prev_h, h, yield_ratio)
+                };
+                global.height[idx] = new_h;
 
-                // Density winner takes gradient, object normal, and paint load.
-                // This keeps all normal-related channels consistent: the stroke
-                // with the thickest paint at this pixel owns the entire normal.
-                if h >= prev_h {
+                // Gradient/normal/paint_load: blend between previous and current
+                // owner proportionally to how much the height shifted.
+                let blend_t = if prev_h <= 0.0 {
+                    1.0 // virgin pixel — new stroke owns fully
+                } else if h >= prev_h {
+                    1.0
+                } else {
+                    // How much did height move toward h? That fraction
+                    // determines how much the new stroke owns this pixel.
+                    // (prev_h - new_h) / (prev_h - h), but prev_h > h here.
+                    let span = prev_h - h;
+                    if span > 1e-8 { (prev_h - new_h) / span } else { 0.0 }
+                };
+
+                if blend_t > 0.0 {
                     if !global.paint_load.is_empty() {
                         let r = bilinear_sample(
                             &local_height.remaining,
@@ -418,19 +437,26 @@ pub fn composite_stroke(
                             lx_f,
                             ly_f,
                         );
-                        global.paint_load[idx] = r;
+                        global.paint_load[idx] = lerp(global.paint_load[idx], r, blend_t);
                     }
                     let local_gx =
                         bilinear_sample(&local_gradient.gx, local_w, local_h, lx_f, ly_f);
                     let local_gy =
                         bilinear_sample(&local_gradient.gy, local_w, local_h, lx_f, ly_f);
                     // Rotate from local frame to global UV space
-                    global.gradient_x[idx] = local_gx * seg_dir.x + local_gy * normal.x;
-                    global.gradient_y[idx] = local_gx * seg_dir.y + local_gy * normal.y;
+                    let new_gx = local_gx * seg_dir.x + local_gy * normal.x;
+                    let new_gy = local_gx * seg_dir.y + local_gy * normal.y;
+                    global.gradient_x[idx] = lerp(global.gradient_x[idx], new_gx, blend_t);
+                    global.gradient_y[idx] = lerp(global.gradient_y[idx], new_gy, blend_t);
 
                     if let Some(sn) = stroke_normal {
                         if !global.object_normal.is_empty() {
-                            global.object_normal[idx] = sn;
+                            let prev_n = global.object_normal[idx];
+                            global.object_normal[idx] = [
+                                lerp(prev_n[0], sn[0], blend_t),
+                                lerp(prev_n[1], sn[1], blend_t),
+                                lerp(prev_n[2], sn[2], blend_t),
+                            ];
                         }
                     }
                 }

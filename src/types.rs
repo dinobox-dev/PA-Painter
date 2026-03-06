@@ -391,9 +391,10 @@ pub struct StrokeParams {
     /// 0.0 = no effect (default, backward compatible).
     #[serde(default)]
     pub viscosity: f32,
-    /// Wet-on-wet mixing (0.0–1.0). When positive, overlapping strokes blend
-    /// subtractively (Kubelka-Munk approximation) based on existing paint height.
-    /// 0.0 = pure opaque layering (default, backward compatible).
+    /// Wet-on-wet mixing (0.0–1.0). Controls subtractive color blending
+    /// and height yielding between overlapping strokes / layers.
+    /// 0.0 = dry (max-height physics, opaque layering).
+    /// 1.0 = fully wet (later strokes dominate height, colors mix subtractively).
     #[serde(default)]
     pub wet_on_wet: f32,
     pub seed: u32,
@@ -559,7 +560,12 @@ pub struct PaintValues {
     /// Paint viscosity (0.0–1.0). See [`StrokeParams::viscosity`].
     #[serde(default)]
     pub viscosity: f32,
-    /// Wet-on-wet mixing (0.0–1.0). See [`StrokeParams::wet_on_wet`].
+
+    // Layer interaction
+    /// Wet-on-wet mixing (0.0–1.0). Controls subtractive color blending
+    /// and height yielding between overlapping strokes / layers.
+    /// 0.0 = dry (max-height physics, opaque layering). 1.0 = fully wet
+    /// (later layer dominates height, colors mix subtractively).
     #[serde(default)]
     pub wet_on_wet: f32,
 }
