@@ -262,6 +262,9 @@ pub struct StrokeAppearance {
     pub id: u32,
     pub normal: Option<[f32; 3]>,
     pub transparent: bool,
+    /// Per-pixel normal clamp: skip pixels whose mesh normal deviates too
+    /// far from the stroke's reference normal. `None` = disabled.
+    pub normal_break_threshold: Option<f32>,
 }
 
 /// Composite a single stroke into the global maps using **per-segment gather**.
@@ -278,6 +281,7 @@ pub fn composite_stroke(
     path: &StrokePath,
     resolution: u32,
     appearance: &StrokeAppearance,
+    normal_data: Option<&MeshNormalData>,
     global: &mut GlobalMaps,
 ) {
     let stroke_color = appearance.color;
@@ -364,6 +368,20 @@ pub fn composite_stroke(
                 let h = bilinear_sample(&local_height.data, local_w, local_h, lx_f, ly_f);
                 if h <= 0.0 {
                     continue;
+                }
+
+                // Per-pixel normal clamp: skip this pixel if its mesh normal
+                // deviates too far from the stroke's reference face normal.
+                if let (Some(threshold), Some(nd), Some(sn)) =
+                    (appearance.normal_break_threshold, normal_data, stroke_normal)
+                {
+                    let uv = Vec2::new((gx as f32 + 0.5) / res_f, (gy as f32 + 0.5) / res_f);
+                    if let Some(pixel_n) = try_sample_object_normal(nd, uv) {
+                        let sn_vec = glam::Vec3::new(sn[0], sn[1], sn[2]);
+                        if sn_vec.dot(pixel_n) < threshold {
+                            continue;
+                        }
+                    }
                 }
 
                 let idx = (gy * res + gx) as usize;
@@ -716,7 +734,9 @@ pub fn composite_layer(
                 id: paths[i].stroke_id,
                 normal: stroke_normals[i],
                 transparent,
+                normal_break_threshold: scaled.normal_break_threshold,
             },
+            normal_data,
             global,
         );
     }

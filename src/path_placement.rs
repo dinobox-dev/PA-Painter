@@ -11,7 +11,9 @@ use glam::Vec2;
 
 use crate::direction_field::DirectionField;
 use crate::math::rotate_vec2;
-use crate::object_normal::{sample_object_normal, MeshNormalData};
+use crate::object_normal::MeshNormalData;
+#[cfg(test)]
+use crate::object_normal::sample_object_normal;
 use crate::rng::SeededRng;
 use crate::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
 use crate::types::{PaintLayer, StrokeParams, StrokePath, BASE_RESOLUTION};
@@ -133,7 +135,7 @@ pub fn trace_streamline(
     resolution: u32,
     rng: &mut SeededRng,
     color_tex: Option<&ColorTextureRef<'_>>,
-    normal_data: Option<&MeshNormalData>,
+    _normal_data: Option<&MeshNormalData>,
     uv_bounds: (Vec2, Vec2),
     mask: Option<&UvMask>,
 ) -> Option<Vec<Vec2>> {
@@ -154,8 +156,6 @@ pub fn trace_streamline(
 
     let max_turn_rad = params.max_turn_angle.to_radians();
     let angle_var_rad = params.angle_variation.to_radians();
-
-    let start_normal = normal_data.map(|nd| sample_object_normal(nd, pos));
 
     while length < target_length {
         let mut dir = field.sample(pos);
@@ -210,15 +210,9 @@ pub fn trace_streamline(
             }
         }
 
-        // Normal boundary check (cumulative from stroke start)
-        if let (Some(threshold), Some(nd), Some(sn)) =
-            (params.normal_break_threshold, normal_data, start_normal)
-        {
-            let next_n = sample_object_normal(nd, next_pos);
-            if sn.dot(next_n) < threshold {
-                break;
-            }
-        }
+        // Normal boundary: no longer terminates the path here.
+        // Per-pixel normal clamp in compositing handles face boundaries
+        // without creating empty gaps at edges.
 
         path.push(next_pos);
         prev_dir = dir;
@@ -385,6 +379,14 @@ pub fn generate_paths_cancellable(
             }
         }
     }
+
+    // Sort by length descending so the overlap filter accepts longer paths first.
+    // Prevents short boundary-clipped strokes from blocking longer interior ones.
+    raw_paths.sort_by(|a, b| {
+        let len_a: f32 = a.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+        let len_b: f32 = b.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+        len_b.total_cmp(&len_a)
+    });
 
     filter_overlapping_paths(
         &mut raw_paths,
@@ -1659,9 +1661,9 @@ mod tests {
     }
 
     #[test]
-    fn normal_boundary_breaks_path() {
-        // Horizontal stroke crossing a 90° normal boundary at u=0.5.
-        // threshold=0.5 (~60°) should break at the boundary (dot=0).
+    fn normal_boundary_no_longer_breaks_path() {
+        // Normal break now handled by per-pixel clamp in compositing,
+        // so paths should NOT be shortened at face boundaries.
         let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
@@ -1708,11 +1710,10 @@ mod tests {
         );
 
         if let (Some(p), Some(p_nb)) = (path, path_no_break) {
-            assert!(
-                p.len() < p_nb.len(),
-                "normal boundary should shorten path: {} vs {} points",
+            assert_eq!(
                 p.len(),
-                p_nb.len()
+                p_nb.len(),
+                "path should NOT be shortened by normal_break_threshold (now per-pixel)"
             );
             let last_x = p.last().unwrap().x;
             assert!(
