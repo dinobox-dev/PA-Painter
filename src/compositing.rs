@@ -266,6 +266,22 @@ pub struct StrokeAppearance {
     /// Per-pixel normal clamp: skip pixels whose mesh normal deviates too
     /// far from the stroke's reference normal. `None` = disabled.
     pub normal_break_threshold: Option<f32>,
+    /// Wet-on-wet subtractive mixing strength (0.0–1.0).
+    pub wet_on_wet: f32,
+}
+
+/// Kubelka-Munk approximate subtractive mix between two colors.
+///
+/// Uses geometric mean per channel as a cheap approximation of pigment mixing:
+/// `sqrt(a * b)` produces darker intermediates (red + blue → dark purple),
+/// which is the hallmark of subtractive (pigment) blending vs additive (light).
+/// `t` controls how far toward the geometric mean we go from `b`.
+fn subtractive_mix(a: Color, b: Color, t: f32) -> Color {
+    let mix = |ca: f32, cb: f32| {
+        let geo = (ca.max(0.001) * cb.max(0.001)).sqrt();
+        lerp(cb, geo, t)
+    };
+    Color::rgb(mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b))
 }
 
 /// Composite a single stroke into the global maps using **per-segment gather**.
@@ -428,15 +444,28 @@ pub fn composite_stroke(
                     } else {
                         // Over-paint: blend paint colors, alpha accumulates (Porter-Duff "over")
                         let prev = global.color[idx];
+                        let blended = if appearance.wet_on_wet > 0.0 && prev_h > 0.0 {
+                            let mix_ratio = appearance.wet_on_wet * prev_h.min(1.0);
+                            subtractive_mix(prev, stroke_color, mix_ratio)
+                        } else {
+                            stroke_color
+                        };
                         global.color[idx] = Color::new(
-                            lerp(prev.r, stroke_color.r, opacity),
-                            lerp(prev.g, stroke_color.g, opacity),
-                            lerp(prev.b, stroke_color.b, opacity),
+                            lerp(prev.r, blended.r, opacity),
+                            lerp(prev.g, blended.g, opacity),
+                            lerp(prev.b, blended.b, opacity),
                             prev.a + opacity * (1.0 - prev.a),
                         );
                     }
                 } else {
-                    global.color[idx] = lerp_color(global.color[idx], stroke_color, opacity);
+                    let existing = global.color[idx];
+                    let blended = if appearance.wet_on_wet > 0.0 && prev_h > 0.0 {
+                        let mix_ratio = appearance.wet_on_wet * prev_h.min(1.0);
+                        subtractive_mix(existing, stroke_color, mix_ratio)
+                    } else {
+                        stroke_color
+                    };
+                    global.color[idx] = lerp_color(existing, blended, opacity);
                 }
 
                 global.stroke_id[idx] = stroke_id;
@@ -750,6 +779,7 @@ pub fn composite_layer(
                 normal: stroke_normals[i],
                 transparent,
                 normal_break_threshold: scaled.normal_break_threshold,
+                wet_on_wet: scaled.wet_on_wet,
             },
             normal_data,
             global,

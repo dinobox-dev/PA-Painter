@@ -130,6 +130,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             Some(0.01),
             2,
         );
+        slider_row(
+            ui,
+            "wet_on_wet",
+            &mut layer.paint.wet_on_wet,
+            0.0..=1.0,
+            "Wet-on-Wet",
+            Some(0.01),
+            2,
+        );
 
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Layout").weak());
