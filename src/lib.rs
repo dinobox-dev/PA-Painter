@@ -74,4 +74,5 @@ pub mod stroke_color;
 pub mod math;
 pub mod object_normal;
 pub mod rng;
+pub mod stretch_map;
 pub mod uv_mask;
