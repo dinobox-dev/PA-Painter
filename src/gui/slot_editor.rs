@@ -121,6 +121,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             Some(0.01),
             2,
         );
+        slider_row(
+            ui,
+            "viscosity",
+            &mut layer.paint.viscosity,
+            0.0..=1.0,
+            "Viscosity",
+            Some(0.01),
+            2,
+        );
 
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Layout").weak());

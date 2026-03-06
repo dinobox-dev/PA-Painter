@@ -386,6 +386,11 @@ pub struct StrokeParams {
     /// Default (None) = 0.3.  Lower values narrow the "too close" zone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overlap_dist_factor: Option<f32>,
+    /// Paint viscosity (0.0–1.0). Higher values spread the bristle pattern
+    /// even when paint is abundant, simulating thick impasto or acrylic media.
+    /// 0.0 = no effect (default, backward compatible).
+    #[serde(default)]
+    pub viscosity: f32,
     pub seed: u32,
 }
 
@@ -405,6 +410,7 @@ impl Default for StrokeParams {
             normal_break_threshold: None,
             overlap_ratio: None,
             overlap_dist_factor: None,
+            viscosity: 0.0,
             seed: 42,
         }
     }
@@ -432,6 +438,7 @@ impl StrokeParams {
             overlap_ratio: paint.overlap_ratio.map(|v| v.clamp(0.0, 1.0)),
             overlap_dist_factor: paint.overlap_dist_factor.map(|v| v.max(0.01)),
             color_variation: paint.color_variation.clamp(0.0, 1.0),
+            viscosity: paint.viscosity.clamp(0.0, 1.0),
             seed,
         }
     }
@@ -542,6 +549,9 @@ pub struct PaintValues {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overlap_dist_factor: Option<f32>,
     pub color_variation: f32,
+    /// Paint viscosity (0.0–1.0). See [`StrokeParams::viscosity`].
+    #[serde(default)]
+    pub viscosity: f32,
 }
 
 impl Default for PaintValues {
@@ -590,6 +600,7 @@ impl Hash for PaintValues {
         self.overlap_ratio.map(|v| v.to_bits()).hash(state);
         self.overlap_dist_factor.map(|v| v.to_bits()).hash(state);
         self.color_variation.to_bits().hash(state);
+        self.viscosity.to_bits().hash(state);
     }
 }
 
@@ -696,6 +707,7 @@ impl PresetLibrary {
                         overlap_ratio: None,
                         overlap_dist_factor: None,
                         color_variation: default_layout.color_variation,
+                        viscosity: 0.0,
                     },
                 },
                 PaintPreset {
@@ -714,6 +726,7 @@ impl PresetLibrary {
                         overlap_ratio: None,
                         overlap_dist_factor: None,
                         color_variation: 0.1,
+                        viscosity: 0.0,
                     },
                 },
                 PaintPreset {
@@ -732,6 +745,7 @@ impl PresetLibrary {
                         overlap_ratio: None,
                         overlap_dist_factor: None,
                         color_variation: 0.15,
+                        viscosity: 0.0,
                     },
                 },
                 PaintPreset {
@@ -750,6 +764,7 @@ impl PresetLibrary {
                         overlap_ratio: Some(0.8),
                         overlap_dist_factor: Some(0.2),
                         color_variation: 0.08,
+                        viscosity: 0.4,
                     },
                 },
                 PaintPreset {
@@ -768,6 +783,7 @@ impl PresetLibrary {
                         overlap_ratio: None,
                         overlap_dist_factor: None,
                         color_variation: 0.1,
+                        viscosity: 0.0,
                     },
                 },
                 PaintPreset {
@@ -812,6 +828,7 @@ impl PresetLibrary {
                         overlap_ratio: None,
                         overlap_dist_factor: None,
                         color_variation: 0.1,
+                        viscosity: 0.0,
                     },
                 },
                 PaintPreset {
@@ -830,6 +847,7 @@ impl PresetLibrary {
                         overlap_ratio: None,
                         overlap_dist_factor: None,
                         color_variation: 0.1,
+                        viscosity: 0.0,
                     },
                 },
                 PaintPreset {
@@ -848,6 +866,7 @@ impl PresetLibrary {
                         overlap_ratio: None,
                         overlap_dist_factor: None,
                         color_variation: 0.15,
+                        viscosity: 0.0,
                     },
                 },
             ],

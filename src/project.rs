@@ -716,6 +716,7 @@ mod tests {
                 overlap_ratio: None,
                 overlap_dist_factor: None,
                 color_variation: 0.05,
+                viscosity: 0.0,
             },
             guides,
             base_color: TextureSource::Solid([0.5, 0.5, 0.5]),

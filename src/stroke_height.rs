@@ -191,13 +191,14 @@ pub fn generate_stroke_height(
             let cutoff_idx = cutoff_start + j as f32 * step;
             let source_idx = lerp(cutoff_idx, compress_idx, blend);
             let rd = interpolate_array(brush_profile, source_idx);
-            // Brush profile shapes cross-section: at low pressure only
-            // bristle tips touch, so gaps show as splits/forks.
-            // At high pressure paint fills gaps → uniform coverage.
-            let profile_mod = lerp(rd, 1.0, p);
+            // Viscosity controls how much bristle pattern shows through.
+            // Low viscosity (fluid paint): gaps fill in → smooth coverage.
+            // High viscosity (thick paint): bristle tracks remain visible.
+            let profile_mod = lerp(rd, 1.0, 1.0 - params.viscosity);
             // As paint depletes, individual bristle tracks emerge further.
+            // High-viscosity paint retains more bristle texture when depleted.
             let fill = remaining.min(1.0);
-            let pattern_spread = (1.0 - fill) * 5.0;
+            let pattern_spread = (1.0 - fill) * (3.0 + 2.0 * params.viscosity);
             let effective_density = profile_mod * p.powf(pattern_spread * (1.0 - rd) + 1.0);
 
             let local_y = active_start + j;
