@@ -70,18 +70,19 @@ pub fn compute_mesh_normal_data(mesh: &LoadedMesh, resolution: u32) -> MeshNorma
     for i in 0..size {
         let n = object_normals[i];
         if n.length_squared() > 1e-12 {
-            object_normals[i] = n.normalize();
-            // Re-orthogonalize T and B against the final normal
+            let n = n.normalize();
+            object_normals[i] = n;
+            // MikkTSpace-compatible orthogonalization: preserve UV handedness.
+            // Gram-Schmidt T against N, then derive B via cross product with
+            // the original handedness sign so mirrored UV islands get correct
+            // bitangent direction.
             let t = tangents[i];
             let b = bitangents[i];
             if t.length_squared() > 1e-12 {
-                tangents[i] = (t - n.dot(t) * object_normals[i]).normalize_or_zero();
-            }
-            if b.length_squared() > 1e-12 {
-                bitangents[i] = (b
-                    - object_normals[i].dot(b) * object_normals[i]
-                    - tangents[i].dot(b) * tangents[i])
-                    .normalize_or_zero();
+                let t_ortho = (t - n.dot(t) * n).normalize_or_zero();
+                let handedness = if t.cross(b).dot(n) > 0.0 { 1.0 } else { -1.0 };
+                tangents[i] = t_ortho;
+                bitangents[i] = n.cross(t_ortho) * handedness;
             }
         }
     }
@@ -646,6 +647,57 @@ mod tests {
         assert!(
             (n - Vec3::Z).length() < EPS,
             "unpainted pixel should return +Z fallback"
+        );
+    }
+
+    // ── Handedness Tests ──
+
+    #[test]
+    fn tbn_handedness_standard_uv() {
+        // Standard (non-mirrored) UV: T×B should align with N (positive handedness)
+        let mesh = make_full_quad_mesh();
+        let data = compute_mesh_normal_data(&mesh, 32);
+
+        let (t, b, n) = sample_tbn(&data, Vec2::new(0.5, 0.5));
+        let cross = t.cross(b);
+        assert!(
+            cross.dot(n) > 0.5,
+            "standard UV should have positive handedness, T×B·N = {:.4}",
+            cross.dot(n)
+        );
+    }
+
+    #[test]
+    fn tbn_handedness_mirrored_uv() {
+        // Mirrored UV: U axis flipped → T×B should be opposite to N (negative handedness)
+        let mesh = LoadedMesh {
+            positions: vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            uvs: vec![
+                // U axis flipped: (1,0) → (0,0) → (0,1) → (1,1)
+                Vec2::new(1.0, 0.0),
+                Vec2::new(0.0, 0.0),
+                Vec2::new(0.0, 1.0),
+                Vec2::new(1.0, 1.0),
+            ],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            groups: vec![],
+            materials: vec![],
+        };
+
+        let data = compute_mesh_normal_data(&mesh, 32);
+        let (t, b, n) = sample_tbn(&data, Vec2::new(0.5, 0.5));
+
+        // With mirrored UVs, the bitangent should flip so T×B·N < 0
+        let cross = t.cross(b);
+        assert!(
+            cross.dot(n) < -0.5,
+            "mirrored UV should have negative handedness, T×B·N = {:.4}",
+            cross.dot(n)
         );
     }
 
