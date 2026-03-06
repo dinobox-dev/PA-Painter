@@ -351,6 +351,7 @@ fn run_pipeline(
                     &global.gradient_y,
                     nd,
                     &global.object_normal,
+                    &global.paint_load,
                     input.resolution,
                     input.settings.normal_strength,
                 )

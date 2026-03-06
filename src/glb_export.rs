@@ -761,6 +761,7 @@ mod tests {
                     &maps.gradient_y,
                     &nd,
                     &maps.object_normal,
+                    &maps.paint_load,
                     res,
                     settings.normal_strength,
                 ),
@@ -900,6 +901,7 @@ mod tests {
             &maps.gradient_y,
             &nd,
             &maps.object_normal,
+            &maps.paint_load,
             res,
             settings.normal_strength,
         );
@@ -992,6 +994,7 @@ mod tests {
             &maps.gradient_y,
             &nd,
             &maps.object_normal,
+            &maps.paint_load,
             res,
             settings.normal_strength,
         );

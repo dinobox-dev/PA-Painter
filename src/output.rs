@@ -11,6 +11,7 @@ use crate::asset_io::linear_to_srgb;
 use crate::compositing::GlobalMaps;
 use crate::object_normal::MeshNormalData;
 use crate::stroke_color::hsv_to_rgb;
+use crate::math::smoothstep;
 use crate::types::{BackgroundMode, Color, HsvColor, NormalMode, OutputSettings};
 use crate::uv_mask::UvMask;
 
@@ -92,14 +93,17 @@ pub fn generate_normal_map(
 /// For each pixel:
 /// 1. Read pre-composited gradient (gx, gy) from global gradient buffers.
 /// 2. Look up the composited object-space normal N_obj, tangent T, and bitangent B.
-/// 3. Perturb: `perturbed = normalize(N_obj + strength * (-gx * T + -gy * B))`
-/// 4. Convert to tangent space: `ts = (perturbed·T, perturbed·B, perturbed·N_geom)`
-/// 5. Encode to [0, 1].
+/// 3. Blend N_obj toward N_geom at low-density pixels so the stroke normal
+///    fades out in sync with the visible paint opacity.
+/// 4. Perturb: `perturbed = normalize(N_blended + strength * (-gx * T + -gy * B))`
+/// 5. Convert to tangent space: `ts = (perturbed·T, perturbed·B, perturbed·N_geom)`
+/// 6. Encode to [0, 1].
 pub fn generate_normal_map_depicted_form(
     gradient_x: &[f32],
     gradient_y: &[f32],
     normal_data: &MeshNormalData,
     global_object_normals: &[[f32; 3]],
+    paint_load: &[f32],
     resolution: u32,
     normal_strength: f32,
 ) -> Vec<[f32; 3]> {
@@ -136,12 +140,16 @@ pub fn generate_normal_map_depicted_form(
                 continue;
             }
 
-            // Use composited stroke normal if available, else use geometric normal
+            // Use composited stroke normal if available, else use geometric normal.
+            // Blend toward n_geom at low density so the flat-plane normal
+            // fades in sync with visible paint opacity.
             let n_obj = if !global_object_normals.is_empty() {
                 let sn = global_object_normals[pixel_idx];
                 let v = glam::Vec3::new(sn[0], sn[1], sn[2]);
                 if v.length_squared() > 0.5 {
-                    v
+                    let load = paint_load[pixel_idx];
+                    let influence = smoothstep(0.0, 0.7, load);
+                    n_geom.lerp(v, influence).normalize()
                 } else {
                     n_geom
                 }
@@ -454,6 +462,7 @@ pub fn export_all(
             &global.gradient_y,
             nd,
             &global.object_normal,
+            &global.paint_load,
             global.resolution,
             settings.normal_strength,
         ),

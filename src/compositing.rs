@@ -41,6 +41,11 @@ pub struct GlobalMaps {
     pub gradient_x: Vec<f32>,
     /// Paint detail gradient (Y component in UV space), composited per-stroke.
     pub gradient_y: Vec<f32>,
+    /// Paint remaining (load depletion) per pixel. Tracks the winning stroke's
+    /// `remaining` value, used by DepictedForm to fade the flat-plane normal
+    /// based on actual paint thickness rather than pressure-driven density.
+    /// Empty in SurfacePaint mode.
+    pub paint_load: Vec<f32>,
     pub resolution: u32,
 }
 
@@ -92,6 +97,12 @@ impl GlobalMaps {
         let gradient_x = vec![0.0f32; size];
         let gradient_y = vec![0.0f32; size];
 
+        let paint_load = if normal_mode == NormalMode::DepictedForm {
+            vec![0.0f32; size]
+        } else {
+            Vec::new()
+        };
+
         Self {
             height,
             color,
@@ -99,6 +110,7 @@ impl GlobalMaps {
             object_normal,
             gradient_x,
             gradient_y,
+            paint_load,
             resolution,
         }
     }
@@ -359,8 +371,20 @@ pub fn composite_stroke(
                 let prev_h = global.height[idx];
                 global.height[idx] = h.max(prev_h);
 
-                // Gradient compositing: winner (highest density) takes gradient
+                // Density winner takes gradient, object normal, and paint load.
+                // This keeps all normal-related channels consistent: the stroke
+                // with the thickest paint at this pixel owns the entire normal.
                 if h >= prev_h {
+                    if !global.paint_load.is_empty() {
+                        let r = bilinear_sample(
+                            &local_height.remaining,
+                            local_w,
+                            local_h,
+                            lx_f,
+                            ly_f,
+                        );
+                        global.paint_load[idx] = r;
+                    }
                     let local_gx =
                         bilinear_sample(&local_gradient.gx, local_w, local_h, lx_f, ly_f);
                     let local_gy =
@@ -368,6 +392,12 @@ pub fn composite_stroke(
                     // Rotate from local frame to global UV space
                     global.gradient_x[idx] = local_gx * seg_dir.x + local_gy * normal.x;
                     global.gradient_y[idx] = local_gx * seg_dir.y + local_gy * normal.y;
+
+                    if let Some(sn) = stroke_normal {
+                        if !global.object_normal.is_empty() {
+                            global.object_normal[idx] = sn;
+                        }
+                    }
                 }
 
                 let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h);
@@ -391,12 +421,6 @@ pub fn composite_stroke(
                 }
 
                 global.stroke_id[idx] = stroke_id;
-
-                if let Some(sn) = stroke_normal {
-                    if !global.object_normal.is_empty() {
-                        global.object_normal[idx] = sn;
-                    }
-                }
             }
         }
     }
@@ -760,15 +784,22 @@ mod tests {
                     continue;
                 }
                 let idx = (py as u32 * res + px as u32) as usize;
-                global.height[idx] = h.max(global.height[idx]);
+                let prev_h = global.height[idx];
+                global.height[idx] = h.max(prev_h);
+                if h >= prev_h {
+                    if !global.paint_load.is_empty() {
+                        let r = local_height.remaining[ly * local_height.width + lx];
+                        global.paint_load[idx] = r;
+                    }
+                    if let Some(sn) = stroke_normal {
+                        if !global.object_normal.is_empty() {
+                            global.object_normal[idx] = sn;
+                        }
+                    }
+                }
                 let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h);
                 global.color[idx] = lerp_color(global.color[idx], stroke_color, opacity);
                 global.stroke_id[idx] = stroke_id;
-                if let Some(sn) = stroke_normal {
-                    if !global.object_normal.is_empty() {
-                        global.object_normal[idx] = sn;
-                    }
-                }
             }
         }
     }
@@ -776,6 +807,7 @@ mod tests {
     fn make_simple_height(width: usize, height: usize, value: f32) -> StrokeHeightResult {
         StrokeHeightResult {
             data: vec![value; width * height],
+            remaining: vec![1.0; width * height],
             width,
             height,
         }

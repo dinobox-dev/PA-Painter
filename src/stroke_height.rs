@@ -20,6 +20,10 @@ pub struct StrokeHeightResult {
     /// Dimensions: height = brush_width_px, width = stroke_length_px
     /// Stored row-major: data[y * width + x]
     pub data: Vec<f32>,
+    /// Paint remaining (load depletion) per pixel, same dimensions as `data`.
+    /// 1.0 = full paint, decreases toward stroke end. Used by DepictedForm
+    /// to fade the flat-plane normal based on actual paint thickness.
+    pub remaining: Vec<f32>,
     pub width: usize,
     pub height: usize,
 }
@@ -126,10 +130,12 @@ pub fn generate_stroke_height(
     let local_height = brush_width_px + 2 * wiggle_margin;
 
     let mut data = vec![0.0f32; local_height * local_width];
+    let mut remaining_map = vec![0.0f32; local_height * local_width];
 
     if stroke_length_px == 0 || brush_width_px == 0 {
         return StrokeHeightResult {
             data,
+            remaining: remaining_map,
             width: local_width,
             height: local_height,
         };
@@ -185,23 +191,29 @@ pub fn generate_stroke_height(
             let cutoff_idx = cutoff_start + j as f32 * step;
             let source_idx = lerp(cutoff_idx, compress_idx, blend);
             let rd = interpolate_array(brush_profile, source_idx);
-            // When paint is abundant, bristle gaps fill in (uniform density).
-            // As paint depletes, individual bristle tracks emerge.
+            // Brush profile shapes cross-section: at low pressure only
+            // bristle tips touch, so gaps show as splits/forks.
+            // At high pressure paint fills gaps → uniform coverage.
+            let profile_mod = lerp(rd, 1.0, p);
+            // As paint depletes, individual bristle tracks emerge further.
             let fill = remaining.min(1.0);
             let pattern_spread = (1.0 - fill) * 5.0;
-            let effective_density = p.powf(pattern_spread * (1.0 - rd) + 1.0);
+            let effective_density = profile_mod * p.powf(pattern_spread * (1.0 - rd) + 1.0);
 
             let local_y = active_start + j;
             let local_x = x;
 
             if local_y < local_height && local_x < local_width {
-                data[local_y * local_width + local_x] = effective_density * remaining;
+                let idx = local_y * local_width + local_x;
+                data[idx] = effective_density * remaining;
+                remaining_map[idx] = remaining;
             }
         }
     }
 
     StrokeHeightResult {
         data,
+        remaining: remaining_map,
         width: local_width,
         height: local_height,
     }
@@ -461,6 +473,7 @@ mod tests {
             }
         }
         let height = StrokeHeightResult {
+            remaining: vec![1.0; w * h],
             data,
             width: w,
             height: h,
@@ -493,6 +506,7 @@ mod tests {
             }
         }
         let height = StrokeHeightResult {
+            remaining: vec![1.0; w * h],
             data,
             width: w,
             height: h,
