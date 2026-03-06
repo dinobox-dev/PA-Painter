@@ -36,6 +36,21 @@ impl StretchMap {
     pub fn resolution(&self) -> u32 {
         self.resolution
     }
+
+    /// Compute the stretch-weighted arc length of a path.
+    ///
+    /// Each UV segment's length is multiplied by the stretch factor at its
+    /// midpoint, giving an approximate 3D arc length.
+    pub fn weighted_arc_length(&self, points: &[Vec2]) -> f32 {
+        points
+            .windows(2)
+            .map(|w| {
+                let mid = (w[0] + w[1]) * 0.5;
+                let uv_len = (w[1] - w[0]).length();
+                uv_len * self.sample(mid)
+            })
+            .sum()
+    }
 }
 
 /// Compute a stretch map from a loaded mesh.

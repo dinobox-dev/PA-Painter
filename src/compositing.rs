@@ -718,7 +718,13 @@ pub fn composite_layer(
         .par_iter()
         .enumerate()
         .map(|(i, path)| {
-            let stroke_length_px = (path.arc_length() * resolution as f32).ceil() as usize;
+            // Use stretch-weighted arc length when available so that height
+            // map resolution matches 3D stroke length, not UV length.
+            let arc_len = match stretch_map {
+                Some(sm) => sm.weighted_arc_length(&path.points),
+                None => path.arc_length(),
+            };
+            let stroke_length_px = (arc_len * resolution as f32).ceil() as usize;
             let jittered = jitter_brush_profile(&brush_profile, scaled.seed + i as u32, 0.15);
             let height = generate_stroke_height(
                 &jittered,

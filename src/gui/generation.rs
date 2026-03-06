@@ -8,6 +8,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use practical_arcana_painter::asset_io::LoadedMesh;
 use practical_arcana_painter::compositing::{composite_layer, fill_base_color_region, GlobalMaps};
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
+use practical_arcana_painter::stretch_map::{compute_stretch_map, StretchMap};
 use practical_arcana_painter::output::{
     blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
 };
@@ -233,6 +234,13 @@ fn run_pipeline(
         return None;
     }
 
+    // Compute stretch map for UV distortion compensation
+    let stretch_data: Option<StretchMap> = input
+        .mesh
+        .as_ref()
+        .map(|mesh| compute_stretch_map(mesh, input.resolution));
+    let stretch_ref = stretch_data.as_ref();
+
     // ── Stage 3: Path generation — parallel per layer ──
 
     stage.store(STAGE_PATHS, Ordering::Relaxed);
@@ -265,7 +273,7 @@ fn run_pipeline(
                 tex_ref.as_ref(),
                 normal_data,
                 mask,
-                None,
+                stretch_ref,
                 Some(cancel),
             );
             let done = completed_paths.fetch_add(1, Ordering::Relaxed) + 1;
@@ -328,7 +336,7 @@ fn run_pipeline(
             Some(&all_paths[sorted_idx]),
             normal_data,
             mask,
-            None,
+            stretch_ref,
         );
         set_progress(
             progress,

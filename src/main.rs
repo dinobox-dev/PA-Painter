@@ -8,6 +8,7 @@ use practical_arcana_painter::compositing::{
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::output::{export_all, ExportFormat};
 use practical_arcana_painter::project::load_project;
+use practical_arcana_painter::stretch_map::{compute_stretch_map, StretchMap};
 use practical_arcana_painter::types::NormalMode;
 use practical_arcana_painter::uv_mask::UvMask;
 
@@ -125,6 +126,13 @@ fn main() {
             None
         };
 
+    // Compute stretch map for UV distortion compensation
+    let stretch_data: Option<StretchMap> = loaded_mesh.as_ref().map(|mesh| {
+        eprintln!("Computing stretch map...");
+        compute_stretch_map(mesh, resolution)
+    });
+    let stretch_ref = stretch_data.as_ref();
+
     // Build UV masks from mesh groups
     let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = loaded_mesh {
         project.build_masks(mesh, resolution)
@@ -153,7 +161,7 @@ fn main() {
     eprintln!("Generating...");
     if project.cached_paths_if_valid().is_none() {
         let paths =
-            generate_all_paths(&layers, &layer_base_colors, normal_data.as_ref(), &mask_refs, None);
+            generate_all_paths(&layers, &layer_base_colors, normal_data.as_ref(), &mask_refs, stretch_ref);
         project.set_cached_paths(paths);
     }
 
@@ -165,7 +173,7 @@ fn main() {
         project.cached_paths.as_deref(),
         normal_data.as_ref(),
         &mask_refs,
-        None,
+        stretch_ref,
     );
 
     // Export
