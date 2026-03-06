@@ -404,9 +404,11 @@ pub fn composite_stroke(
                 let idx = (gy * res + gx) as usize;
 
                 let prev_h = global.height[idx];
+                let same_stroke = global.stroke_id[idx] == stroke_id;
                 // Wet-on-wet height yielding: same formula as color mixing
                 // (wet_on_wet × prev_h) so thick wet paint resists more.
-                let new_h = if h >= prev_h {
+                // Skip yielding when revisiting the same stroke (segment overlap).
+                let new_h = if same_stroke || h >= prev_h {
                     h
                 } else {
                     let yield_ratio = appearance.wet_on_wet * prev_h.min(1.0);
@@ -470,7 +472,8 @@ pub fn composite_stroke(
                     } else {
                         // Over-paint: blend paint colors, alpha accumulates (Porter-Duff "over")
                         let prev = global.color[idx];
-                        let blended = if appearance.wet_on_wet > 0.0 && prev_h > 0.0 {
+                        let blended = if !same_stroke && appearance.wet_on_wet > 0.0 && prev_h > 0.0
+                        {
                             let mix_ratio = appearance.wet_on_wet * prev_h.min(1.0);
                             subtractive_mix(prev, stroke_color, mix_ratio)
                         } else {
@@ -485,7 +488,7 @@ pub fn composite_stroke(
                     }
                 } else {
                     let existing = global.color[idx];
-                    let blended = if appearance.wet_on_wet > 0.0 && prev_h > 0.0 {
+                    let blended = if !same_stroke && appearance.wet_on_wet > 0.0 && prev_h > 0.0 {
                         let mix_ratio = appearance.wet_on_wet * prev_h.min(1.0);
                         subtractive_mix(existing, stroke_color, mix_ratio)
                     } else {
