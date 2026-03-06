@@ -873,6 +873,7 @@ mod tests {
             &settings,
             None,
             &[],
+            None,
         );
 
         let dir = std::env::temp_dir()
@@ -914,6 +915,7 @@ mod tests {
             &settings,
             None,
             &[],
+            None,
         );
 
         let dir = std::env::temp_dir()

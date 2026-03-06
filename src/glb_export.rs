@@ -752,6 +752,7 @@ mod tests {
                 &settings,
                 mesh_nd,
                 &[],
+                None,
             );
 
             let normalized_height = normalize_height_map(&maps.height);
@@ -893,6 +894,7 @@ mod tests {
             &settings,
             Some(&nd),
             &[],
+            None,
         );
 
         let normalized_height = normalize_height_map(&maps.height);
@@ -974,7 +976,7 @@ mod tests {
         };
 
         // Generate paths with overscan + Poisson + 3 passes
-        let paths = generate_paths(&layer, 0, None, Some(&nd), None);
+        let paths = generate_paths(&layer, 0, None, Some(&nd), None, None);
         eprintln!("Overscan+Poisson: {} paths generated", paths.len());
 
         let cached_paths = vec![paths];
@@ -986,6 +988,7 @@ mod tests {
             Some(&cached_paths),
             Some(&nd),
             &[],
+            None,
         );
 
         let normalized_height = normalize_height_map(&maps.height);

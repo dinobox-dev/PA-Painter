@@ -11,6 +11,7 @@ use crate::math::{lerp, lerp_color, perpendicular, smoothstep};
 use crate::object_normal::{try_sample_object_normal, MeshNormalData};
 use crate::path_placement::generate_paths;
 use crate::rng::SeededRng;
+use crate::stretch_map::StretchMap;
 use crate::stroke_color::ColorTextureRef;
 use crate::stroke_color::{compute_stroke_color, sample_bilinear};
 use crate::stroke_height::{
@@ -457,6 +458,7 @@ pub fn generate_all_paths(
     base_colors: &[LayerBaseColor],
     normal_data: Option<&MeshNormalData>,
     masks: &[Option<&UvMask>],
+    stretch_map: Option<&StretchMap>,
 ) -> Vec<Vec<StrokePath>> {
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
@@ -480,6 +482,7 @@ pub fn generate_all_paths(
                 tex_ref.as_ref(),
                 normal_data,
                 mask,
+                stretch_map,
             )
         })
         .collect();
@@ -511,6 +514,7 @@ pub fn composite_all(
     settings: &OutputSettings,
     normal_data: Option<&MeshNormalData>,
     masks: &[Option<&UvMask>],
+    stretch_map: Option<&StretchMap>,
 ) -> GlobalMaps {
     composite_all_with_paths(
         layers,
@@ -520,6 +524,7 @@ pub fn composite_all(
         None,
         normal_data,
         masks,
+        stretch_map,
     )
 }
 
@@ -537,6 +542,7 @@ pub fn composite_all_with_paths(
     cached_paths: Option<&[Vec<StrokePath>]>,
     normal_data: Option<&MeshNormalData>,
     masks: &[Option<&UvMask>],
+    stretch_map: Option<&StretchMap>,
 ) -> GlobalMaps {
     // Initialize with neutral gray; per-layer base colors are painted into regions below.
     let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
@@ -586,6 +592,7 @@ pub fn composite_all_with_paths(
                     tex_ref.as_ref(),
                     normal_data,
                     mask,
+                    stretch_map,
                 )
             })
             .collect::<Vec<_>>();
@@ -609,6 +616,7 @@ pub fn composite_all_with_paths(
             Some(&all_paths[sorted_idx]),
             normal_data,
             mask,
+            stretch_map,
         );
     }
 
@@ -633,6 +641,7 @@ pub fn composite_layer(
     cached_paths: Option<&[StrokePath]>,
     normal_data: Option<&MeshNormalData>,
     mask: Option<&UvMask>,
+    stretch_map: Option<&StretchMap>,
 ) {
     let resolution = global.resolution;
     let transparent = settings.background_mode == BackgroundMode::Transparent;
@@ -645,7 +654,7 @@ pub fn composite_layer(
             width: base_color.tex_width,
             height: base_color.tex_height,
         });
-        paths_owned = generate_paths(layer, layer_index, tex_ref.as_ref(), normal_data, mask);
+        paths_owned = generate_paths(layer, layer_index, tex_ref.as_ref(), normal_data, mask, stretch_map);
         &paths_owned
     };
 
@@ -1121,6 +1130,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         composite_layer(
             &layer_b,
@@ -1128,6 +1138,7 @@ mod tests {
             &mut global,
             &settings,
             &BaseColorSource::solid(solid_b),
+            None,
             None,
             None,
             None,
@@ -1154,6 +1165,7 @@ mod tests {
             &settings,
             None,
             &[],
+            None,
         );
 
         assert_eq!(maps.height.len(), 128 * 128);
@@ -1177,6 +1189,7 @@ mod tests {
             &settings,
             None,
             &[],
+            None,
         );
         let maps2 = composite_all(
             &[layer],
@@ -1185,6 +1198,7 @@ mod tests {
             &settings,
             None,
             &[],
+            None,
         );
 
         assert_eq!(maps1.height, maps2.height);
@@ -1209,6 +1223,7 @@ mod tests {
             &settings,
             None,
             &[],
+            None,
         );
 
         let out_dir = crate::test_module_output_dir("compositing");
@@ -1275,6 +1290,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let maps = global;
 
@@ -1323,6 +1339,7 @@ mod tests {
             &settings,
             None,
             &[],
+            None,
         );
 
         let color_pixels: Vec<u8> = maps

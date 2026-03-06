@@ -265,6 +265,7 @@ fn run_pipeline(
                 tex_ref.as_ref(),
                 normal_data,
                 mask,
+                None,
                 Some(cancel),
             );
             let done = completed_paths.fetch_add(1, Ordering::Relaxed) + 1;
@@ -327,6 +328,7 @@ fn run_pipeline(
             Some(&all_paths[sorted_idx]),
             normal_data,
             mask,
+            None,
         );
         set_progress(
             progress,

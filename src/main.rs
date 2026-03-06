@@ -153,7 +153,7 @@ fn main() {
     eprintln!("Generating...");
     if project.cached_paths_if_valid().is_none() {
         let paths =
-            generate_all_paths(&layers, &layer_base_colors, normal_data.as_ref(), &mask_refs);
+            generate_all_paths(&layers, &layer_base_colors, normal_data.as_ref(), &mask_refs, None);
         project.set_cached_paths(paths);
     }
 
@@ -165,6 +165,7 @@ fn main() {
         project.cached_paths.as_deref(),
         normal_data.as_ref(),
         &mask_refs,
+        None,
     );
 
     // Export

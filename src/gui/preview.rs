@@ -348,6 +348,7 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
         None, // color_ref: per-layer base will be added in Commit 3
         normal_ref,
         None,
+        None,
         Some(cancel),
     );
 

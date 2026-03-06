@@ -15,9 +15,15 @@ use crate::object_normal::MeshNormalData;
 #[cfg(test)]
 use crate::object_normal::sample_object_normal;
 use crate::rng::SeededRng;
+use crate::stretch_map::StretchMap;
 use crate::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
 use crate::types::{PaintLayer, StrokeParams, StrokePath, BASE_RESOLUTION};
 use crate::uv_mask::UvMask;
+
+/// Clamp range for stretch factors in path placement.
+/// Prevents degenerate meshes from causing extreme over/under-sampling.
+const STRETCH_CLAMP_MIN: f32 = 0.5;
+const STRETCH_CLAMP_MAX: f32 = 2.0;
 
 /// Check cancellation token, returning early if set.
 #[inline]
@@ -28,19 +34,31 @@ fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {
 /// Generate Poisson disk seeds within an arbitrary UV rectangle `[lo, hi]`.
 ///
 /// Uses Bridson's algorithm to produce a blue-noise distribution with minimum
-/// spacing guarantee.
+/// spacing guarantee. When a `stretch_map` is provided, the minimum spacing
+/// adapts per-point: compressed UV regions (high stretch) get denser seeding,
+/// stretched UV regions (low stretch) get sparser seeding.
 fn generate_seeds_poisson_in(
     params: &StrokeParams,
     resolution: u32,
     lo: Vec2,
     hi: Vec2,
+    stretch_map: Option<&StretchMap>,
     cancel: Option<&AtomicBool>,
 ) -> Vec<Vec2> {
-    let min_dist = params.brush_width / resolution as f32 * params.stroke_spacing;
-    if min_dist <= 0.0 || !min_dist.is_finite() {
+    let base_min_dist = params.brush_width / resolution as f32 * params.stroke_spacing;
+    if base_min_dist <= 0.0 || !base_min_dist.is_finite() {
         return Vec::new();
     }
-    let cell_size = min_dist / std::f32::consts::SQRT_2;
+
+    // With stretch adaptation, the smallest local min_dist determines the grid
+    // cell size. Without stretch, use the uniform base distance.
+    let has_stretch = stretch_map.is_some();
+    let min_local_dist = if has_stretch {
+        base_min_dist / STRETCH_CLAMP_MAX
+    } else {
+        base_min_dist
+    };
+    let cell_size = min_local_dist / std::f32::consts::SQRT_2;
     let extent = hi - lo;
     let grid_w = (extent.x / cell_size).ceil() as usize + 1;
     let grid_h = (extent.y / cell_size).ceil() as usize + 1;
@@ -49,8 +67,25 @@ fn generate_seeds_poisson_in(
     let mut points: Vec<Vec2> = Vec::new();
     let mut active: Vec<usize> = Vec::new();
 
-    let min_dist_sq = min_dist * min_dist;
+    // Neighbor check radius: must cover the largest possible local min_dist.
+    // max_local_dist / cell_size = (base / STRETCH_MIN) / (base / STRETCH_MAX / sqrt2)
+    //                            = STRETCH_MAX / STRETCH_MIN * sqrt2
+    let check_radius = if has_stretch {
+        ((STRETCH_CLAMP_MAX / STRETCH_CLAMP_MIN) * std::f32::consts::SQRT_2).ceil() as i32 + 1
+    } else {
+        2
+    };
+
     let k = 30; // candidates per active point
+
+    /// Look up clamped stretch at a UV point.
+    #[inline]
+    fn local_min_dist(pos: Vec2, base: f32, sm: Option<&StretchMap>) -> f32 {
+        match sm {
+            Some(sm) => base / sm.sample(pos).clamp(STRETCH_CLAMP_MIN, STRETCH_CLAMP_MAX),
+            None => base,
+        }
+    }
 
     // Start with a random initial point within [lo, hi]
     let initial = Vec2::new(
@@ -69,11 +104,12 @@ fn generate_seeds_poisson_in(
         }
         let active_idx = (rng.next_f32() * active.len() as f32) as usize % active.len();
         let center = points[active[active_idx]];
+        let center_min = local_min_dist(center, base_min_dist, stretch_map);
 
         let mut found = false;
         for _ in 0..k {
             let angle = rng.next_f32() * std::f32::consts::TAU;
-            let dist = min_dist + rng.next_f32() * min_dist;
+            let dist = center_min + rng.next_f32() * center_min;
             let candidate = center + Vec2::new(angle.cos(), angle.sin()) * dist;
 
             if candidate.x < lo.x || candidate.x > hi.x || candidate.y < lo.y || candidate.y > hi.y
@@ -84,15 +120,18 @@ fn generate_seeds_poisson_in(
             let ci = (((candidate.x - lo.x) / cell_size) as usize).min(grid_w - 1);
             let cj = (((candidate.y - lo.y) / cell_size) as usize).min(grid_h - 1);
 
-            // Check neighbors in 5×5 grid
+            let cand_min = local_min_dist(candidate, base_min_dist, stretch_map);
+            let cand_min_sq = cand_min * cand_min;
+
+            // Check neighbors
             let mut too_close = false;
-            'outer: for dy in -2i32..=2 {
-                for dx in -2i32..=2 {
+            'outer: for dy in -check_radius..=check_radius {
+                for dx in -check_radius..=check_radius {
                     let ni = ci as i32 + dx;
                     let nj = cj as i32 + dy;
                     if ni >= 0 && ni < grid_w as i32 && nj >= 0 && nj < grid_h as i32 {
                         if let Some(idx) = grid[nj as usize * grid_w + ni as usize] {
-                            if (candidate - points[idx]).length_squared() < min_dist_sq {
+                            if (candidate - points[idx]).length_squared() < cand_min_sq {
                                 too_close = true;
                                 break 'outer;
                             }
@@ -138,8 +177,9 @@ pub fn trace_streamline(
     _normal_data: Option<&MeshNormalData>,
     uv_bounds: (Vec2, Vec2),
     mask: Option<&UvMask>,
+    stretch_map: Option<&StretchMap>,
 ) -> Option<Vec<Vec2>> {
-    let step_size_uv = 1.0 / resolution as f32;
+    let base_step = 1.0 / resolution as f32;
 
     // Consume RNG for target length FIRST.
     // Power distribution: target = max * U^0.5 gives linearly increasing density
@@ -182,6 +222,13 @@ pub fn trace_streamline(
             break;
         }
 
+        // Stretch-adaptive step: in compressed UV regions (high stretch),
+        // take smaller UV steps so path point density stays uniform in 3D.
+        let stretch = stretch_map
+            .map(|sm| sm.sample(pos).clamp(STRETCH_CLAMP_MIN, STRETCH_CLAMP_MAX))
+            .unwrap_or(1.0);
+        let step_size_uv = base_step / stretch;
+
         let next_pos = pos + dir * step_size_uv;
 
         // UV boundary check
@@ -217,7 +264,8 @@ pub fn trace_streamline(
         path.push(next_pos);
         prev_dir = dir;
         pos = next_pos;
-        length += step_size_uv;
+        // Accumulate 3D-equivalent length: UV step × stretch factor
+        length += step_size_uv * stretch;
     }
 
     // Minimum length filter
@@ -299,8 +347,9 @@ pub fn generate_paths(
     color_tex: Option<&ColorTextureRef<'_>>,
     normal_data: Option<&MeshNormalData>,
     mask: Option<&UvMask>,
+    stretch_map: Option<&StretchMap>,
 ) -> Vec<StrokePath> {
-    generate_paths_cancellable(layer, layer_index, color_tex, normal_data, mask, None)
+    generate_paths_cancellable(layer, layer_index, color_tex, normal_data, mask, stretch_map, None)
 }
 
 /// Like [`generate_paths`] but accepts an optional cancellation token.
@@ -311,6 +360,7 @@ pub fn generate_paths_cancellable(
     color_tex: Option<&ColorTextureRef<'_>>,
     normal_data: Option<&MeshNormalData>,
     mask: Option<&UvMask>,
+    stretch_map: Option<&StretchMap>,
     cancel: Option<&AtomicBool>,
 ) -> Vec<StrokePath> {
     // Path geometry is resolution-independent in UV space: seed density and
@@ -341,7 +391,7 @@ pub fn generate_paths_cancellable(
         (Vec2::splat(-margin), Vec2::splat(1.0 + margin))
     };
 
-    let seeds = generate_seeds_poisson_in(&scaled, resolution, seed_lo, seed_hi, cancel);
+    let seeds = generate_seeds_poisson_in(&scaled, resolution, seed_lo, seed_hi, stretch_map, cancel);
     if is_cancelled(cancel) {
         return Vec::new();
     }
@@ -370,6 +420,7 @@ pub fn generate_paths_cancellable(
             normal_data,
             (seed_lo, seed_hi),
             mask,
+            stretch_map,
         ) {
             if let Some(clipped) = clip_path_to_uv(path) {
                 let length: f32 = clipped.windows(2).map(|w| (w[1] - w[0]).length()).sum();
@@ -449,7 +500,7 @@ mod tests {
     #[test]
     fn seed_poisson_coverage() {
         let layer = make_layer();
-        let seeds = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None);
+        let seeds = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
         // Poisson disk should produce a reasonable number of seeds
         assert!(
             seeds.len() > 50 && seeds.len() < 1000,
@@ -461,7 +512,7 @@ mod tests {
     #[test]
     fn seeds_poisson_within_bounds() {
         let layer = make_layer();
-        let seeds = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None);
+        let seeds = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
         assert!(!seeds.is_empty());
         for seed in &seeds {
             assert!(
@@ -476,8 +527,8 @@ mod tests {
     #[test]
     fn seed_poisson_determinism() {
         let layer = make_layer();
-        let seeds1 = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None);
-        let seeds2 = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None);
+        let seeds1 = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
+        let seeds2 = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
         assert_eq!(seeds1.len(), seeds2.len());
         for (a, b) in seeds1.iter().zip(seeds2.iter()) {
             assert_eq!(a.x, b.x);
@@ -491,7 +542,7 @@ mod tests {
         let resolution = 512u32;
         let min_dist = layer.params.brush_width / resolution as f32 * layer.params.stroke_spacing;
         let seeds =
-            generate_seeds_poisson_in(&layer.params, resolution, Vec2::ZERO, Vec2::ONE, None);
+            generate_seeds_poisson_in(&layer.params, resolution, Vec2::ZERO, Vec2::ONE, None, None);
         // Verify all pairs respect minimum distance
         for (i, a) in seeds.iter().enumerate() {
             for b in &seeds[i + 1..] {
@@ -532,6 +583,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            None,
         );
 
         let path = path.expect("path should exist");
@@ -569,6 +621,7 @@ mod tests {
             None,
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -608,6 +661,7 @@ mod tests {
             None,
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -649,6 +703,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            None,
         );
 
         // min_length = 100/512 ≈ 0.195 UV, but max target ≈ 0.002 UV
@@ -676,6 +731,7 @@ mod tests {
                 None,
                 None,
                 (Vec2::ZERO, Vec2::ONE),
+                None,
                 None,
             ) {
                 let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
@@ -749,8 +805,8 @@ mod tests {
     #[test]
     fn generate_paths_determinism() {
         let layer = make_layer();
-        let paths1 = generate_paths(&layer, 0, None, None, None);
-        let paths2 = generate_paths(&layer, 0, None, None, None);
+        let paths1 = generate_paths(&layer, 0, None, None, None, None);
+        let paths2 = generate_paths(&layer, 0, None, None, None, None);
 
         assert_eq!(paths1.len(), paths2.len());
         for (a, b) in paths1.iter().zip(paths2.iter()) {
@@ -767,7 +823,7 @@ mod tests {
     #[test]
     fn generate_paths_sorted_by_y() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None, None);
 
         assert!(!paths.is_empty(), "should generate some paths");
         for i in 1..paths.len() {
@@ -785,7 +841,7 @@ mod tests {
     #[test]
     fn generate_paths_unique_stroke_ids() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None, None);
 
         let mut ids: Vec<u32> = paths.iter().map(|p| p.stroke_id).collect();
         ids.sort();
@@ -797,7 +853,7 @@ mod tests {
     fn area_coverage_90_percent() {
         let layer = make_layer();
         let resolution = 512u32;
-        let paths = generate_paths(&layer, 0, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None, None);
 
         let mut covered = vec![false; (resolution * resolution) as usize];
         let brush_radius_uv = layer.params.brush_width / resolution as f32 / 2.0;
@@ -846,7 +902,7 @@ mod tests {
     #[test]
     fn paths_stay_within_uv() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None, None);
 
         for path in &paths {
             for point in &path.points {
@@ -892,6 +948,7 @@ mod tests {
             None,
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -941,6 +998,7 @@ mod tests {
             None,
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -1014,7 +1072,7 @@ mod tests {
     fn visual_horizontal_strokes() {
         let layer = make_layer();
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None, None);
 
         eprintln!("visual_horizontal_strokes: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "horizontal_strokes.png");
@@ -1061,7 +1119,7 @@ mod tests {
             ],
         };
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, None, None, None);
+        let paths = generate_paths(&layer, 0, None, None, None, None);
 
         eprintln!("visual_spiral_guides: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "spiral_guides.png");
@@ -1162,8 +1220,8 @@ mod tests {
         let mut layer_on = layer_off.clone();
         layer_on.params.color_break_threshold = Some(0.08);
 
-        let paths_off = generate_paths(&layer_off, 0, Some(&tex_ref), None, None);
-        let paths_on = generate_paths(&layer_on, 0, Some(&tex_ref), None, None);
+        let paths_off = generate_paths(&layer_off, 0, Some(&tex_ref), None, None, None);
+        let paths_on = generate_paths(&layer_on, 0, Some(&tex_ref), None, None, None);
 
         eprintln!(
             "color_break OFF: {} paths, ON: {} paths",
@@ -1216,6 +1274,7 @@ mod tests {
                 None,
                 (Vec2::ZERO, Vec2::ONE),
                 None,
+                None,
             ) {
                 let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
                 lengths.push(len);
@@ -1255,6 +1314,7 @@ mod tests {
                 None,
                 (Vec2::ZERO, Vec2::ONE),
                 None,
+                None,
             ) {
                 let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
                 assert!(
@@ -1287,6 +1347,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            None,
         );
         let path2 = trace_streamline(
             Vec2::new(0.5, 0.5),
@@ -1297,6 +1358,7 @@ mod tests {
             None,
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -1337,6 +1399,7 @@ mod tests {
                     None,
                     None,
                     (Vec2::ZERO, Vec2::ONE),
+                    None,
                     None,
                 ) {
                     let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
@@ -1399,6 +1462,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            None,
         );
         let path_with_tex = trace_streamline(
             Vec2::new(0.1, 0.5),
@@ -1409,6 +1473,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -1470,6 +1535,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            None,
         );
 
         // Path should exist but be shorter than without boundary
@@ -1486,6 +1552,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -1544,6 +1611,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            None,
         );
         let path_no_break = trace_streamline(
             Vec2::new(0.1, 0.5),
@@ -1554,6 +1622,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -1606,6 +1675,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            None,
         );
         let p2 = trace_streamline(
             Vec2::new(0.2, 0.5),
@@ -1616,6 +1686,7 @@ mod tests {
             Some(&tex_ref),
             None,
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -1690,6 +1761,7 @@ mod tests {
             Some(&nd),
             (Vec2::ZERO, Vec2::ONE),
             None,
+            None,
         );
 
         // Path without normal break for comparison
@@ -1706,6 +1778,7 @@ mod tests {
             None,
             Some(&nd),
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -1751,6 +1824,7 @@ mod tests {
             Some(&nd),
             (Vec2::ZERO, Vec2::ONE),
             None,
+            None,
         );
         let p2 = trace_streamline(
             Vec2::new(0.2, 0.5),
@@ -1761,6 +1835,7 @@ mod tests {
             None,
             Some(&nd),
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -1806,6 +1881,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            None,
         );
         let path_with_nd = trace_streamline(
             Vec2::new(0.1, 0.5),
@@ -1816,6 +1892,7 @@ mod tests {
             None,
             Some(&nd),
             (Vec2::ZERO, Vec2::ONE),
+            None,
             None,
         );
 
@@ -1954,8 +2031,8 @@ mod tests {
         let mut layer_on = layer_off.clone();
         layer_on.params.normal_break_threshold = Some(0.5);
 
-        let paths_off = generate_paths(&layer_off, 0, None, Some(&nd), None);
-        let paths_on = generate_paths(&layer_on, 0, None, Some(&nd), None);
+        let paths_off = generate_paths(&layer_off, 0, None, Some(&nd), None, None);
+        let paths_on = generate_paths(&layer_on, 0, None, Some(&nd), None, None);
 
         eprintln!(
             "normal_break OFF: {} paths, ON: {} paths",
@@ -2047,7 +2124,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_base = generate_paths(&layer_base, 0, None, None, None);
+        let paths_base = generate_paths(&layer_base, 0, None, None, None, None);
 
         // ── 2. Method A: tight spacing ──
         let layer_a = PaintLayer {
@@ -2059,7 +2136,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_a = generate_paths(&layer_a, 0, None, None, None);
+        let paths_a = generate_paths(&layer_a, 0, None, None, None, None);
 
         // ── 3. Method A+B: tight spacing + relaxed overlap filter ──
         let layer_ab = PaintLayer {
@@ -2073,7 +2150,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_ab = generate_paths(&layer_ab, 0, None, None, None);
+        let paths_ab = generate_paths(&layer_ab, 0, None, None, None, None);
 
         eprintln!("=== Density Comparison ===");
         eprintln!("  Baseline:      {} paths", paths_base.len());
