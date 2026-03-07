@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use practical_arcana_painter::asset_io::LoadedMesh;
-use practical_arcana_painter::compositing::{composite_layer, fill_base_color_region, GlobalMaps};
+use practical_arcana_painter::compositing::{
+    composite_layer, compute_height_gradients, fill_base_color_region, GlobalMaps,
+};
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::stretch_map::{compute_stretch_map, StretchMap};
 use practical_arcana_painter::output::{
@@ -347,6 +349,9 @@ fn run_pipeline(
             return None;
         }
     }
+
+    // ── Compute gradients from global height map (Sobel) ──
+    compute_height_gradients(&mut global);
 
     // ── Stage 5: Normal map ──
 

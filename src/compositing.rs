@@ -14,9 +14,7 @@ use crate::rng::SeededRng;
 use crate::stretch_map::StretchMap;
 use crate::stroke_color::ColorTextureRef;
 use crate::stroke_color::{compute_stroke_color, sample_bilinear};
-use crate::stroke_height::{
-    compute_stroke_gradients, generate_stroke_height, StrokeGradientResult, StrokeHeightResult,
-};
+use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
 use crate::types::{
     BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal, NormalMode,
     OutputSettings, PaintLayer, StrokePath, TextureSource,
@@ -294,7 +292,6 @@ fn subtractive_mix(a: Color, b: Color, t: f32) -> Color {
 /// the per-pixel cost constant (no full-path scan).
 pub fn composite_stroke(
     local_height: &StrokeHeightResult,
-    local_gradient: &StrokeGradientResult,
     path: &StrokePath,
     resolution: u32,
     appearance: &StrokeAppearance,
@@ -405,10 +402,13 @@ pub fn composite_stroke(
 
                 let prev_h = global.height[idx];
                 let same_stroke = global.stroke_id[idx] == stroke_id;
+
                 // Wet-on-wet height yielding: same formula as color mixing
                 // (wet_on_wet × prev_h) so thick wet paint resists more.
                 // Skip yielding when revisiting the same stroke (segment overlap).
-                let new_h = if same_stroke || h >= prev_h {
+                let new_h = if same_stroke {
+                    h.max(prev_h)
+                } else if h >= prev_h {
                     h
                 } else {
                     let yield_ratio = appearance.wet_on_wet * prev_h.min(1.0);
@@ -416,16 +416,14 @@ pub fn composite_stroke(
                 };
                 global.height[idx] = new_h;
 
-                // Gradient/normal/paint_load: blend between previous and current
-                // owner proportionally to how much the height shifted.
+                // Paint load and object normal: blend proportionally to
+                // height ownership. Gradients are computed post-compositing
+                // from the global height map (see compute_height_gradients).
                 let blend_t = if prev_h <= 0.0 {
-                    1.0 // virgin pixel — new stroke owns fully
+                    1.0
                 } else if h >= prev_h {
                     1.0
                 } else {
-                    // How much did height move toward h? That fraction
-                    // determines how much the new stroke owns this pixel.
-                    // (prev_h - new_h) / (prev_h - h), but prev_h > h here.
                     let span = prev_h - h;
                     if span > 1e-8 { (prev_h - new_h) / span } else { 0.0 }
                 };
@@ -441,15 +439,6 @@ pub fn composite_stroke(
                         );
                         global.paint_load[idx] = lerp(global.paint_load[idx], r, blend_t);
                     }
-                    let local_gx =
-                        bilinear_sample(&local_gradient.gx, local_w, local_h, lx_f, ly_f);
-                    let local_gy =
-                        bilinear_sample(&local_gradient.gy, local_w, local_h, lx_f, ly_f);
-                    // Rotate from local frame to global UV space
-                    let new_gx = local_gx * seg_dir.x + local_gy * normal.x;
-                    let new_gy = local_gx * seg_dir.y + local_gy * normal.y;
-                    global.gradient_x[idx] = lerp(global.gradient_x[idx], new_gx, blend_t);
-                    global.gradient_y[idx] = lerp(global.gradient_y[idx], new_gy, blend_t);
 
                     if let Some(sn) = stroke_normal {
                         if !global.object_normal.is_empty() {
@@ -678,7 +667,56 @@ pub fn composite_all_with_paths(
         );
     }
 
+    compute_height_gradients(&mut global);
     global
+}
+
+/// Compute gradient_x / gradient_y from the global height map using 3×3 Sobel.
+///
+/// Replaces per-stroke gradient compositing.  Because both strokes share
+/// nearly equal height at their competition boundary, the Sobel naturally
+/// produces a smooth gradient there — no winner-take-all seam.
+///
+/// At stroke edges (paint → no-paint), unpainted neighbours are replaced
+/// with the centre value so that the boundary does not produce a hard
+/// gradient ridge.
+pub fn compute_height_gradients(global: &mut GlobalMaps) {
+    let res = global.resolution as usize;
+    let h = &global.height;
+
+    for y in 0..res {
+        for x in 0..res {
+            let idx = y * res + x;
+            let c = h[idx];
+            if c <= 0.0 {
+                continue;
+            }
+
+            // Clamp-to-edge indices
+            let xl = x.saturating_sub(1);
+            let xr = (x + 1).min(res - 1);
+            let yl = y.saturating_sub(1);
+            let yr = (y + 1).min(res - 1);
+
+            // Sample with boundary replacement: unpainted neighbours → centre
+            let s = |sy: usize, sx: usize| {
+                let v = h[sy * res + sx];
+                if v <= 0.0 { c } else { v }
+            };
+
+            let tl = s(yl, xl);
+            let tc = s(yl, x);
+            let tr = s(yl, xr);
+            let ml = s(y, xl);
+            let mr = s(y, xr);
+            let bl = s(yr, xl);
+            let bc = s(yr, x);
+            let br = s(yr, xr);
+
+            global.gradient_x[idx] = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+            global.gradient_y[idx] = (bl + 2.0 * bc + br) - (tl + 2.0 * tc + tr);
+        }
+    }
 }
 
 /// Composite a single layer's strokes into the global maps.
@@ -771,8 +809,8 @@ pub fn composite_layer(
         vec![None; paths.len()]
     };
 
-    // Step 2: Build height maps and gradients in parallel
-    let heights_and_gradients: Vec<(StrokeHeightResult, StrokeGradientResult)> = paths
+    // Step 2: Build height maps in parallel
+    let heights: Vec<StrokeHeightResult> = paths
         .par_iter()
         .enumerate()
         .map(|(i, path)| {
@@ -784,22 +822,19 @@ pub fn composite_layer(
             };
             let stroke_length_px = (arc_len * resolution as f32).ceil() as usize;
             let jittered = jitter_brush_profile(&brush_profile, scaled.seed + i as u32, 0.15);
-            let height = generate_stroke_height(
+            generate_stroke_height(
                 &jittered,
                 stroke_length_px,
                 &scaled,
                 scaled.seed + i as u32,
-            );
-            let gradient = compute_stroke_gradients(&height, &scaled.pressure_curve);
-            (height, gradient)
+            )
         })
         .collect();
 
     // Step 3: Composite sequentially using gather (no scatter-write gaps)
-    for (i, (local_height, local_gradient)) in heights_and_gradients.iter().enumerate() {
+    for (i, local_height) in heights.iter().enumerate() {
         composite_stroke(
             local_height,
-            local_gradient,
             &paths[i],
             resolution,
             &StrokeAppearance {
