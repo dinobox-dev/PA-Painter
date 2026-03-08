@@ -115,6 +115,46 @@ impl GlobalMaps {
     }
 }
 
+/// Per-layer compositing buffers in UV space.
+///
+/// Contains the same pixel-level data as [`GlobalMaps`], but for a single
+/// layer rendered in isolation (transparent background). Produced by
+/// [`render_layer()`] and consumed by [`merge_layers()`].
+pub struct LayerMaps {
+    /// Height map. 0.0 = no paint. Row-major, size = resolution².
+    pub height: Vec<f32>,
+    /// Color map with alpha = density. Transparent where unpainted.
+    pub color: Vec<Color>,
+    /// Stroke ID map. 0 = no stroke.
+    pub stroke_id: Vec<u32>,
+    /// Object-space normal per pixel (composited from strokes).
+    pub object_normal: Vec<[f32; 3]>,
+    /// Paint detail gradient (X component), composited per-stroke.
+    pub gradient_x: Vec<f32>,
+    /// Paint detail gradient (Y component), composited per-stroke.
+    pub gradient_y: Vec<f32>,
+    /// Paint remaining (load depletion) per pixel.
+    pub paint_load: Vec<f32>,
+    pub resolution: u32,
+}
+
+impl LayerMaps {
+    /// Create empty layer maps with transparent background.
+    pub fn new(resolution: u32) -> Self {
+        let size = (resolution * resolution) as usize;
+        Self {
+            height: vec![0.0; size],
+            color: vec![Color::new(0.0, 0.0, 0.0, 0.0); size],
+            stroke_id: vec![0u32; size],
+            object_normal: vec![[0.0f32; 3]; size],
+            gradient_x: vec![0.0f32; size],
+            gradient_y: vec![0.0f32; size],
+            paint_load: vec![0.0f32; size],
+            resolution,
+        }
+    }
+}
+
 /// Resolve a [`TextureSource`] into owned base color data for compositing.
 ///
 /// Needs access to the mesh's material list for `MeshMaterial` variants.
