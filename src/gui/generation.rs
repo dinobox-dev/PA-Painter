@@ -7,7 +7,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use practical_arcana_painter::asset_io::LoadedMesh;
 use practical_arcana_painter::compositing::{
-    composite_layer, compute_height_gradients, fill_base_color_region, GlobalMaps,
+    compute_height_gradients, fill_base_color_region, merge_layers, render_layer, GlobalMaps,
+    LayerMaps,
 };
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::stretch_map::{compute_stretch_map, StretchMap};
@@ -17,8 +18,8 @@ use practical_arcana_painter::output::{
 use practical_arcana_painter::path_placement::generate_paths_cancellable;
 use practical_arcana_painter::stroke_color::ColorTextureRef;
 use practical_arcana_painter::types::{
-    BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal, NormalMode,
-    OutputSettings, PaintLayer, StrokePath,
+    BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal,
+    LayerCompositeSettings, NormalMode, OutputSettings, PaintLayer, StrokePath,
 };
 use practical_arcana_painter::uv_mask::UvMask;
 
@@ -297,12 +298,41 @@ fn run_pipeline(
         return None;
     }
 
-    // ── Stage 4: Compositing — sequential per layer ──
+    // ── Stage 4: Per-layer independent rendering → merge ──
 
     stage.store(STAGE_COMPOSITE, Ordering::Relaxed);
     set_progress(progress, p_composite);
 
-    // Initialize with neutral gray; per-layer base colors are painted into regions below.
+    // 4a: Render each layer into independent LayerMaps
+    let mut layer_maps: Vec<LayerMaps> = Vec::with_capacity(sorted.len());
+    for (sorted_idx, &(layer_index, layer)) in sorted.iter().enumerate() {
+        let base = input
+            .layer_base_colors
+            .get(layer_index)
+            .map(|bc| bc.as_source())
+            .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+        let mask = mask_refs.get(layer_index).and_then(|m| *m);
+        layer_maps.push(render_layer(
+            layer,
+            layer_index as u32,
+            &base,
+            Some(&all_paths[sorted_idx]),
+            normal_data,
+            mask,
+            stretch_ref,
+            input.resolution,
+        ));
+        set_progress(
+            progress,
+            p_composite + comp_span * (sorted_idx + 1) as f32 / n,
+        );
+
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+    }
+
+    // 4b: Initialize GlobalMaps with base colors and merge layers
     let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
     let mut global = GlobalMaps::new(
         input.resolution,
@@ -311,7 +341,6 @@ fn run_pipeline(
         input.settings.background_mode,
     );
 
-    // Fill per-layer base color into each layer's mask region (Opaque mode only).
     if input.settings.background_mode != BackgroundMode::Transparent {
         for &(layer_index, _) in &sorted {
             if let Some(bc) = input.layer_base_colors.get(layer_index) {
@@ -322,33 +351,15 @@ fn run_pipeline(
         }
     }
 
-    for (sorted_idx, &(layer_index, layer)) in sorted.iter().enumerate() {
-        let base = input
-            .layer_base_colors
-            .get(layer_index)
-            .map(|bc| bc.as_source())
-            .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
-        let mask = mask_refs.get(layer_index).and_then(|m| *m);
-        composite_layer(
-            layer,
-            layer_index as u32,
-            &mut global,
-            &input.settings,
-            &base,
-            Some(&all_paths[sorted_idx]),
-            normal_data,
-            mask,
-            stretch_ref,
-        );
-        set_progress(
-            progress,
-            p_composite + comp_span * (sorted_idx + 1) as f32 / n,
-        );
-
-        if cancel.load(Ordering::Relaxed) {
-            return None;
-        }
-    }
+    let layer_refs: Vec<&LayerMaps> = layer_maps.iter().collect();
+    let layer_settings: Vec<LayerCompositeSettings> =
+        vec![LayerCompositeSettings::default(); layer_maps.len()];
+    merge_layers(
+        &layer_refs,
+        &layer_settings,
+        &mut global,
+        input.settings.background_mode,
+    );
 
     // ── Compute gradients from global height map (Sobel) ──
     compute_height_gradients(&mut global);
