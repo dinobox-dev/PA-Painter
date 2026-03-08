@@ -93,6 +93,19 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
         ui.add_space(4.0);
 
+        ui.label(egui::RichText::new("Layer").weak());
+        slider_row(
+            ui,
+            "dry",
+            &mut layer.dry,
+            0.0..=1.0,
+            "Paint after Dry",
+            Some(0.01),
+            2,
+        );
+
+        ui.add_space(4.0);
+
         ui.label(egui::RichText::new("Brush").weak());
         slider_row(
             ui,

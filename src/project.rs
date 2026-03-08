@@ -721,6 +721,7 @@ mod tests {
             guides,
             base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
             base_normal: TextureSource::None,
+            dry: 1.0,
         }
     }
 

@@ -931,16 +931,16 @@ pub fn render_layer(
 /// this function — typically via [`GlobalMaps::new()`] and
 /// [`fill_base_color_region()`].
 ///
-/// `layer_wet` controls the surface wetness of each layer (parallel to
-/// `layers`). When painting on top of a wet surface (`wet` → 1.0), paint
-/// mixes subtractively with max-height physics. On a dry surface
-/// (`wet` → 0.0), paint stacks (heights accumulate) with opaque color.
+/// `layer_dry` controls how dry the surface below was when each layer was
+/// painted (parallel to `layers`). dry=0 → painted on wet surface
+/// (subtractive mix + max height), dry=1 → painted on dry surface
+/// (opaque over + height accumulation).
 ///
 /// After merging, call [`compute_height_gradients()`] on the result to
 /// populate gradient fields (Sobel runs on the final merged height map).
 pub fn merge_layers(
     layers: &[&LayerMaps],
-    layer_wet: &[f32],
+    layer_dry: &[f32],
     settings: &[LayerCompositeSettings],
     global: &mut GlobalMaps,
     background_mode: BackgroundMode,
@@ -948,12 +948,11 @@ pub fn merge_layers(
     let size = (global.resolution * global.resolution) as usize;
     let transparent = background_mode == BackgroundMode::Transparent;
 
-    // Track per-pixel surface wetness: updated as each layer is merged.
-    let mut surface_wet = vec![0.0f32; size];
-
     for (i, layer) in layers.iter().enumerate() {
         debug_assert_eq!(layer.resolution, global.resolution);
         let layer_opacity = settings.get(i).map_or(1.0, |s| s.opacity);
+        let dry = layer_dry.get(i).copied().unwrap_or(1.0);
+        let wet = 1.0 - dry;
 
         for idx in 0..size {
             let h_above = layer.height[idx];
@@ -962,17 +961,16 @@ pub fn merge_layers(
             }
 
             let h_below = global.height[idx];
-            let wet = surface_wet[idx];
 
             // ── Height ──
-            // wet=1: max (wet surface — paint displaces fluid below)
-            // wet=0: accumulate (dry surface — paint stacks on solid)
+            // dry=0 (wet): max (paint displaces fluid below)
+            // dry=1: accumulate (paint stacks on solid)
             let new_h = if h_below <= 0.0 {
                 h_above
             } else {
                 let max_h = h_above.max(h_below);
                 let sum_h = h_above + h_below;
-                lerp(sum_h, max_h, wet)
+                lerp(max_h, sum_h, dry)
             };
 
             // Paint load and object normal: winner-takes-all by height
@@ -988,8 +986,8 @@ pub fn merge_layers(
             global.height[idx] = new_h;
 
             // ── Color ──
-            // wet=1: subtractive mix (pigments blend on wet surface)
-            // wet=0: opaque over (paint covers dried surface)
+            // dry=0 (wet): subtractive mix (pigments blend on wet surface)
+            // dry=1: opaque over (paint covers dried surface)
             let above_color = layer.color[idx];
             let blended = if h_below > 0.0 && wet > 0.0 {
                 let mix_ratio = wet * h_below.min(1.0);
@@ -1019,9 +1017,6 @@ pub fn merge_layers(
             }
 
             global.stroke_id[idx] = layer.stroke_id[idx];
-
-            // Update surface wetness to this layer's value
-            surface_wet[idx] = layer_wet.get(i).copied().unwrap_or(0.0);
         }
     }
 }

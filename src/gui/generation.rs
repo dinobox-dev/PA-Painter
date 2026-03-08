@@ -38,6 +38,8 @@ pub struct GenInput {
     pub cached_normals: Option<(u32, Arc<MeshNormalData>)>,
     /// Group names for visible layers (parallel to `layers`), used to build UV masks.
     pub layer_group_names: Vec<String>,
+    /// Per-layer dryness of surface below (parallel to `layers`).
+    pub layer_dry: Vec<f32>,
 }
 
 /// Output from a completed generation.
@@ -352,12 +354,16 @@ fn run_pipeline(
     }
 
     let layer_refs: Vec<&LayerMaps> = layer_maps.iter().collect();
-    let layer_wet: Vec<f32> = vec![0.0; layer_maps.len()]; // TODO: read from Layer.wet
+    // Reorder dry values to match sorted (compositing) order
+    let layer_dry: Vec<f32> = sorted
+        .iter()
+        .map(|&(layer_index, _)| input.layer_dry.get(layer_index).copied().unwrap_or(1.0))
+        .collect();
     let layer_settings: Vec<LayerCompositeSettings> =
         vec![LayerCompositeSettings::default(); layer_maps.len()];
     merge_layers(
         &layer_refs,
-        &layer_wet,
+        &layer_dry,
         &layer_settings,
         &mut global,
         input.settings.background_mode,

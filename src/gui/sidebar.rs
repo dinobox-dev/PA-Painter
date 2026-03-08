@@ -341,6 +341,7 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
                         guides: vec![],
                         base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
                         base_normal: TextureSource::None,
+                        dry: 1.0,
                     });
                     // Reassign: index 0 (top of UI) = highest order (painted last = on top)
                     let n = state.project.layers.len() as i32;

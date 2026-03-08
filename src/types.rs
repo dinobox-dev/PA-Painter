@@ -607,6 +607,10 @@ impl Hash for PaintValues {
 
 // ── Layer ──
 
+fn default_dry() -> f32 {
+    1.0
+}
+
 fn default_visible() -> bool {
     true
 }
@@ -635,6 +639,11 @@ pub struct Layer {
     /// Per-layer base normal source.
     #[serde(default)]
     pub base_normal: TextureSource,
+    /// How dry the surface below was when this layer was painted (0.0–1.0).
+    /// dry=0 → painted on wet surface (subtractive mix + max height),
+    /// dry=1 → painted on dry surface (opaque over + height accumulation).
+    #[serde(default = "default_dry")]
+    pub dry: f32,
 }
 
 impl Layer {

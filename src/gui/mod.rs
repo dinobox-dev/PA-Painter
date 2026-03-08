@@ -96,6 +96,7 @@ impl PainterApp {
             mesh,
             cached_normals,
             layer_group_names,
+            layer_dry: visible_layers.iter().map(|l| l.dry).collect(),
         });
         self.state.generation_snapshot = Some(state::generation_state_hash(
             &self.state.project.layers,

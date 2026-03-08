@@ -279,6 +279,7 @@ pub fn reload_mesh(state: &mut AppState) {
                     guides: vec![],
                     base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
                     base_normal: TextureSource::None,
+                    dry: 1.0,
                 });
             }
 
@@ -710,6 +711,7 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
                 guides: vec![],
                 base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
                 base_normal: TextureSource::None,
+                dry: 1.0,
             });
         }
 
@@ -794,6 +796,7 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
                 guides: vec![],
                 base_color: lm.base_color.clone(),
                 base_normal: lm.base_normal.clone(),
+                dry: 1.0,
             });
         }
         state.selected_layer = if state.project.layers.is_empty() {

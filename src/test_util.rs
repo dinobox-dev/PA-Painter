@@ -37,6 +37,7 @@ pub fn make_project_layer_with_order(order: i32) -> Layer {
         }],
         base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
         base_normal: TextureSource::None,
+        dry: 1.0,
     }
 }
 
