@@ -87,6 +87,32 @@ impl PainterApp {
             .map(|l| l.group_name.clone())
             .collect();
 
+        // Per-layer render hashes (parallel to visible layers / `layers` vec)
+        let base_seed = self.state.project.settings.seed;
+        let layer_hashes: Vec<u64> = self
+            .state
+            .project
+            .layers
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.visible)
+            .map(|(i, l)| l.render_hash(base_seed.wrapping_add(i as u32)))
+            .collect();
+
+        // Pass layer cache if global inputs (resolution, mesh) haven't changed
+        let global_hash = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            resolution.hash(&mut h);
+            self.state.mesh_hash.hash(&mut h);
+            h.finish()
+        };
+        let cached_layers = if global_hash == self.state.generation.cache_global_hash {
+            self.state.generation.layer_cache.clone()
+        } else {
+            Vec::new()
+        };
+
         self.state.generation.start(generation::GenInput {
             layers,
             resolution,
@@ -97,6 +123,8 @@ impl PainterApp {
             cached_normals,
             layer_group_names,
             layer_dry: visible_layers.iter().map(|l| l.dry).collect(),
+            layer_hashes,
+            cached_layers,
         });
         self.state.generation_snapshot = Some(state::generation_state_hash(
             &self.state.project.layers,
@@ -145,6 +173,17 @@ impl PainterApp {
         if let Some(normals) = &result.computed_normals {
             self.state.cached_mesh_normals = Some((normals.0, std::sync::Arc::clone(&normals.1)));
         }
+
+        // Store per-layer render cache for next generation
+        self.state.generation.layer_cache = result.rendered_layers.clone();
+        self.state.generation.cache_global_hash = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            result.resolution.hash(&mut h);
+            self.state.mesh_hash.hash(&mut h);
+            h.finish()
+        };
+
         self.state.status_message = format!("Generated in {:.1}s", result.elapsed.as_secs_f32());
         self.state.generated = Some(result);
         self.state.dirty = true;

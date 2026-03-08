@@ -40,6 +40,10 @@ pub struct GenInput {
     pub layer_group_names: Vec<String>,
     /// Per-layer dryness of surface below (parallel to `layers`).
     pub layer_dry: Vec<f32>,
+    /// Per-layer render hashes (parallel to `layers`), computed from render-relevant fields.
+    pub layer_hashes: Vec<u64>,
+    /// Cached layer renders from a previous run, keyed by render hash.
+    pub cached_layers: Vec<(u64, Arc<LayerMaps>)>,
 }
 
 /// Output from a completed generation.
@@ -52,6 +56,8 @@ pub struct GenResult {
     pub elapsed: Duration,
     /// Freshly computed mesh normals — returned so the main thread can cache them.
     pub computed_normals: Option<(u32, Arc<MeshNormalData>)>,
+    /// Rendered layer maps for caching, keyed by render hash.
+    pub rendered_layers: Vec<(u64, Arc<LayerMaps>)>,
 }
 
 /// Manages a single background generation thread.
@@ -71,6 +77,11 @@ pub struct GenerationManager {
     /// Wall-clock start time recorded before pre-computation, so the displayed
     /// elapsed duration includes main-thread prep work the user actually waits for.
     pub start_time: Option<Instant>,
+    /// Cached per-layer render results from the last completed generation.
+    pub layer_cache: Vec<(u64, Arc<LayerMaps>)>,
+    /// Global hash (resolution + mesh) for the cached layers.
+    /// When this changes, all cached layers are invalidated.
+    pub cache_global_hash: u64,
 }
 
 impl Default for GenerationManager {
@@ -81,6 +92,8 @@ impl Default for GenerationManager {
             progress: Arc::new(AtomicU32::new(0f32.to_bits())),
             stage: Arc::new(AtomicU8::new(0)),
             start_time: None,
+            layer_cache: Vec::new(),
+            cache_global_hash: 0,
         }
     }
 }
@@ -246,21 +259,44 @@ fn run_pipeline(
         .map(|mesh| compute_stretch_map(mesh, input.resolution));
     let stretch_ref = stretch_data.as_ref();
 
-    // ── Stage 3: Path generation — parallel per layer ──
-
-    stage.store(STAGE_PATHS, Ordering::Relaxed);
-    set_progress(progress, p_paths);
-
     let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 
     let mut sorted: Vec<(usize, &PaintLayer)> = input.layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
 
-    let completed_paths = AtomicUsize::new(0);
+    // ── Check per-layer cache ──
+    let cached_maps: Vec<Option<Arc<LayerMaps>>> = sorted
+        .iter()
+        .map(|&(layer_index, _)| {
+            let hash = input.layer_hashes.get(layer_index).copied().unwrap_or(0);
+            input
+                .cached_layers
+                .iter()
+                .find(|(h, _)| *h == hash)
+                .map(|(_, maps)| Arc::clone(maps))
+        })
+        .collect();
 
-    let mut all_paths: Vec<Vec<StrokePath>> = sorted
+    // Indices of layers that need rendering: (sorted_idx, layer_index)
+    let miss_indices: Vec<(usize, usize)> = sorted
+        .iter()
+        .enumerate()
+        .filter(|(si, _)| cached_maps[*si].is_none())
+        .map(|(si, &(li, _))| (si, li))
+        .collect();
+
+    // ── Stage 3: Path generation — only for uncached layers ──
+
+    stage.store(STAGE_PATHS, Ordering::Relaxed);
+    set_progress(progress, p_paths);
+
+    let completed_paths = AtomicUsize::new(0);
+    let n_miss = miss_indices.len().max(1) as f32;
+
+    let mut miss_paths: Vec<Vec<StrokePath>> = miss_indices
         .par_iter()
-        .map(|&(layer_index, layer)| {
+        .map(|&(_, layer_index)| {
+            let layer = &input.layers[layer_index];
             let base = input
                 .layer_base_colors
                 .get(layer_index)
@@ -282,14 +318,14 @@ fn run_pipeline(
                 Some(cancel),
             );
             let done = completed_paths.fetch_add(1, Ordering::Relaxed) + 1;
-            set_progress(progress, p_paths + path_span * done as f32 / n);
+            set_progress(progress, p_paths + path_span * done as f32 / n_miss);
             result
         })
         .collect();
 
     // Assign globally unique stroke IDs (1-based; 0 = no stroke).
     let mut next_id = 1u32;
-    for layer_paths in all_paths.iter_mut() {
+    for layer_paths in miss_paths.iter_mut() {
         for path in layer_paths.iter_mut() {
             path.stroke_id = next_id;
             next_id = next_id.wrapping_add(1);
@@ -305,25 +341,32 @@ fn run_pipeline(
     stage.store(STAGE_COMPOSITE, Ordering::Relaxed);
     set_progress(progress, p_composite);
 
-    // 4a: Render each layer into independent LayerMaps
-    let mut layer_maps: Vec<LayerMaps> = Vec::with_capacity(sorted.len());
-    for (sorted_idx, &(layer_index, layer)) in sorted.iter().enumerate() {
-        let base = input
-            .layer_base_colors
-            .get(layer_index)
-            .map(|bc| bc.as_source())
-            .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
-        let mask = mask_refs.get(layer_index).and_then(|m| *m);
-        layer_maps.push(render_layer(
-            layer,
-            layer_index as u32,
-            &base,
-            Some(&all_paths[sorted_idx]),
-            normal_data,
-            mask,
-            stretch_ref,
-            input.resolution,
-        ));
+    // 4a: Render uncached layers, assemble all LayerMaps as Arc
+    let mut result_maps: Vec<Arc<LayerMaps>> = Vec::with_capacity(sorted.len());
+    let mut miss_path_idx = 0;
+    for (sorted_idx, &(layer_index, _)) in sorted.iter().enumerate() {
+        if let Some(ref cached) = cached_maps[sorted_idx] {
+            result_maps.push(Arc::clone(cached));
+        } else {
+            let layer = &input.layers[layer_index];
+            let base = input
+                .layer_base_colors
+                .get(layer_index)
+                .map(|bc| bc.as_source())
+                .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+            let mask = mask_refs.get(layer_index).and_then(|m| *m);
+            result_maps.push(Arc::new(render_layer(
+                layer,
+                layer_index as u32,
+                &base,
+                Some(&miss_paths[miss_path_idx]),
+                normal_data,
+                mask,
+                stretch_ref,
+                input.resolution,
+            )));
+            miss_path_idx += 1;
+        }
         set_progress(
             progress,
             p_composite + comp_span * (sorted_idx + 1) as f32 / n,
@@ -333,6 +376,16 @@ fn run_pipeline(
             return None;
         }
     }
+
+    // Build rendered_layers for caching (hash → Arc<LayerMaps>)
+    let rendered_layers: Vec<(u64, Arc<LayerMaps>)> = sorted
+        .iter()
+        .enumerate()
+        .map(|(si, &(li, _))| {
+            let hash = input.layer_hashes.get(li).copied().unwrap_or(0);
+            (hash, Arc::clone(&result_maps[si]))
+        })
+        .collect();
 
     // 4b: Initialize GlobalMaps with base colors and merge layers
     let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
@@ -353,14 +406,14 @@ fn run_pipeline(
         }
     }
 
-    let layer_refs: Vec<&LayerMaps> = layer_maps.iter().collect();
+    let layer_refs: Vec<&LayerMaps> = result_maps.iter().map(|a| a.as_ref()).collect();
     // Reorder dry values to match sorted (compositing) order
     let layer_dry: Vec<f32> = sorted
         .iter()
         .map(|&(layer_index, _)| input.layer_dry.get(layer_index).copied().unwrap_or(1.0))
         .collect();
     let layer_settings: Vec<LayerCompositeSettings> =
-        vec![LayerCompositeSettings::default(); layer_maps.len()];
+        vec![LayerCompositeSettings::default(); result_maps.len()];
     merge_layers(
         &layer_refs,
         &layer_dry,
@@ -437,5 +490,6 @@ fn run_pipeline(
         resolution: input.resolution,
         elapsed: start.elapsed(),
         computed_normals: fresh_normals.map(|nd| (input.resolution, nd)),
+        rendered_layers,
     })
 }

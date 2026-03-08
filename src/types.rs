@@ -657,6 +657,28 @@ impl Layer {
             guides: self.guides.clone(),
         }
     }
+
+    /// Hash of the fields that affect [`render_layer()`] output.
+    ///
+    /// Covers `paint`, `guides`, `group_name`, `order`, `base_color`, and the
+    /// externally supplied `seed`. Fields that only affect merge/output stages
+    /// (`dry`, `visible`, `name`, `base_normal`) are excluded so that changing
+    /// them does not invalidate the per-layer render cache.
+    pub fn render_hash(&self, seed: u32) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        if let Ok(bytes) = serde_json::to_vec(&(
+            &self.paint,
+            &self.guides,
+            &self.group_name,
+            self.order,
+            &self.base_color,
+        )) {
+            bytes.hash(&mut hasher);
+        }
+        seed.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 // ── Preset System ──
