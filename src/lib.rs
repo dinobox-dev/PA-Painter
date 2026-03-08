@@ -68,11 +68,13 @@ pub mod types;
 // ── I/O & export ──
 pub mod asset_io;
 pub mod glb_export;
+
+// ── Pipeline support ──
+pub mod object_normal;
 pub mod stroke_color;
 
 // ── Utilities ──
 pub mod math;
-pub mod object_normal;
 pub mod rng;
 pub mod stretch_map;
 pub mod uv_mask;

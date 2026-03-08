@@ -43,7 +43,7 @@ The project ships as **one library crate** with **two binaries** (CLI and GUI).
 | Pipeline Stage 5 | `output`, `glb_export` |
 | Data model | `types`, `project`, `pressure` |
 | I/O | `asset_io` (OBJ / glTF / PNG / EXR) |
-| Utilities | `math`, `rng`, `error` |
+| Utilities | `math`, `rng`, `stretch_map`, `error` |
 
 Every pipeline module is **stateless** — pure functions with no side effects,
 testable without a GUI or GPU.
