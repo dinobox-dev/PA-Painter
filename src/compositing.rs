@@ -45,6 +45,12 @@ pub struct GlobalMaps {
     /// based on actual paint thickness rather than pressure-driven density.
     /// Empty in SurfacePaint mode.
     pub paint_load: Vec<f32>,
+    /// Stroke time: normalized stroke order within the layer (0.0–1.0).
+    /// First stroke = 0.0, last stroke = 1.0. Uses min policy (first touch wins).
+    pub stroke_time_order: Vec<f32>,
+    /// Stroke time: arc-length progress within each stroke (0.0–1.0).
+    /// Start of stroke = 0.0, end = 1.0.
+    pub stroke_time_arc: Vec<f32>,
     pub resolution: u32,
 }
 
@@ -102,6 +108,9 @@ impl GlobalMaps {
             Vec::new()
         };
 
+        let stroke_time_order = vec![0.0f32; size];
+        let stroke_time_arc = vec![0.0f32; size];
+
         Self {
             height,
             color,
@@ -110,6 +119,8 @@ impl GlobalMaps {
             gradient_x,
             gradient_y,
             paint_load,
+            stroke_time_order,
+            stroke_time_arc,
             resolution,
         }
     }
@@ -135,6 +146,10 @@ pub struct LayerMaps {
     pub gradient_y: Vec<f32>,
     /// Paint remaining (load depletion) per pixel.
     pub paint_load: Vec<f32>,
+    /// Stroke time: normalized stroke order within the layer (0.0–1.0).
+    pub stroke_time_order: Vec<f32>,
+    /// Stroke time: arc-length progress within each stroke (0.0–1.0).
+    pub stroke_time_arc: Vec<f32>,
     pub resolution: u32,
 }
 
@@ -150,6 +165,8 @@ impl LayerMaps {
             gradient_x: vec![0.0f32; size],
             gradient_y: vec![0.0f32; size],
             paint_load: vec![0.0f32; size],
+            stroke_time_order: vec![0.0f32; size],
+            stroke_time_arc: vec![0.0f32; size],
             resolution,
         }
     }
@@ -304,6 +321,8 @@ pub struct StrokeAppearance {
     /// Per-pixel normal clamp: skip pixels whose mesh normal deviates too
     /// far from the stroke's reference normal. `None` = disabled.
     pub normal_break_threshold: Option<f32>,
+    /// Normalized stroke order within the layer (0.0 = first, 1.0 = last).
+    pub time_order: f32,
 }
 
 /// Kubelka-Munk approximate subtractive mix between two colors.
@@ -500,6 +519,19 @@ pub fn composite_stroke(
                 }
 
                 global.stroke_id[idx] = stroke_id;
+
+                // Stroke time: min policy — first touch wins.
+                // arc_t = progress along stroke (0.0 at start, 1.0 at end).
+                let arc_t = t.clamp(0.0, 1.0);
+                let order = appearance.time_order;
+                if global.stroke_time_order[idx] == 0.0
+                    || order < global.stroke_time_order[idx]
+                    || (order == global.stroke_time_order[idx]
+                        && arc_t < global.stroke_time_arc[idx])
+                {
+                    global.stroke_time_order[idx] = order;
+                    global.stroke_time_arc[idx] = arc_t;
+                }
             }
         }
     }
@@ -845,7 +877,13 @@ pub fn composite_layer(
         .collect();
 
     // Step 3: Composite sequentially using gather (no scatter-write gaps)
+    let total_strokes = heights.len();
     for (i, local_height) in heights.iter().enumerate() {
+        let time_order = if total_strokes <= 1 {
+            0.0
+        } else {
+            i as f32 / (total_strokes - 1) as f32
+        };
         composite_stroke(
             local_height,
             &paths[i],
@@ -856,6 +894,7 @@ pub fn composite_layer(
                 normal: stroke_normals[i],
                 transparent,
                 normal_break_threshold: scaled.normal_break_threshold,
+                time_order,
             },
             normal_data,
             global,
@@ -920,6 +959,8 @@ pub fn render_layer(
         gradient_x: global.gradient_x,
         gradient_y: global.gradient_y,
         paint_load: global.paint_load,
+        stroke_time_order: global.stroke_time_order,
+        stroke_time_arc: global.stroke_time_arc,
         resolution,
     }
 }
@@ -1017,6 +1058,10 @@ pub fn merge_layers(
             }
 
             global.stroke_id[idx] = layer.stroke_id[idx];
+
+            // Stroke time: propagate from winning layer
+            global.stroke_time_order[idx] = layer.stroke_time_order[idx];
+            global.stroke_time_arc[idx] = layer.stroke_time_arc[idx];
         }
     }
 }
