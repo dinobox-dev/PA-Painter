@@ -681,6 +681,37 @@ impl Layer {
         self.seed.hash(&mut hasher);
         hasher.finish()
     }
+
+    /// Hash of the fields that affect path generation only.
+    ///
+    /// Subset of [`render_hash()`]. Type C parameters (`load`, `body_wiggle`,
+    /// `pressure_curve`, `color_variation`, `viscosity`, `normal_break_threshold`)
+    /// are excluded — changing them allows cached paths to be reused while
+    /// only re-running stroke height and compositing.
+    pub fn path_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        // Path-affecting PaintValues fields
+        let p = &self.paint;
+        p.brush_width.to_bits().hash(&mut hasher);
+        p.stroke_spacing.to_bits().hash(&mut hasher);
+        p.max_stroke_length.to_bits().hash(&mut hasher);
+        p.angle_variation.to_bits().hash(&mut hasher);
+        p.max_turn_angle.to_bits().hash(&mut hasher);
+        p.color_break_threshold.map(|v| v.to_bits()).hash(&mut hasher);
+        p.overlap_ratio.map(|v| v.to_bits()).hash(&mut hasher);
+        p.overlap_dist_factor.map(|v| v.to_bits()).hash(&mut hasher);
+        // Non-PaintValues path-affecting fields
+        if let Ok(bytes) = serde_json::to_vec(&(
+            &self.guides,
+            &self.group_name,
+            &self.base_color,
+        )) {
+            bytes.hash(&mut hasher);
+        }
+        self.seed.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 // ── Preset System ──

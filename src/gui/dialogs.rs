@@ -144,6 +144,7 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                     elapsed: std::time::Duration::ZERO,
                     computed_normals: None,
                     rendered_layers: Vec::new(),
+                    rendered_paths: Vec::new(),
                 });
                 // Create texture handles so UV View displays the maps
                 let gen = state.generated.as_ref().unwrap();

@@ -42,8 +42,12 @@ pub struct GenInput {
     pub layer_dry: Vec<f32>,
     /// Per-layer render hashes (parallel to `layers`), computed from render-relevant fields.
     pub layer_hashes: Vec<u64>,
+    /// Per-layer path hashes (parallel to `layers`), covering only path-affecting fields.
+    pub layer_path_hashes: Vec<u64>,
     /// Cached layer renders from a previous run, keyed by render hash.
     pub cached_layers: Vec<(u64, Arc<LayerMaps>)>,
+    /// Cached paths from a previous run, keyed by path hash.
+    pub cached_paths: Vec<(u64, Arc<Vec<StrokePath>>)>,
 }
 
 /// Output from a completed generation.
@@ -58,6 +62,8 @@ pub struct GenResult {
     pub computed_normals: Option<(u32, Arc<MeshNormalData>)>,
     /// Rendered layer maps for caching, keyed by render hash.
     pub rendered_layers: Vec<(u64, Arc<LayerMaps>)>,
+    /// Generated paths for caching, keyed by path hash.
+    pub rendered_paths: Vec<(u64, Arc<Vec<StrokePath>>)>,
 }
 
 /// Manages a single background generation thread.
@@ -79,6 +85,9 @@ pub struct GenerationManager {
     pub start_time: Option<Instant>,
     /// Cached per-layer render results from the last completed generation.
     pub layer_cache: Vec<(u64, Arc<LayerMaps>)>,
+    /// Cached per-layer paths from the last completed generation, keyed by path hash.
+    /// Path geometry is resolution-independent so these survive resolution changes.
+    pub path_cache: Vec<(u64, Arc<Vec<StrokePath>>)>,
     /// Global hash (resolution + mesh) for the cached layers.
     /// When this changes, all cached layers are invalidated.
     pub cache_global_hash: u64,
@@ -95,6 +104,7 @@ impl Default for GenerationManager {
             stage: Arc::new(AtomicU8::new(0)),
             start_time: None,
             layer_cache: Vec::new(),
+            path_cache: Vec::new(),
             cache_global_hash: 0,
             is_preview: false,
         }
@@ -267,36 +277,51 @@ fn run_pipeline(
     let mut sorted: Vec<(usize, &PaintLayer)> = input.layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
 
-    // ── Check per-layer cache ──
-    let cached_maps: Vec<Option<Arc<LayerMaps>>> = sorted
+    // ── Check per-layer caches (render + path) ──
+    //
+    // Three cases per layer:
+    //   1. render_hash match → full LayerMaps cache hit (skip paths + render)
+    //   2. path_hash match  → path cache hit (skip path generation, re-render)
+    //   3. neither          → generate paths from scratch, then render
+    #[derive(Clone)]
+    enum LayerCacheState {
+        RenderHit(Arc<LayerMaps>),
+        PathHit(Arc<Vec<StrokePath>>),
+        Miss,
+    }
+
+    let cache_states: Vec<LayerCacheState> = sorted
         .iter()
         .map(|&(layer_index, _)| {
-            let hash = input.layer_hashes.get(layer_index).copied().unwrap_or(0);
-            input
-                .cached_layers
-                .iter()
-                .find(|(h, _)| *h == hash)
-                .map(|(_, maps)| Arc::clone(maps))
+            let render_h = input.layer_hashes.get(layer_index).copied().unwrap_or(0);
+            if let Some((_, maps)) = input.cached_layers.iter().find(|(h, _)| *h == render_h) {
+                return LayerCacheState::RenderHit(Arc::clone(maps));
+            }
+            let path_h = input.layer_path_hashes.get(layer_index).copied().unwrap_or(0);
+            if let Some((_, paths)) = input.cached_paths.iter().find(|(h, _)| *h == path_h) {
+                return LayerCacheState::PathHit(Arc::clone(paths));
+            }
+            LayerCacheState::Miss
         })
         .collect();
 
-    // Indices of layers that need rendering: (sorted_idx, layer_index)
-    let miss_indices: Vec<(usize, usize)> = sorted
+    // Indices of layers that need fresh path generation (Miss only, not PathHit)
+    let path_miss_indices: Vec<(usize, usize)> = sorted
         .iter()
         .enumerate()
-        .filter(|(si, _)| cached_maps[*si].is_none())
+        .filter(|(si, _)| matches!(cache_states[*si], LayerCacheState::Miss))
         .map(|(si, &(li, _))| (si, li))
         .collect();
 
-    // ── Stage 3: Path generation — only for uncached layers ──
+    // ── Stage 3: Path generation — only for layers with no path cache ──
 
     stage.store(STAGE_PATHS, Ordering::Relaxed);
     set_progress(progress, p_paths);
 
     let completed_paths = AtomicUsize::new(0);
-    let n_miss = miss_indices.len().max(1) as f32;
+    let n_path_miss = path_miss_indices.len().max(1) as f32;
 
-    let mut miss_paths: Vec<Vec<StrokePath>> = miss_indices
+    let mut fresh_paths: Vec<Vec<StrokePath>> = path_miss_indices
         .par_iter()
         .map(|&(_, layer_index)| {
             let layer = &input.layers[layer_index];
@@ -321,14 +346,14 @@ fn run_pipeline(
                 Some(cancel),
             );
             let done = completed_paths.fetch_add(1, Ordering::Relaxed) + 1;
-            set_progress(progress, p_paths + path_span * done as f32 / n_miss);
+            set_progress(progress, p_paths + path_span * done as f32 / n_path_miss);
             result
         })
         .collect();
 
     // Assign globally unique stroke IDs (1-based; 0 = no stroke).
     let mut next_id = 1u32;
-    for layer_paths in miss_paths.iter_mut() {
+    for layer_paths in fresh_paths.iter_mut() {
         for path in layer_paths.iter_mut() {
             path.stroke_id = next_id;
             next_id = next_id.wrapping_add(1);
@@ -344,31 +369,62 @@ fn run_pipeline(
     stage.store(STAGE_COMPOSITE, Ordering::Relaxed);
     set_progress(progress, p_composite);
 
-    // 4a: Render uncached layers, assemble all LayerMaps as Arc
+    // Assemble paths for each layer (from cache or fresh), then render
     let mut result_maps: Vec<Arc<LayerMaps>> = Vec::with_capacity(sorted.len());
-    let mut miss_path_idx = 0;
+    let mut all_paths: Vec<(u64, Arc<Vec<StrokePath>>)> = Vec::with_capacity(sorted.len());
+    let mut fresh_path_idx = 0;
     for (sorted_idx, &(layer_index, _)) in sorted.iter().enumerate() {
-        if let Some(ref cached) = cached_maps[sorted_idx] {
-            result_maps.push(Arc::clone(cached));
-        } else {
-            let layer = &input.layers[layer_index];
-            let base = input
-                .layer_base_colors
-                .get(layer_index)
-                .map(|bc| bc.as_source())
-                .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
-            let mask = mask_refs.get(layer_index).and_then(|m| *m);
-            result_maps.push(Arc::new(render_layer(
-                layer,
-                layer_index as u32,
-                &base,
-                Some(&miss_paths[miss_path_idx]),
-                normal_data,
-                mask,
-                stretch_ref,
-                input.resolution,
-            )));
-            miss_path_idx += 1;
+        let path_hash = input.layer_path_hashes.get(layer_index).copied().unwrap_or(0);
+        match &cache_states[sorted_idx] {
+            LayerCacheState::RenderHit(maps) => {
+                result_maps.push(Arc::clone(maps));
+                // Preserve existing path cache entry if available
+                if let Some((_, paths)) = input.cached_paths.iter().find(|(h, _)| *h == path_hash) {
+                    all_paths.push((path_hash, Arc::clone(paths)));
+                }
+            }
+            LayerCacheState::PathHit(paths) => {
+                let layer = &input.layers[layer_index];
+                let base = input
+                    .layer_base_colors
+                    .get(layer_index)
+                    .map(|bc| bc.as_source())
+                    .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+                let mask = mask_refs.get(layer_index).and_then(|m| *m);
+                result_maps.push(Arc::new(render_layer(
+                    layer,
+                    layer_index as u32,
+                    &base,
+                    Some(paths),
+                    normal_data,
+                    mask,
+                    stretch_ref,
+                    input.resolution,
+                )));
+                all_paths.push((path_hash, Arc::clone(paths)));
+            }
+            LayerCacheState::Miss => {
+                let layer = &input.layers[layer_index];
+                let base = input
+                    .layer_base_colors
+                    .get(layer_index)
+                    .map(|bc| bc.as_source())
+                    .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+                let mask = mask_refs.get(layer_index).and_then(|m| *m);
+                let paths_arc = Arc::new(std::mem::take(&mut fresh_paths[fresh_path_idx]));
+                fresh_path_idx += 1;
+                result_maps.push(Arc::new(render_layer(
+                    layer,
+                    layer_index as u32,
+                    &base,
+                    Some(&paths_arc),
+                    normal_data,
+                    mask,
+                    stretch_ref,
+                    input.resolution,
+                )));
+                all_paths.push((path_hash, paths_arc));
+            }
         }
         set_progress(
             progress,
@@ -494,5 +550,6 @@ fn run_pipeline(
         elapsed: start.elapsed(),
         computed_normals: fresh_normals.map(|nd| (input.resolution, nd)),
         rendered_layers,
+        rendered_paths: all_paths,
     })
 }

@@ -142,6 +142,14 @@ impl PainterApp {
             .filter(|l| l.visible)
             .map(|l| l.render_hash())
             .collect();
+        let layer_path_hashes: Vec<u64> = self
+            .state
+            .project
+            .layers
+            .iter()
+            .filter(|l| l.visible)
+            .map(|l| l.path_hash())
+            .collect();
 
         // Pass layer cache if global inputs (resolution, mesh) haven't changed
         let global_hash = {
@@ -156,6 +164,8 @@ impl PainterApp {
         } else {
             Vec::new()
         };
+        // Path cache is resolution-independent — always pass it
+        let cached_paths = self.state.generation.path_cache.clone();
 
         self.state.generation.start(generation::GenInput {
             layers,
@@ -168,7 +178,9 @@ impl PainterApp {
             layer_group_names,
             layer_dry: visible_layers.iter().map(|l| l.dry).collect(),
             layer_hashes,
+            layer_path_hashes,
             cached_layers,
+            cached_paths,
         });
         if !is_preview {
             self.state.generation_snapshot = Some(state::generation_state_hash(
@@ -219,6 +231,11 @@ impl PainterApp {
         // Cache mesh normals computed on the worker thread
         if let Some(normals) = &result.computed_normals {
             self.state.cached_mesh_normals = Some((normals.0, std::sync::Arc::clone(&normals.1)));
+        }
+
+        // Path cache is resolution-independent — always update
+        if !result.rendered_paths.is_empty() {
+            self.state.generation.path_cache = result.rendered_paths.clone();
         }
 
         if is_preview {
@@ -447,6 +464,7 @@ impl PainterApp {
             elapsed: std::time::Duration::ZERO,
             computed_normals: None,
             rendered_layers: self.state.generation.layer_cache.clone(),
+            rendered_paths: self.state.generation.path_cache.clone(),
         });
 
         // Output now matches current project state
