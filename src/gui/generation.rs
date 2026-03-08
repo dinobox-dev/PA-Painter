@@ -82,6 +82,8 @@ pub struct GenerationManager {
     /// Global hash (resolution + mesh) for the cached layers.
     /// When this changes, all cached layers are invalidated.
     pub cache_global_hash: u64,
+    /// Whether the current run is a low-res preview (skip cache update on completion).
+    pub is_preview: bool,
 }
 
 impl Default for GenerationManager {
@@ -94,6 +96,7 @@ impl Default for GenerationManager {
             start_time: None,
             layer_cache: Vec::new(),
             cache_global_hash: 0,
+            is_preview: false,
         }
     }
 }

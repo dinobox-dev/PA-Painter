@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use eframe::egui;
 use glam::Vec2;
@@ -260,6 +261,14 @@ pub struct AppState {
     /// Hash of (layers, settings, mesh_hash) at last generation — used to detect outdated results.
     pub generation_snapshot: Option<u64>,
 
+    // ── Auto-Preview ──
+    /// Combined render hash from previous frame, for detecting Type C/D changes.
+    pub prev_render_hash: u64,
+    /// When a Type C/D parameter last changed (debounce timer start).
+    pub auto_preview_timer: Option<Instant>,
+    /// Whether to auto-start full-res generation after preview completes.
+    pub pending_full_after_preview: bool,
+
     // ── Undo/Redo ──
     pub undo: UndoHistory,
 }
@@ -305,6 +314,9 @@ impl AppState {
             group_dim_cache: GroupDimCache::default(),
             status_message: "Ready".to_string(),
             generation_snapshot: None,
+            prev_render_hash: 0,
+            auto_preview_timer: None,
+            pending_full_after_preview: false,
             undo: UndoHistory::default(),
         }
     }

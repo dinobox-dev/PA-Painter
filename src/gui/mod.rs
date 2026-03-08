@@ -49,17 +49,52 @@ impl PainterApp {
         }
     }
 
+    /// Compute a combined hash of all layer render hashes + mesh hash.
+    /// Used to detect Type C/D parameter changes between frames.
+    fn combined_render_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for layer in &self.state.project.layers {
+            layer.render_hash().hash(&mut hasher);
+        }
+        self.state.mesh_hash.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Preview resolution for auto-preview (256px).
+    const PREVIEW_RESOLUTION: u32 = 256;
+    /// Debounce delay before starting auto-preview.
+    const PREVIEW_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
+    /// Delay after preview before starting full-res generation.
+    const FULL_GEN_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+
     fn start_generation(&mut self) {
+        self.state.auto_preview_timer = None;
+        self.state.pending_full_after_preview = false;
+        self.start_generation_at_resolution(
+            self.state.project.settings.resolution_preset.resolution(),
+            false,
+        );
+    }
+
+    fn start_preview_generation(&mut self) {
+        self.start_generation_at_resolution(Self::PREVIEW_RESOLUTION, true);
+    }
+
+    fn start_generation_at_resolution(&mut self, resolution: u32, is_preview: bool) {
         if self.state.generation.is_running() {
-            self.state.status_message = "Generation already running".to_string();
-            return;
+            // Cancel in-flight generation to start the new one
+            self.state.generation.discard();
         }
 
-        let resolution = self.state.project.settings.resolution_preset.resolution();
-
         // Show feedback immediately — no heavy work before this point.
-        self.state.status_message = format!("Generating at {}px...", resolution);
+        if is_preview {
+            self.state.status_message = format!("Preview at {}px...", resolution);
+        } else {
+            self.state.status_message = format!("Generating at {}px...", resolution);
+        }
         self.state.generation.start_time = Some(std::time::Instant::now());
+        self.state.generation.is_preview = is_preview;
 
         let layers = self.state.project.paint_layers();
         let settings = self.state.project.settings.clone();
@@ -135,14 +170,17 @@ impl PainterApp {
             layer_hashes,
             cached_layers,
         });
-        self.state.generation_snapshot = Some(state::generation_state_hash(
-            &self.state.project.layers,
-            &self.state.project.settings,
-            self.state.mesh_hash,
-        ));
+        if !is_preview {
+            self.state.generation_snapshot = Some(state::generation_state_hash(
+                &self.state.project.layers,
+                &self.state.project.settings,
+                self.state.mesh_hash,
+            ));
+        }
     }
 
     fn apply_generation_result(&mut self, ctx: &egui::Context, result: generation::GenResult) {
+        let is_preview = self.state.generation.is_preview;
         let r = result.resolution;
         self.state.textures.color = Some(textures::color_buffer_to_handle(
             ctx,
@@ -183,26 +221,37 @@ impl PainterApp {
             self.state.cached_mesh_normals = Some((normals.0, std::sync::Arc::clone(&normals.1)));
         }
 
-        // Store per-layer render cache for next generation
-        self.state.generation.layer_cache = result.rendered_layers.clone();
-        self.state.generation.cache_global_hash = {
-            use std::hash::{Hash, Hasher};
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            result.resolution.hash(&mut h);
-            self.state.mesh_hash.hash(&mut h);
-            h.finish()
-        };
+        if is_preview {
+            // Preview: display result but don't update layer cache (preserve full-res cache).
+            // Schedule full-res follow-up after a short delay.
+            self.state.status_message =
+                format!("Preview in {:.2}s", result.elapsed.as_secs_f32());
+            self.state.generated = Some(result);
+            self.state.pending_full_after_preview = true;
+            self.state.auto_preview_timer = Some(std::time::Instant::now());
+        } else {
+            // Full-res: update layer cache for future reuse.
+            self.state.generation.layer_cache = result.rendered_layers.clone();
+            self.state.generation.cache_global_hash = {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                result.resolution.hash(&mut h);
+                self.state.mesh_hash.hash(&mut h);
+                h.finish()
+            };
+            self.state.status_message =
+                format!("Generated in {:.1}s", result.elapsed.as_secs_f32());
+            self.state.generated = Some(result);
+            self.state.dirty = true;
+            self.state.pending_full_after_preview = false;
 
-        self.state.status_message = format!("Generated in {:.1}s", result.elapsed.as_secs_f32());
-        self.state.generated = Some(result);
-        self.state.dirty = true;
-
-        // Chain: auto-export to pre-selected path if requested via Generate & Export
-        if let Some(dir) = self.state.post_gen_export_maps.take() {
-            dialogs::export_maps_to(&mut self.state, &dir);
-        }
-        if let Some(path) = self.state.post_gen_export_glb.take() {
-            dialogs::export_glb_to(&mut self.state, &path);
+            // Chain: auto-export to pre-selected path if requested via Generate & Export
+            if let Some(dir) = self.state.post_gen_export_maps.take() {
+                dialogs::export_maps_to(&mut self.state, &dir);
+            }
+            if let Some(path) = self.state.post_gen_export_glb.take() {
+                dialogs::export_glb_to(&mut self.state, &path);
+            }
         }
     }
 
@@ -1139,6 +1188,40 @@ impl eframe::App for PainterApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             self.state.selected_guide = None;
             self.state.guide_tool = GuideTool::Select;
+        }
+
+        // ── Auto-preview: detect Type C/D parameter changes ──
+        if !project_replacing && self.state.loaded_mesh.is_some() {
+            let current_render_hash = self.combined_render_hash();
+            if current_render_hash != self.state.prev_render_hash
+                && self.state.prev_render_hash != 0
+            {
+                // Render-affecting parameter changed — reset debounce timer
+                self.state.auto_preview_timer = Some(std::time::Instant::now());
+                self.state.pending_full_after_preview = false;
+            }
+            self.state.prev_render_hash = current_render_hash;
+
+            // Debounce → start preview or full-res
+            if let Some(timer) = self.state.auto_preview_timer {
+                let elapsed = timer.elapsed();
+                if self.state.pending_full_after_preview {
+                    // Preview already displayed — escalate to full-res after delay
+                    if elapsed >= Self::FULL_GEN_DELAY && !self.state.generation.is_running() {
+                        self.state.auto_preview_timer = None;
+                        self.state.pending_full_after_preview = false;
+                        self.start_generation();
+                    } else {
+                        ctx.request_repaint();
+                    }
+                } else if elapsed >= Self::PREVIEW_DEBOUNCE {
+                    // Debounce expired — start low-res preview
+                    self.start_preview_generation();
+                    self.state.auto_preview_timer = None;
+                } else {
+                    ctx.request_repaint();
+                }
+            }
         }
 
         // ── Undo: track post-frame changes ──
