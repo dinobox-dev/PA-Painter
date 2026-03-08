@@ -33,6 +33,14 @@ pub enum MapMode {
     StrokeId,
 }
 
+/// Which base texture to display in the Setup tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SetupMapMode {
+    #[default]
+    Color,
+    Normal,
+}
+
 /// Top-level viewport tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewportTab {
@@ -202,6 +210,7 @@ pub struct AppState {
     pub viewport: ViewportState,
     pub viewport_tab: ViewportTab,
     pub map_mode: MapMode,
+    pub setup_map_mode: SetupMapMode,
     pub guide_tool: GuideTool,
     pub mesh_preview: MeshPreviewState,
 
@@ -255,6 +264,11 @@ pub struct AppState {
     // ── Group Dim Overlay ──
     pub group_dim_cache: GroupDimCache,
 
+    // ── Setup tab base texture cache ──
+    pub setup_base_tex: Option<egui::TextureHandle>,
+    /// Cache key: (layer_idx, is_color, source_hash)
+    pub setup_base_key: Option<(usize, bool, u64)>,
+
     // ── Status ──
     pub status_message: String,
 
@@ -285,6 +299,7 @@ impl AppState {
             viewport: ViewportState::default(),
             viewport_tab: ViewportTab::Setup,
             map_mode: MapMode::Color,
+            setup_map_mode: SetupMapMode::default(),
             guide_tool: GuideTool::default(),
             mesh_preview: MeshPreviewState::default(),
             selected_layer: None,
@@ -312,6 +327,8 @@ impl AppState {
             reload_summary: None,
             mesh_load_popup: None,
             group_dim_cache: GroupDimCache::default(),
+            setup_base_tex: None,
+            setup_base_key: None,
             status_message: "Ready".to_string(),
             generation_snapshot: None,
             prev_render_hash: 0,

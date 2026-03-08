@@ -31,6 +31,33 @@ pub fn loaded_texture_to_handle(
     )
 }
 
+/// Convert a LoadedTexture to an egui TextureHandle without sRGB conversion.
+/// Use for non-color data like normal maps.
+pub fn loaded_texture_raw_handle(
+    ctx: &egui::Context,
+    tex: &LoadedTexture,
+    name: &str,
+) -> egui::TextureHandle {
+    let pixels: Vec<egui::Color32> = tex
+        .pixels
+        .iter()
+        .map(|p| {
+            egui::Color32::from_rgba_unmultiplied(
+                linear_to_raw_u8(p[0]),
+                linear_to_raw_u8(p[1]),
+                linear_to_raw_u8(p[2]),
+                (p[3].clamp(0.0, 1.0) * 255.0) as u8,
+            )
+        })
+        .collect();
+
+    ctx.load_texture(
+        name,
+        egui::ColorImage::new([tex.width as usize, tex.height as usize], pixels),
+        egui::TextureOptions::LINEAR,
+    )
+}
+
 /// Convert a Vec<Color> (linear float RGBA) to an egui TextureHandle.
 pub fn color_buffer_to_handle(
     ctx: &egui::Context,
@@ -148,6 +175,11 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
         _ => (c, 0.0, x),
     };
     (r + m, g + m, b + m)
+}
+
+/// Linear float [0,1] to u8 without gamma correction (for non-color data like normal maps).
+pub(super) fn linear_to_raw_u8(l: f32) -> u8 {
+    (l.clamp(0.0, 1.0) * 255.0) as u8
 }
 
 pub(super) fn linear_to_srgb_u8(l: f32) -> u8 {

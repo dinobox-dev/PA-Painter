@@ -1,10 +1,11 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
 use eframe::egui_wgpu;
 
-use practical_arcana_painter::types::GuideType;
+use practical_arcana_painter::types::{GuideType, TextureSource};
 
 use super::mesh_preview;
-use super::state::{AppState, GroupDimKey, GuideTool, MapMode, ViewportTab};
+use super::state::{AppState, GroupDimKey, GuideTool, MapMode, SetupMapMode, ViewportTab};
+use super::textures::{linear_to_raw_u8, linear_to_srgb_u8};
 use super::widgets::{slider_row, toolbar_icon_button};
 
 /// Convert UV coordinate to screen position.
@@ -111,6 +112,117 @@ fn update_group_dim_cache(ctx: &egui::Context, state: &mut AppState) {
     state.group_dim_cache.texture = texture;
 }
 
+// ── Setup tab base texture cache ─────────────────────────────────────
+
+fn texture_source_hash(src: &TextureSource) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    std::mem::discriminant(src).hash(&mut h);
+    match src {
+        TextureSource::None => {}
+        TextureSource::Solid(rgb) => {
+            rgb[0].to_bits().hash(&mut h);
+            rgb[1].to_bits().hash(&mut h);
+            rgb[2].to_bits().hash(&mut h);
+        }
+        TextureSource::MeshMaterial(idx) => idx.hash(&mut h),
+        TextureSource::File(opt) => {
+            if let Some(et) = opt {
+                et.label.hash(&mut h);
+                et.width.hash(&mut h);
+                et.height.hash(&mut h);
+            }
+        }
+    }
+    h.finish()
+}
+
+/// Resolve a TextureSource into an egui TextureHandle for the Setup tab.
+fn resolve_setup_texture(
+    ctx: &egui::Context,
+    source: &TextureSource,
+    is_color: bool,
+    mesh: Option<&practical_arcana_painter::asset_io::LoadedMesh>,
+) -> Option<egui::TextureHandle> {
+    let name = if is_color { "setup_base_color" } else { "setup_base_normal" };
+    match source {
+        TextureSource::None => {
+            // Color: gray 50%; Normal: flat normal (0.5, 0.5, 1.0) = #8080FF
+            let c = if is_color {
+                Color32::from_gray(128)
+            } else {
+                Color32::from_rgb(128, 128, 255)
+            };
+            Some(ctx.load_texture(
+                name,
+                egui::ColorImage::new([1, 1], vec![c]),
+                egui::TextureOptions::NEAREST,
+            ))
+        }
+        TextureSource::Solid(rgb) => {
+            let c = Color32::from_rgb(
+                linear_to_srgb_u8(rgb[0]),
+                linear_to_srgb_u8(rgb[1]),
+                linear_to_srgb_u8(rgb[2]),
+            );
+            Some(ctx.load_texture(
+                name,
+                egui::ColorImage::new([1, 1], vec![c]),
+                egui::TextureOptions::NEAREST,
+            ))
+        }
+        TextureSource::MeshMaterial(idx) => {
+            let mat = mesh?.materials.get(*idx)?;
+            if is_color {
+                let tex = mat.base_color_texture.as_ref()?;
+                Some(super::textures::loaded_texture_to_handle(ctx, tex, name))
+            } else {
+                let tex = mat.normal_texture.as_ref()?;
+                // Normal maps are non-color data — no sRGB conversion
+                Some(super::textures::loaded_texture_raw_handle(ctx, tex, name))
+            }
+        }
+        TextureSource::File(opt) => {
+            let et = opt.as_ref()?;
+            let convert = if is_color { linear_to_srgb_u8 } else { linear_to_raw_u8 };
+            let pixels: Vec<Color32> = et.pixels.iter().map(|p| {
+                Color32::from_rgba_unmultiplied(
+                    convert(p[0]),
+                    convert(p[1]),
+                    convert(p[2]),
+                    (p[3].clamp(0.0, 1.0) * 255.0) as u8,
+                )
+            }).collect();
+            Some(ctx.load_texture(
+                name,
+                egui::ColorImage::new([et.width as usize, et.height as usize], pixels),
+                egui::TextureOptions::LINEAR,
+            ))
+        }
+    }
+}
+
+/// Update the cached base texture for the Setup tab.
+fn update_setup_base_texture(ctx: &egui::Context, state: &mut AppState) {
+    let is_color = state.setup_map_mode == SetupMapMode::Color;
+    let desired_key = state.selected_layer.and_then(|idx| {
+        let layer = state.project.layers.get(idx)?;
+        let src = if is_color { &layer.base_color } else { &layer.base_normal };
+        Some((idx, is_color, texture_source_hash(src)))
+    });
+
+    if state.setup_base_key == desired_key {
+        return;
+    }
+
+    state.setup_base_tex = desired_key.and_then(|(idx, is_color, _)| {
+        let layer = state.project.layers.get(idx)?;
+        let src = if is_color { &layer.base_color } else { &layer.base_normal };
+        resolve_setup_texture(ctx, src, is_color, state.loaded_mesh.as_deref())
+    });
+    state.setup_base_key = desired_key;
+}
+
 // ── Main viewport entry point ───────────────────────────────────────
 
 /// Draw the viewport: tabs, main content, and floating strip overlay.
@@ -123,8 +235,8 @@ pub fn show(
     ui.horizontal(|ui: &mut egui::Ui| {
         let tabs = [
             (ViewportTab::Setup, "Setup"),
-            (ViewportTab::UvView, "UV View"),
-            (ViewportTab::Mesh3D, "3D"),
+            (ViewportTab::UvView, "UV Result"),
+            (ViewportTab::Mesh3D, "3D Preview"),
         ];
         for (tab, label) in &tabs {
             let selected = state.viewport_tab == *tab;
@@ -363,6 +475,18 @@ fn strip_setup(ui: &mut egui::Ui, state: &mut AppState) {
         }
     }
     ui.separator();
+
+    // Base texture mode: Color / Normal
+    overlay_text_button(ui, "Col", state.setup_map_mode == SetupMapMode::Color, || {
+        state.setup_map_mode = SetupMapMode::Color;
+        state.setup_base_key = None; // force cache refresh
+    });
+    overlay_text_button(ui, "Nrm", state.setup_map_mode == SetupMapMode::Normal, || {
+        state.setup_map_mode = SetupMapMode::Normal;
+        state.setup_base_key = None;
+    });
+
+    ui.separator();
     strip_overlay_controls(ui, state);
 }
 
@@ -464,10 +588,10 @@ fn show_setup_view(ui: &mut egui::Ui, state: &mut AppState) {
 
     painter.rect_filled(rect, 0.0, Color32::from_gray(48));
 
-    // Show color texture as background context
+    // Show selected layer's base texture (color or normal)
+    update_setup_base_texture(ui.ctx(), state);
     let tex = state
-        .textures
-        .color
+        .setup_base_tex
         .as_ref()
         .or(state.textures.base_texture.as_ref());
     draw_texture(&painter, tex, state, rect);
