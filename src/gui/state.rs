@@ -239,6 +239,8 @@ pub struct AppState {
     pub pending_generate: bool,
     pub pending_reload_mesh: bool,
     pub pending_replace_mesh: bool,
+    /// Re-merge cached LayerMaps without re-rendering (visibility/order/dry change).
+    pub pending_remerge: bool,
     /// Chain: auto-export to pre-selected path after next generation completes.
     pub post_gen_export_maps: Option<PathBuf>,
     pub post_gen_export_glb: Option<PathBuf>,
@@ -295,6 +297,7 @@ impl AppState {
             pending_generate: false,
             pending_reload_mesh: false,
             pending_replace_mesh: false,
+            pending_remerge: false,
             post_gen_export_maps: None,
             post_gen_export_glb: None,
             reload_summary: None,

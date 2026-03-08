@@ -424,6 +424,7 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
                 }
                 if eye_resp.on_hover_text("Toggle visibility").clicked() {
                     state.project.layers[i].visible = !visible;
+                    state.pending_remerge = true;
                 }
 
                 // ── Action icons (right, selected only) ──
@@ -555,6 +556,7 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
                 for (i, layer) in state.project.layers.iter_mut().enumerate() {
                     layer.order = n - 1 - i as i32;
                 }
+                state.pending_remerge = true;
             }
         }
     }); // indent

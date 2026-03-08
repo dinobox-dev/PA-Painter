@@ -83,6 +83,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     });
     ui.add_space(1.0);
 
+    let old_dry = state.project.layers[idx].dry;
     ui.indent("paint_content", |ui: &mut egui::Ui| {
         let layer_seed = state.project.settings.seed.wrapping_add(idx as u32);
         let layer = &mut state.project.layers[idx];
@@ -210,6 +211,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             layer.paint.normal_break_threshold = None;
         }
     });
+    if state.project.layers[idx].dry != old_dry {
+        state.pending_remerge = true;
+    }
 
     ui.separator();
 
