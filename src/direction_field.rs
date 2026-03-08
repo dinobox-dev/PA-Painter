@@ -322,6 +322,122 @@ impl DirectionField {
     }
 }
 
+// ── Direction field overlay texture ────────────────────────────────
+
+/// Render the direction field as an RGBA arrow overlay texture.
+///
+/// Returns `resolution × resolution` pixels as `Vec<u8>` in RGBA order.
+/// Arrows are drawn on a grid with `arrow_spacing` pixel intervals.
+/// Transparent background; arrows are white with alpha for overlay blending.
+pub fn render_direction_field_overlay(
+    guides: &[Guide],
+    resolution: u32,
+    arrow_spacing: u32,
+) -> Vec<u8> {
+    let res = resolution as usize;
+    let mut pixels = vec![0u8; res * res * 4]; // fully transparent
+
+    let inv_res = 1.0 / resolution as f32;
+    let half_spacing = arrow_spacing as f32 * 0.4;
+    let head_len = half_spacing * 0.4;
+    let line_w = 1.5f32;
+    let head_w = 3.0f32;
+
+    // For each grid cell, draw an arrow
+    let offset = arrow_spacing / 2;
+    let mut cy = offset;
+    while cy < resolution {
+        let mut cx = offset;
+        while cx < resolution {
+            let uv = Vec2::new(
+                (cx as f32 + 0.5) * inv_res,
+                (cy as f32 + 0.5) * inv_res,
+            );
+            let dir = direction_at(uv, guides);
+            if dir.length_squared() < 1e-6 {
+                cx += arrow_spacing;
+                continue;
+            }
+
+            let center = Vec2::new(cx as f32, cy as f32);
+            let tip = center + dir * half_spacing;
+            let tail = center - dir * half_spacing;
+
+            // Draw line from tail to tip
+            draw_line_aa(&mut pixels, res, tail, tip, line_w, [255, 255, 255, 180]);
+
+            // Draw arrowhead
+            let perp = Vec2::new(-dir.y, dir.x);
+            let head_base = tip - dir * head_len;
+            let left = head_base + perp * head_w;
+            let right = head_base - perp * head_w;
+            draw_line_aa(&mut pixels, res, tip, left, line_w, [255, 255, 255, 220]);
+            draw_line_aa(&mut pixels, res, tip, right, line_w, [255, 255, 255, 220]);
+
+            cx += arrow_spacing;
+        }
+        cy += arrow_spacing;
+    }
+
+    pixels
+}
+
+/// Draw an anti-aliased line into an RGBA pixel buffer using distance-based alpha.
+fn draw_line_aa(
+    pixels: &mut [u8],
+    res: usize,
+    p0: Vec2,
+    p1: Vec2,
+    width: f32,
+    color: [u8; 4],
+) {
+    let dx = p1.x - p0.x;
+    let dy = p1.y - p0.y;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 0.01 {
+        return;
+    }
+
+    // Bounding box with padding
+    let pad = width + 1.0;
+    let min_x = (p0.x.min(p1.x) - pad).floor().max(0.0) as usize;
+    let max_x = (p0.x.max(p1.x) + pad).ceil().min(res as f32 - 1.0) as usize;
+    let min_y = (p0.y.min(p1.y) - pad).floor().max(0.0) as usize;
+    let max_y = (p0.y.max(p1.y) + pad).ceil().min(res as f32 - 1.0) as usize;
+
+    let half_w = width * 0.5;
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+
+            // Project point onto line segment
+            let t = ((px - p0.x) * dx + (py - p0.y) * dy) / (len * len);
+            let t = t.clamp(0.0, 1.0);
+            let closest_x = p0.x + t * dx;
+            let closest_y = p0.y + t * dy;
+            let dist = ((px - closest_x).powi(2) + (py - closest_y).powi(2)).sqrt();
+
+            if dist < half_w + 1.0 {
+                // Anti-aliased alpha based on distance from line center
+                let alpha = ((half_w + 0.5 - dist).clamp(0.0, 1.0) * color[3] as f32) as u8;
+                if alpha > 0 {
+                    let idx = (y * res + x) * 4;
+                    // Max-blend: overlay takes the brightest alpha
+                    let existing_a = pixels[idx + 3];
+                    if alpha > existing_a {
+                        pixels[idx] = color[0];
+                        pixels[idx + 1] = color[1];
+                        pixels[idx + 2] = color[2];
+                        pixels[idx + 3] = alpha;
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

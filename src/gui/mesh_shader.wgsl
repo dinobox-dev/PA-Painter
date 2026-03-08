@@ -9,6 +9,7 @@ struct Uniforms {
 @group(1) @binding(0) var t_color: texture_2d<f32>;
 @group(1) @binding(1) var s_color: sampler;
 @group(1) @binding(2) var t_normal: texture_2d<f32>;
+@group(1) @binding(3) var t_overlay: texture_2d<f32>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -51,5 +52,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let n = normalize(mix(N, world_normal, normal_sample.a));
     let ndotl = max(dot(n, u.light_dir), 0.0);
     let lighting = u.ambient + (1.0 - u.ambient) * ndotl;
-    return vec4<f32>(tex_color.rgb * lighting, 1.0);
+    let base = tex_color.rgb * lighting;
+    // Alpha-blend overlay (direction field arrows, etc.) over lit surface
+    let overlay = textureSample(t_overlay, s_color, in.uv);
+    let final_color = mix(base, overlay.rgb, overlay.a);
+    return vec4<f32>(final_color, 1.0);
 }

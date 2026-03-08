@@ -141,6 +141,10 @@ struct MeshGpuResources {
     normal_texture: wgpu::Texture,
     #[allow(dead_code)] // Ownership anchor: texture_bind_group references this view.
     normal_texture_view: wgpu::TextureView,
+    #[allow(dead_code)] // Ownership anchor: TextureView and BindGroup reference this GPU resource.
+    overlay_texture: wgpu::Texture,
+    #[allow(dead_code)] // Ownership anchor: texture_bind_group references this view.
+    overlay_texture_view: wgpu::TextureView,
     texture_bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -341,6 +345,44 @@ fn create_placeholder_normal_texture(device: &wgpu::Device, queue: &wgpu::Queue)
     texture
 }
 
+/// 1×1 fully transparent overlay (no effect on final color).
+fn create_placeholder_overlay_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> wgpu::Texture {
+    let size = wgpu::Extent3d {
+        width: 1,
+        height: 1,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mesh_placeholder_overlay"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &[0u8, 0, 0, 0],
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4),
+            rows_per_image: Some(1),
+        },
+        size,
+    );
+    texture
+}
+
 struct RenderTargets {
     color_texture: wgpu::Texture,
     /// sRGB view used as render attachment (GPU applies linear→sRGB automatically).
@@ -450,6 +492,9 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
     let normal_texture = create_placeholder_normal_texture(device, queue);
     let normal_texture_view = normal_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+    let overlay_texture = create_placeholder_overlay_texture(device, queue);
+    let overlay_texture_view = overlay_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("mesh_sampler"),
         mag_filter: wgpu::FilterMode::Linear,
@@ -487,6 +532,16 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
     let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -504,6 +559,10 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: wgpu::BindingResource::TextureView(&normal_texture_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&overlay_texture_view),
             },
         ],
     });
@@ -578,6 +637,8 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         color_texture_view,
         normal_texture,
         normal_texture_view,
+        overlay_texture,
+        overlay_texture_view,
         texture_bind_group,
         texture_bind_group_layout,
         sampler,
@@ -680,24 +741,10 @@ pub fn upload_color_texture(
 
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
-        res.texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("mesh_texture_bg"),
-            layout: &res.texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&res.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&res.normal_texture_view),
-                },
-            ],
-        });
+        res.texture_bind_group = rebuild_texture_bind_group(
+            device, &res.texture_bind_group_layout, &res.sampler,
+            &view, &res.normal_texture_view, &res.overlay_texture_view,
+        );
         res.color_texture = texture;
         res.color_texture_view = view;
     }
@@ -763,27 +810,120 @@ pub fn upload_normal_texture(
 
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
-        res.texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("mesh_texture_bg"),
-            layout: &res.texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&res.color_texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&res.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-            ],
-        });
+        res.texture_bind_group = rebuild_texture_bind_group(
+            device, &res.texture_bind_group_layout, &res.sampler,
+            &res.color_texture_view, &view, &res.overlay_texture_view,
+        );
         res.normal_texture = texture;
         res.normal_texture_view = view;
     }
+}
+
+// ── Overlay texture upload ─────────────────────────────────────────
+
+/// Upload an RGBA overlay texture (e.g. direction field arrows) to the 3D preview.
+/// Pixels are in linear [0..255] RGBA with straight alpha.
+pub fn upload_overlay_texture(
+    render_state: &egui_wgpu::RenderState,
+    pixels: &[u8],
+    resolution: u32,
+) {
+    let device = &render_state.device;
+    let queue = &render_state.queue;
+
+    let size = wgpu::Extent3d {
+        width: resolution,
+        height: resolution,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mesh_overlay_tex"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        pixels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(resolution * 4),
+            rows_per_image: Some(resolution),
+        },
+        size,
+    );
+
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let mut renderer = render_state.renderer.write();
+    if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
+        res.texture_bind_group = rebuild_texture_bind_group(
+            device, &res.texture_bind_group_layout, &res.sampler,
+            &res.color_texture_view, &res.normal_texture_view, &view,
+        );
+        res.overlay_texture = texture;
+        res.overlay_texture_view = view;
+    }
+}
+
+/// Clear the overlay to a 1×1 transparent texture (no visual effect).
+pub fn clear_overlay_texture(render_state: &egui_wgpu::RenderState) {
+    let device = &render_state.device;
+    let queue = &render_state.queue;
+
+    let texture = create_placeholder_overlay_texture(device, queue);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let mut renderer = render_state.renderer.write();
+    if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
+        res.texture_bind_group = rebuild_texture_bind_group(
+            device, &res.texture_bind_group_layout, &res.sampler,
+            &res.color_texture_view, &res.normal_texture_view, &view,
+        );
+        res.overlay_texture = texture;
+        res.overlay_texture_view = view;
+    }
+}
+
+fn rebuild_texture_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    color_view: &wgpu::TextureView,
+    normal_view: &wgpu::TextureView,
+    overlay_view: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("mesh_texture_bg"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(color_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(normal_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(overlay_view),
+            },
+        ],
+    })
 }
 
 // ── Render + Display ───────────────────────────────────────────────

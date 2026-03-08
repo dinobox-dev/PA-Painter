@@ -35,6 +35,10 @@ pub struct PainterApp {
     prev_base_tex_hash: u64,
     /// Background remerge worker.
     remerge_worker: generation::RemergeWorker,
+    /// Previous show_direction_field state for toggle change detection.
+    prev_show_direction_field: bool,
+    /// Hash of guide state for direction field overlay invalidation.
+    prev_direction_field_hash: u64,
 }
 
 impl PainterApp {
@@ -51,6 +55,8 @@ impl PainterApp {
             prev_show_result: true,
             prev_base_tex_hash: 0,
             remerge_worker: generation::RemergeWorker::default(),
+            prev_show_direction_field: false,
+            prev_direction_field_hash: 0,
         }
     }
 
@@ -303,6 +309,46 @@ impl PainterApp {
             }
         }
         h.finish()
+    }
+
+    /// Hash of all visible layers' guides (for direction field overlay invalidation).
+    fn direction_field_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for layer in &self.state.project.layers {
+            if layer.visible {
+                layer.guides.len().hash(&mut h);
+                for g in &layer.guides {
+                    g.guide_type.hash(&mut h);
+                    g.position.x.to_bits().hash(&mut h);
+                    g.position.y.to_bits().hash(&mut h);
+                    g.direction.x.to_bits().hash(&mut h);
+                    g.direction.y.to_bits().hash(&mut h);
+                    g.influence.to_bits().hash(&mut h);
+                    g.strength.to_bits().hash(&mut h);
+                }
+            }
+        }
+        h.finish()
+    }
+
+    /// Render and upload the direction field overlay from all visible layers' guides.
+    fn upload_direction_field_overlay(&self, render_state: &egui_wgpu::RenderState) {
+        let all_guides: Vec<practical_arcana_painter::types::Guide> = self
+            .state
+            .project
+            .layers
+            .iter()
+            .filter(|l| l.visible)
+            .flat_map(|l| l.guides.iter().cloned())
+            .collect();
+
+        let resolution = 512u32;
+        let arrow_spacing = 32u32;
+        let pixels = practical_arcana_painter::direction_field::render_direction_field_overlay(
+            &all_guides, resolution, arrow_spacing,
+        );
+        mesh_preview::upload_overlay_texture(render_state, &pixels, resolution);
     }
 
     /// Upload base-only textures to the 3D preview (no stroke results).
@@ -619,6 +665,27 @@ impl eframe::App for PainterApp {
                 if h != self.prev_base_tex_hash {
                     self.prev_base_tex_hash = h;
                     self.upload_base_only_to_3d();
+                }
+            }
+        }
+
+        // ── Direction field overlay: sync with toggle + guide changes ──
+        if let Some(ref rs) = self.render_state {
+            if self.state.mesh_preview.gpu_ready {
+                let show_df = self.state.mesh_preview.show_direction_field;
+                let df_hash = self.direction_field_hash();
+
+                if show_df != self.prev_show_direction_field {
+                    self.prev_show_direction_field = show_df;
+                    if show_df {
+                        self.upload_direction_field_overlay(rs);
+                        self.prev_direction_field_hash = df_hash;
+                    } else {
+                        mesh_preview::clear_overlay_texture(rs);
+                    }
+                } else if show_df && df_hash != self.prev_direction_field_hash {
+                    self.prev_direction_field_hash = df_hash;
+                    self.upload_direction_field_overlay(rs);
                 }
             }
         }
