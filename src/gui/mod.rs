@@ -276,6 +276,17 @@ impl PainterApp {
                 dialogs::export_glb_to(&mut self.state, &path);
             }
         }
+
+        // If Type A settings changed while generation was running, remerge with current values
+        let s = &self.state.project.settings;
+        if let Some(ref gen) = self.state.generated {
+            if gen.gen_normal_strength != s.normal_strength
+                || gen.gen_normal_mode != s.normal_mode
+                || gen.gen_background_mode != s.background_mode
+            {
+                self.state.pending_remerge = true;
+            }
+        }
     }
 
     /// Re-merge cached LayerMaps on the main thread (instant).
@@ -557,6 +568,9 @@ impl PainterApp {
             computed_normals: None,
             rendered_layers: self.state.generation.layer_cache.clone(),
             rendered_paths: self.state.generation.path_cache.clone(),
+            gen_normal_strength: settings.normal_strength,
+            gen_normal_mode: settings.normal_mode,
+            gen_background_mode: settings.background_mode,
         });
 
         // Output now matches current project state

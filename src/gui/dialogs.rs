@@ -145,6 +145,9 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                     computed_normals: None,
                     rendered_layers: Vec::new(),
                     rendered_paths: Vec::new(),
+                    gen_normal_strength: state.project.settings.normal_strength,
+                    gen_normal_mode: state.project.settings.normal_mode,
+                    gen_background_mode: state.project.settings.background_mode,
                 });
                 // Create texture handles so UV View displays the maps
                 let gen = state.generated.as_ref().unwrap();

@@ -64,6 +64,10 @@ pub struct GenResult {
     pub rendered_layers: Vec<(u64, Arc<LayerMaps>)>,
     /// Generated paths for caching, keyed by path hash.
     pub rendered_paths: Vec<(u64, Arc<Vec<StrokePath>>)>,
+    /// Type A settings snapshot at generation start — used to detect stale output stage.
+    pub gen_normal_strength: f32,
+    pub gen_normal_mode: NormalMode,
+    pub gen_background_mode: BackgroundMode,
 }
 
 /// Manages a single background generation thread.
@@ -551,5 +555,8 @@ fn run_pipeline(
         computed_normals: fresh_normals.map(|nd| (input.resolution, nd)),
         rendered_layers,
         rendered_paths: all_paths,
+        gen_normal_strength: input.settings.normal_strength,
+        gen_normal_mode: input.settings.normal_mode,
+        gen_background_mode: input.settings.background_mode,
     })
 }
