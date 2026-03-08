@@ -54,6 +54,10 @@ pub struct MeshPreviewState {
     pub rendered_texture_id: Option<egui::TextureId>,
     /// Model transform that normalizes the mesh to a unit-scale centered at origin.
     pub model_transform: Mat4,
+    /// Whether to show the generated result textures on the 3D mesh.
+    pub show_result: bool,
+    /// Whether to show the direction field arrow overlay on the 3D mesh.
+    pub show_direction_field: bool,
 }
 
 impl Default for MeshPreviewState {
@@ -71,6 +75,8 @@ impl Default for MeshPreviewState {
             gpu_ready: false,
             rendered_texture_id: None,
             model_transform: Mat4::IDENTITY,
+            show_result: true,
+            show_direction_field: false,
         }
     }
 }

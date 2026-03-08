@@ -37,7 +37,7 @@ pub enum MapMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewportTab {
     UvView,
-    Guide,
+    Setup,
     Mesh3D,
 }
 
@@ -45,9 +45,9 @@ impl ViewportTab {
     /// Cycle order must match tab-bar order in `viewport.rs:show_viewport()`.
     pub fn next(self) -> Self {
         match self {
-            Self::Guide => Self::UvView,
+            Self::Setup => Self::UvView,
             Self::UvView => Self::Mesh3D,
-            Self::Mesh3D => Self::Guide,
+            Self::Mesh3D => Self::Setup,
         }
     }
 }
@@ -283,7 +283,7 @@ impl AppState {
             uv_edges: None,
             mesh_hash: 0,
             viewport: ViewportState::default(),
-            viewport_tab: ViewportTab::Guide,
+            viewport_tab: ViewportTab::Setup,
             map_mode: MapMode::Color,
             guide_tool: GuideTool::default(),
             mesh_preview: MeshPreviewState::default(),

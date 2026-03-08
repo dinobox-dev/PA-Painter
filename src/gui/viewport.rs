@@ -122,7 +122,7 @@ pub fn show(
     // ── Top tab bar (order must match ViewportTab::next() in state.rs) ──
     ui.horizontal(|ui: &mut egui::Ui| {
         let tabs = [
-            (ViewportTab::Guide, "Guide"),
+            (ViewportTab::Setup, "Setup"),
             (ViewportTab::UvView, "UV View"),
             (ViewportTab::Mesh3D, "3D"),
         ];
@@ -137,7 +137,7 @@ pub fn show(
     // ── Main viewport content ──
     match state.viewport_tab {
         ViewportTab::UvView => show_uv_view(ui, state),
-        ViewportTab::Guide => show_guide_view(ui, state),
+        ViewportTab::Setup => show_setup_view(ui, state),
         ViewportTab::Mesh3D => show_3d_view(ui, state, render_state),
     }
 }
@@ -339,7 +339,7 @@ fn strip_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
     });
 }
 
-fn strip_guide(ui: &mut egui::Ui, state: &mut AppState) {
+fn strip_setup(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 4.0;
     use egui_phosphor::fill::*;
     let no_text = !ui.ctx().wants_keyboard_input();
@@ -403,7 +403,16 @@ fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
             .speed(0.01)
             .fixed_decimals(2),
     );
-    ui.add_space(4.0);
+
+    ui.separator();
+
+    // 3D overlay toggles: Result (generated textures) and Direction (field arrows)
+    overlay_text_button(ui, "Result", state.mesh_preview.show_result, || {
+        state.mesh_preview.show_result = !state.mesh_preview.show_result;
+    });
+    overlay_text_button(ui, "Direction", state.mesh_preview.show_direction_field, || {
+        state.mesh_preview.show_direction_field = !state.mesh_preview.show_direction_field;
+    });
 }
 
 // ── UV View tab ─────────────────────────────────────────────────────
@@ -447,9 +456,9 @@ fn show_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
     handle_pan_zoom(&response, ui, state, rect, false);
 }
 
-// ── Guide tab ───────────────────────────────────────────────────────
+// ── Setup tab (formerly Guide) ───────────────────────────────────────
 
-fn show_guide_view(ui: &mut egui::Ui, state: &mut AppState) {
+fn show_setup_view(ui: &mut egui::Ui, state: &mut AppState) {
     let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let rect = response.rect;
 
@@ -494,14 +503,14 @@ fn show_guide_view(ui: &mut egui::Ui, state: &mut AppState) {
     draw_stale_badge(&painter, state, rect);
 
     // Floating strip overlay at bottom center
-    egui::Area::new(egui::Id::new("strip_guide"))
+    egui::Area::new(egui::Id::new("strip_setup"))
         .order(egui::Order::Foreground)
         .fixed_pos(Pos2::new(rect.center().x, rect.bottom() - 8.0))
         .pivot(egui::Align2::CENTER_BOTTOM)
         .show(ui.ctx(), |ui: &mut egui::Ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui: &mut egui::Ui| {
                 ui.horizontal(|ui: &mut egui::Ui| {
-                    strip_guide(ui, state);
+                    strip_setup(ui, state);
                 });
             });
         });
