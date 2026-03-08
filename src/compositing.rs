@@ -891,6 +891,66 @@ pub fn composite_layer(
     }
 }
 
+/// Render a single layer into independent [`LayerMaps`].
+///
+/// This is the per-layer rendering entry point for the independent-layer
+/// pipeline. Unlike [`composite_layer()`], which writes directly into shared
+/// [`GlobalMaps`], this function returns an isolated result with transparent
+/// background. Intra-layer wet-on-wet mixing is preserved.
+///
+/// The returned `LayerMaps` can be cached and reused when the layer's
+/// parameters haven't changed, enabling fast re-compositing via
+/// `merge_layers()`.
+pub fn render_layer(
+    layer: &PaintLayer,
+    layer_index: u32,
+    base_color: &BaseColorSource,
+    cached_paths: Option<&[StrokePath]>,
+    normal_data: Option<&MeshNormalData>,
+    mask: Option<&UvMask>,
+    stretch_map: Option<&StretchMap>,
+    resolution: u32,
+) -> LayerMaps {
+    // Use GlobalMaps internally with DepictedForm (all fields allocated) and
+    // Transparent background, then move the buffers into LayerMaps.
+    let dummy_base = BaseColorSource::solid(Color::new(0.0, 0.0, 0.0, 0.0));
+    let mut global = GlobalMaps::new(
+        resolution,
+        &dummy_base,
+        NormalMode::DepictedForm,
+        BackgroundMode::Transparent,
+    );
+
+    let settings = OutputSettings {
+        background_mode: BackgroundMode::Transparent,
+        normal_mode: NormalMode::DepictedForm,
+        ..OutputSettings::default()
+    };
+
+    composite_layer(
+        layer,
+        layer_index,
+        &mut global,
+        &settings,
+        base_color,
+        cached_paths,
+        normal_data,
+        mask,
+        stretch_map,
+    );
+
+    LayerMaps {
+        height: global.height,
+        color: global.color,
+        stroke_id: global.stroke_id,
+        object_normal: global.object_normal,
+        gradient_x: global.gradient_x,
+        gradient_y: global.gradient_y,
+        paint_load: global.paint_load,
+        resolution,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
