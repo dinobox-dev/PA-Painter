@@ -16,15 +16,11 @@ use eframe::egui_wgpu;
 use state::{AppState, GuideTool};
 
 use practical_arcana_painter::compositing::{
-    compute_height_gradients, fill_base_color_region, merge_layers, resolve_base_color,
-    resolve_base_normal, GlobalMaps, LayerMaps,
+    fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
 };
-use practical_arcana_painter::output::{
-    blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
-};
+use practical_arcana_painter::output::blend_normals_udn;
 use practical_arcana_painter::types::{
-    BackgroundMode, BaseColorSource, Color, LayerCompositeSettings, NormalMode, TextureSource,
-    BASE_RESOLUTION,
+    BaseColorSource, Color, TextureSource, BASE_RESOLUTION,
 };
 use practical_arcana_painter::uv_mask::UvMask;
 
@@ -37,6 +33,8 @@ pub struct PainterApp {
     prev_show_result: bool,
     /// Hash of base texture state for 3D preview invalidation when show_result is off.
     prev_base_tex_hash: u64,
+    /// Background remerge worker.
+    remerge_worker: generation::RemergeWorker,
 }
 
 impl PainterApp {
@@ -52,6 +50,7 @@ impl PainterApp {
             render_state: cc.wgpu_render_state.clone(),
             prev_show_result: true,
             prev_base_tex_hash: 0,
+            remerge_worker: generation::RemergeWorker::default(),
         }
     }
 
@@ -289,8 +288,6 @@ impl PainterApp {
         }
     }
 
-    /// Re-merge cached LayerMaps on the main thread (instant).
-    ///
     /// Hash of visible layers' base texture state (color, normal, group, order, visibility).
     fn base_texture_hash(&self) -> u64 {
         use std::hash::{Hash, Hasher};
@@ -380,197 +377,61 @@ impl PainterApp {
     /// Used when only visibility, order, or dry changes — no re-rendering needed.
     /// Runs the merge → Sobel → normal map → UDN pipeline using cached per-layer
     /// render results. Skips silently if the cache is empty or incomplete.
-    fn remerge(&mut self, ctx: &egui::Context) {
+    fn start_remerge(&mut self) {
         let cache = &self.state.generation.layer_cache;
         if cache.is_empty() {
             return;
         }
 
-        let settings = &self.state.project.settings;
-        let resolution = settings.resolution_preset.resolution();
+        self.remerge_worker.start(generation::RemergeInput {
+            layer_cache: cache.clone(),
+            settings: self.state.project.settings.clone(),
+            layers: self.state.project.layers.clone(),
+            mesh: self.state.loaded_mesh.clone(),
+            cached_normals: self.state.cached_mesh_normals.clone(),
+            rendered_paths: self.state.generation.path_cache.clone(),
+        });
+    }
 
-        // Collect visible layers and match with cache
-        let visible: Vec<(usize, &practical_arcana_painter::types::Layer)> = self
-            .state
-            .project
-            .layers
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| l.visible)
-            .collect();
-
-        let mut sorted_layers: Vec<(usize, &practical_arcana_painter::types::Layer)> =
-            visible.clone();
-        sorted_layers.sort_by(|a, b| a.1.order.cmp(&b.1.order));
-
-        // Match each visible layer to its cached LayerMaps by render hash
-        let mut layer_maps: Vec<&LayerMaps> = Vec::with_capacity(sorted_layers.len());
-        for &(_, layer) in &sorted_layers {
-            let hash = layer.render_hash();
-            if let Some((_, maps)) = cache.iter().find(|(h, _)| *h == hash) {
-                layer_maps.push(maps.as_ref());
-            } else {
-                return; // cache miss — need full generate
-            }
-        }
-
-        // Build UV masks
-        let materials: &[_] = self
-            .state
-            .loaded_mesh
-            .as_ref()
-            .map(|m| m.materials.as_slice())
-            .unwrap_or(&[]);
-        let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = self.state.loaded_mesh {
-            sorted_layers
-                .iter()
-                .map(|(_, layer)| {
-                    if layer.group_name == "__all__" {
-                        None
-                    } else {
-                        mesh.groups
-                            .iter()
-                            .find(|g| g.name == layer.group_name)
-                            .map(|group| {
-                                let mut mask =
-                                    UvMask::from_mesh_group(mesh, group, resolution);
-                                mask.dilate(2);
-                                mask
-                            })
-                    }
-                })
-                .collect()
-        } else {
-            sorted_layers.iter().map(|_| None).collect()
-        };
-        let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
-
-        // Initialize GlobalMaps
-        let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
-        let mut global = GlobalMaps::new(
-            resolution,
-            &default_base,
-            settings.normal_mode,
-            settings.background_mode,
-        );
-
-        // Fill base colors
-        if settings.background_mode != BackgroundMode::Transparent {
-            for (si, &(_, layer)) in sorted_layers.iter().enumerate() {
-                let bc = resolve_base_color(&layer.base_color, materials);
-                let src = bc.as_source();
-                let mask = mask_refs[si];
-                fill_base_color_region(&mut global, &src, mask);
-            }
-        }
-
-        // Merge
-        let layer_dry: Vec<f32> = sorted_layers.iter().map(|(_, l)| l.dry).collect();
-        let layer_settings =
-            vec![LayerCompositeSettings::default(); sorted_layers.len()];
-        merge_layers(
-            &layer_maps,
-            &layer_dry,
-            &layer_settings,
-            &mut global,
-            settings.background_mode,
-        );
-
-        // Sobel
-        compute_height_gradients(&mut global);
-
-        // Normal map
-        let normal_data = if settings.normal_mode == NormalMode::DepictedForm {
-            self.state
-                .cached_mesh_normals
-                .as_ref()
-                .map(|(_, nd)| nd.as_ref())
-        } else {
-            None
-        };
-
-        let mut normal_map = match settings.normal_mode {
-            NormalMode::DepictedForm => {
-                if let Some(nd) = normal_data {
-                    generate_normal_map_depicted_form(
-                        &global.gradient_x,
-                        &global.gradient_y,
-                        nd,
-                        &global.object_normal,
-                        &global.paint_load,
-                        resolution,
-                        settings.normal_strength,
-                    )
-                } else {
-                    generate_normal_map(
-                        &global.gradient_x,
-                        &global.gradient_y,
-                        resolution,
-                        settings.normal_strength,
-                    )
-                }
-            }
-            NormalMode::SurfacePaint => generate_normal_map(
-                &global.gradient_x,
-                &global.gradient_y,
-                resolution,
-                settings.normal_strength,
-            ),
-        };
-
-        // UDN normal blending
-        for (si, &(_, layer)) in sorted_layers.iter().enumerate() {
-            let bn = resolve_base_normal(&layer.base_normal, materials);
-            if let Some(ref pixels) = bn.pixels {
-                let mask = mask_refs[si];
-                blend_normals_udn(
-                    &mut normal_map,
-                    pixels,
-                    bn.width,
-                    bn.height,
-                    resolution,
-                    mask,
-                );
-            }
-        }
+    fn apply_remerge_result(&mut self, ctx: &egui::Context, result: generation::RemergeResult) {
+        let r = result.resolution;
 
         // Update textures
-        let r = resolution;
         self.state.textures.color = Some(textures::color_buffer_to_handle(
-            ctx, &global.color, r, r, "remerge_color",
+            ctx, &result.color, r, r, "remerge_color",
         ));
         self.state.textures.height = Some(textures::height_buffer_to_handle(
-            ctx, &global.height, r, "remerge_height",
+            ctx, &result.height, r, "remerge_height",
         ));
         self.state.textures.normal = Some(textures::normal_map_to_handle(
-            ctx, &normal_map, r, "remerge_normal",
+            ctx, &result.normal_map, r, "remerge_normal",
         ));
         self.state.textures.stroke_id = Some(textures::stroke_id_to_handle(
-            ctx, &global.stroke_id, r, "remerge_stroke_id",
+            ctx, &result.stroke_id, r, "remerge_stroke_id",
         ));
 
         // Upload to 3D preview
         if let Some(ref rs) = self.render_state {
             if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result {
-                mesh_preview::upload_color_texture(rs, &global.color, r as usize);
-                mesh_preview::upload_normal_texture(rs, &normal_map, r as usize);
+                mesh_preview::upload_color_texture(rs, &result.color, r as usize);
+                mesh_preview::upload_normal_texture(rs, &result.normal_map, r as usize);
             }
         }
 
         // Update stored result
         self.state.generated = Some(generation::GenResult {
-            color: global.color,
-            height: global.height,
-            normal_map,
-            stroke_id: global.stroke_id,
-            resolution,
+            color: result.color,
+            height: result.height,
+            normal_map: result.normal_map,
+            stroke_id: result.stroke_id,
+            resolution: r,
             elapsed: std::time::Duration::ZERO,
             computed_normals: None,
-            rendered_layers: self.state.generation.layer_cache.clone(),
-            rendered_paths: self.state.generation.path_cache.clone(),
-            gen_normal_strength: settings.normal_strength,
-            gen_normal_mode: settings.normal_mode,
-            gen_background_mode: settings.background_mode,
+            rendered_layers: result.rendered_layers,
+            rendered_paths: result.rendered_paths,
+            gen_normal_strength: result.gen_normal_strength,
+            gen_normal_mode: result.gen_normal_mode,
+            gen_background_mode: result.gen_background_mode,
         });
 
         // Output now matches current project state
@@ -721,9 +582,10 @@ impl eframe::App for PainterApp {
             dialogs::replace_mesh(&mut self.state);
             // State untouched — mesh held in popup until user confirms.
         }
-        if self.state.pending_remerge {
+        // Start async remerge if requested and no remerge is in flight
+        if self.state.pending_remerge && !self.remerge_worker.is_running() {
             self.state.pending_remerge = false;
-            self.remerge(ctx);
+            self.start_remerge();
         }
 
         // ── 3D Result toggle: sync GPU textures when show_result changes ──
@@ -1386,6 +1248,20 @@ impl eframe::App for PainterApp {
                     ctx.request_repaint();
                 }
             }
+        }
+
+        // ── Poll async remerge results ──
+        if let Some(result) = self.remerge_worker.poll() {
+            self.apply_remerge_result(ctx, result);
+            // If settings changed while remerge was running, start another
+            if self.state.pending_remerge {
+                self.state.pending_remerge = false;
+                self.start_remerge();
+            }
+        }
+        // Keep repainting while remerge is in progress
+        if self.remerge_worker.is_running() {
+            ctx.request_repaint();
         }
 
         // ── Undo: track post-frame changes ──

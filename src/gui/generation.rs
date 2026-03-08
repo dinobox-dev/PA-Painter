@@ -18,10 +18,11 @@ use practical_arcana_painter::output::{
 use practical_arcana_painter::path_placement::generate_paths_cancellable;
 use practical_arcana_painter::stroke_color::ColorTextureRef;
 use practical_arcana_painter::types::{
-    BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal,
+    BackgroundMode, BaseColorSource, Color, Layer, LayerBaseColor, LayerBaseNormal,
     LayerCompositeSettings, NormalMode, OutputSettings, PaintLayer, StrokePath,
 };
 use practical_arcana_painter::uv_mask::UvMask;
+use practical_arcana_painter::compositing::{resolve_base_color, resolve_base_normal};
 
 /// All data needed for a generation run. Fully owned, Send + 'static.
 pub struct GenInput {
@@ -558,5 +559,211 @@ fn run_pipeline(
         gen_normal_strength: input.settings.normal_strength,
         gen_normal_mode: input.settings.normal_mode,
         gen_background_mode: input.settings.background_mode,
+    })
+}
+
+// ── Async Remerge ──────────────────────────────────────────────────
+
+/// All data needed for an async remerge. Fully owned, Send + 'static.
+pub struct RemergeInput {
+    pub layer_cache: Vec<(u64, Arc<LayerMaps>)>,
+    pub settings: OutputSettings,
+    pub layers: Vec<Layer>,
+    pub mesh: Option<Arc<LoadedMesh>>,
+    pub cached_normals: Option<(u32, Arc<MeshNormalData>)>,
+    pub rendered_paths: Vec<(u64, Arc<Vec<StrokePath>>)>,
+}
+
+/// Output from a completed async remerge.
+pub struct RemergeResult {
+    pub color: Vec<Color>,
+    pub height: Vec<f32>,
+    pub normal_map: Vec<[f32; 3]>,
+    pub stroke_id: Vec<u32>,
+    pub resolution: u32,
+    pub gen_normal_strength: f32,
+    pub gen_normal_mode: NormalMode,
+    pub gen_background_mode: BackgroundMode,
+    pub rendered_layers: Vec<(u64, Arc<LayerMaps>)>,
+    pub rendered_paths: Vec<(u64, Arc<Vec<StrokePath>>)>,
+}
+
+/// Lightweight async worker for re-merge operations.
+pub struct RemergeWorker {
+    handle: Option<thread::JoinHandle<Option<RemergeResult>>>,
+}
+
+impl Default for RemergeWorker {
+    fn default() -> Self {
+        Self { handle: None }
+    }
+}
+
+impl RemergeWorker {
+    pub fn is_running(&self) -> bool {
+        self.handle.as_ref().is_some_and(|h| !h.is_finished())
+    }
+
+    pub fn poll(&mut self) -> Option<RemergeResult> {
+        if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
+            match self.handle.take().unwrap().join() {
+                Ok(Some(result)) => Some(result),
+                Ok(None) => None,
+                Err(_) => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn start(&mut self, input: RemergeInput) {
+        self.handle = Some(thread::spawn(move || run_remerge(input)));
+    }
+}
+
+fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
+    let settings = &input.settings;
+    let resolution = settings.resolution_preset.resolution();
+
+    // Collect visible layers sorted by order
+    let mut sorted_layers: Vec<&Layer> = input.layers.iter().filter(|l| l.visible).collect();
+    sorted_layers.sort_by_key(|l| l.order);
+
+    // Match each visible layer to its cached LayerMaps by render hash
+    let mut layer_maps: Vec<&LayerMaps> = Vec::with_capacity(sorted_layers.len());
+    for layer in &sorted_layers {
+        let hash = layer.render_hash();
+        if let Some((_, maps)) = input.layer_cache.iter().find(|(h, _)| *h == hash) {
+            layer_maps.push(maps.as_ref());
+        } else {
+            return None; // cache miss
+        }
+    }
+
+    // Build UV masks
+    let materials: &[_] = input
+        .mesh
+        .as_ref()
+        .map(|m| m.materials.as_slice())
+        .unwrap_or(&[]);
+    let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = input.mesh {
+        sorted_layers
+            .iter()
+            .map(|layer| {
+                if layer.group_name == "__all__" {
+                    None
+                } else {
+                    mesh.groups
+                        .iter()
+                        .find(|g| g.name == layer.group_name)
+                        .map(|group| {
+                            let mut mask = UvMask::from_mesh_group(mesh, group, resolution);
+                            mask.dilate(2);
+                            mask
+                        })
+                }
+            })
+            .collect()
+    } else {
+        sorted_layers.iter().map(|_| None).collect()
+    };
+    let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
+
+    // Initialize GlobalMaps
+    let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
+    let mut global = GlobalMaps::new(
+        resolution,
+        &default_base,
+        settings.normal_mode,
+        settings.background_mode,
+    );
+
+    // Fill base colors
+    if settings.background_mode != BackgroundMode::Transparent {
+        for (si, layer) in sorted_layers.iter().enumerate() {
+            let bc = resolve_base_color(&layer.base_color, materials);
+            let src = bc.as_source();
+            let mask = mask_refs[si];
+            fill_base_color_region(&mut global, &src, mask);
+        }
+    }
+
+    // Merge
+    let layer_dry: Vec<f32> = sorted_layers.iter().map(|l| l.dry).collect();
+    let layer_settings = vec![LayerCompositeSettings::default(); sorted_layers.len()];
+    merge_layers(
+        &layer_maps,
+        &layer_dry,
+        &layer_settings,
+        &mut global,
+        settings.background_mode,
+    );
+
+    // Sobel
+    compute_height_gradients(&mut global);
+
+    // Normal map
+    let normal_data = if settings.normal_mode == NormalMode::DepictedForm {
+        input.cached_normals.as_ref().map(|(_, nd)| nd.as_ref())
+    } else {
+        None
+    };
+
+    let mut normal_map = match settings.normal_mode {
+        NormalMode::DepictedForm => {
+            if let Some(nd) = normal_data {
+                generate_normal_map_depicted_form(
+                    &global.gradient_x,
+                    &global.gradient_y,
+                    nd,
+                    &global.object_normal,
+                    &global.paint_load,
+                    resolution,
+                    settings.normal_strength,
+                )
+            } else {
+                generate_normal_map(
+                    &global.gradient_x,
+                    &global.gradient_y,
+                    resolution,
+                    settings.normal_strength,
+                )
+            }
+        }
+        NormalMode::SurfacePaint => generate_normal_map(
+            &global.gradient_x,
+            &global.gradient_y,
+            resolution,
+            settings.normal_strength,
+        ),
+    };
+
+    // UDN normal blending
+    for (si, layer) in sorted_layers.iter().enumerate() {
+        let bn = resolve_base_normal(&layer.base_normal, materials);
+        if let Some(ref pixels) = bn.pixels {
+            let mask = mask_refs[si];
+            blend_normals_udn(
+                &mut normal_map,
+                pixels,
+                bn.width,
+                bn.height,
+                resolution,
+                mask,
+            );
+        }
+    }
+
+    Some(RemergeResult {
+        color: global.color,
+        height: global.height,
+        normal_map,
+        stroke_id: global.stroke_id,
+        resolution,
+        gen_normal_strength: settings.normal_strength,
+        gen_normal_mode: settings.normal_mode,
+        gen_background_mode: settings.background_mode,
+        rendered_layers: input.layer_cache,
+        rendered_paths: input.rendered_paths,
     })
 }
