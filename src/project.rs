@@ -160,14 +160,11 @@ impl Default for Project {
 
 impl Project {
     /// Convert visible layers to PaintLayers for downstream pipeline compatibility.
-    /// Each layer gets `seed + layer_index` for unique randomness.
     pub fn paint_layers(&self) -> Vec<PaintLayer> {
-        let base_seed = self.settings.seed;
         self.layers
             .iter()
-            .enumerate()
-            .filter(|(_, l)| l.visible)
-            .map(|(i, l)| l.to_paint_layer_with_seed(base_seed.wrapping_add(i as u32)))
+            .filter(|l| l.visible)
+            .map(|l| l.to_paint_layer())
             .collect()
     }
 
@@ -722,6 +719,7 @@ mod tests {
             base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
             base_normal: TextureSource::None,
             dry: 1.0,
+            seed: order as u32,
         }
     }
 

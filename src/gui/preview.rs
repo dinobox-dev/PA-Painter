@@ -341,7 +341,7 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
     }
 
     // No base color texture for path generation (per-layer base in Commit 3).
-    let paint_layer = input.layer.to_paint_layer_with_seed(input.seed);
+    let paint_layer = input.layer.to_paint_layer();
     let paths = path_placement::generate_paths_cancellable(
         &paint_layer,
         0,

@@ -99,15 +99,13 @@ impl PainterApp {
             .collect();
 
         // Per-layer render hashes (parallel to visible layers / `layers` vec)
-        let base_seed = self.state.project.settings.seed;
         let layer_hashes: Vec<u64> = self
             .state
             .project
             .layers
             .iter()
-            .enumerate()
-            .filter(|(_, l)| l.visible)
-            .map(|(i, l)| l.render_hash(base_seed.wrapping_add(i as u32)))
+            .filter(|l| l.visible)
+            .map(|l| l.render_hash())
             .collect();
 
         // Pass layer cache if global inputs (resolution, mesh) haven't changed
@@ -221,7 +219,6 @@ impl PainterApp {
 
         let settings = &self.state.project.settings;
         let resolution = settings.resolution_preset.resolution();
-        let base_seed = settings.seed;
 
         // Collect visible layers and match with cache
         let visible: Vec<(usize, &practical_arcana_painter::types::Layer)> = self
@@ -239,8 +236,8 @@ impl PainterApp {
 
         // Match each visible layer to its cached LayerMaps by render hash
         let mut layer_maps: Vec<&LayerMaps> = Vec::with_capacity(sorted_layers.len());
-        for &(orig_idx, layer) in &sorted_layers {
-            let hash = layer.render_hash(base_seed.wrapping_add(orig_idx as u32));
+        for &(_, layer) in &sorted_layers {
+            let hash = layer.render_hash();
             if let Some((_, maps)) = cache.iter().find(|(h, _)| *h == hash) {
                 layer_maps.push(maps.as_ref());
             } else {
@@ -574,12 +571,7 @@ impl eframe::App for PainterApp {
                 if selected < self.state.project.layers.len() {
                     let layer = &self.state.project.layers[selected];
                     if layer.visible {
-                        let seed = self
-                            .state
-                            .project
-                            .settings
-                            .seed
-                            .wrapping_add(selected as u32);
+                        let seed = layer.seed;
 
                         let stale = self
                             .state

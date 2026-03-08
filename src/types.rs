@@ -644,39 +644,41 @@ pub struct Layer {
     /// dry=1 → painted on dry surface (opaque over + height accumulation).
     #[serde(default = "default_dry")]
     pub dry: f32,
+    /// Per-layer random seed for path placement and stroke variation.
+    /// Stable across reordering — not derived from array position.
+    #[serde(default)]
+    pub seed: u32,
 }
 
 impl Layer {
     /// Convert to PaintLayer for downstream pipeline compatibility.
-    /// `seed` is derived externally (e.g., project seed + layer index).
-    pub fn to_paint_layer_with_seed(&self, seed: u32) -> PaintLayer {
+    pub fn to_paint_layer(&self) -> PaintLayer {
         PaintLayer {
             name: self.group_name.clone(),
             order: self.order,
-            params: StrokeParams::from_paint_values(&self.paint, seed),
+            params: StrokeParams::from_paint_values(&self.paint, self.seed),
             guides: self.guides.clone(),
         }
     }
 
     /// Hash of the fields that affect [`render_layer()`] output.
     ///
-    /// Covers `paint`, `guides`, `group_name`, `order`, `base_color`, and the
-    /// externally supplied `seed`. Fields that only affect merge/output stages
-    /// (`dry`, `visible`, `name`, `base_normal`) are excluded so that changing
-    /// them does not invalidate the per-layer render cache.
-    pub fn render_hash(&self, seed: u32) -> u64 {
+    /// Covers `paint`, `guides`, `group_name`, `base_color`, and `seed`.
+    /// Fields that only affect merge/output stages (`dry`, `visible`, `name`,
+    /// `base_normal`, `order`) are excluded so that changing them does not
+    /// invalidate the per-layer render cache.
+    pub fn render_hash(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         if let Ok(bytes) = serde_json::to_vec(&(
             &self.paint,
             &self.guides,
             &self.group_name,
-            self.order,
             &self.base_color,
         )) {
             bytes.hash(&mut hasher);
         }
-        seed.hash(&mut hasher);
+        self.seed.hash(&mut hasher);
         hasher.finish()
     }
 }
@@ -1080,13 +1082,6 @@ pub struct OutputSettings {
     pub normal_mode: NormalMode,
     #[serde(default)]
     pub background_mode: BackgroundMode,
-    /// Global random seed; each layer derives its own via `seed + layer_index`.
-    #[serde(default = "default_seed")]
-    pub seed: u32,
-}
-
-fn default_seed() -> u32 {
-    42
 }
 
 impl Default for OutputSettings {
@@ -1096,7 +1091,6 @@ impl Default for OutputSettings {
             normal_strength: 0.3,
             normal_mode: NormalMode::default(),
             background_mode: BackgroundMode::default(),
-            seed: 42,
         }
     }
 }

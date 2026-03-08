@@ -332,6 +332,7 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
                     );
                 }
                 if resp.on_hover_text("Add Layer").clicked() && has_mesh {
+                    let next_seed = state.project.layers.len() as u32;
                     state.project.layers.insert(0, Layer {
                         name: "__all__".to_string(),
                         visible: true,
@@ -342,6 +343,7 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
                         base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
                         base_normal: TextureSource::None,
                         dry: 1.0,
+                        seed: next_seed,
                     });
                     // Reassign: index 0 (top of UI) = highest order (painted last = on top)
                     let n = state.project.layers.len() as i32;
@@ -562,31 +564,8 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
     }); // indent
 }
 
-/// Draw the bottom-pinned section: Seed + Generate button.
+/// Draw the bottom-pinned section: Generate button.
 pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
-    // ── Seed ──
-    ui.add_space(4.0);
-    ui.horizontal(|ui: &mut egui::Ui| {
-        ui.label("Seed:");
-        let seed_text = seed_to_alpha(state.project.settings.seed);
-        // TextEdit fills remaining space minus Shuffle button width
-        let button_width = 60.0;
-        let text_width =
-            (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(40.0);
-        ui.add(
-            egui::TextEdit::singleline(&mut seed_text.clone())
-                .desired_width(text_width)
-                .font(egui::TextStyle::Monospace)
-                .interactive(false),
-        );
-        if ui.button("Shuffle").clicked() {
-            state.project.settings.seed = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| (d.as_millis() & 0xFFFFFFFF) as u32)
-                .unwrap_or(1234);
-        }
-    });
-
     ui.add_space(4.0);
 
     // ── Generate ──
@@ -683,16 +662,6 @@ pub fn build_group_names(state: &AppState) -> Vec<String> {
         }
     }
     names
-}
-
-/// Convert a u32 seed to a fixed 6-letter uppercase string (base-26).
-fn seed_to_alpha(mut seed: u32) -> String {
-    let mut chars = [b'A'; 6];
-    for c in chars.iter_mut().rev() {
-        *c = b'A' + (seed % 26) as u8;
-        seed /= 26;
-    }
-    String::from_utf8_lossy(&chars).into_owned()
 }
 
 fn short_filename(path: &str) -> &str {

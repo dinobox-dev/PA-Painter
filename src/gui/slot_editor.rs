@@ -85,8 +85,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
     let old_dry = state.project.layers[idx].dry;
     ui.indent("paint_content", |ui: &mut egui::Ui| {
-        let layer_seed = state.project.settings.seed.wrapping_add(idx as u32);
         let layer = &mut state.project.layers[idx];
+        let layer_seed = layer.seed;
         let cache = &mut state.preview_cache;
 
         // Pressure curve + stroke preview (top)
@@ -104,6 +104,24 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             Some(0.01),
             2,
         );
+
+        // Seed row: 6-letter code + Shuffle button
+        ui.horizontal(|ui: &mut egui::Ui| {
+            ui.label("Seed");
+            let seed_text = seed_to_alpha(layer.seed);
+            ui.add(
+                egui::TextEdit::singleline(&mut seed_text.clone())
+                    .desired_width(56.0)
+                    .font(egui::TextStyle::Monospace)
+                    .interactive(false),
+            );
+            if ui.small_button("Shuffle").clicked() {
+                layer.seed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| (d.as_millis() & 0xFFFFFFFF) as u32)
+                    .unwrap_or(1234);
+            }
+        });
 
         ui.add_space(4.0);
 
@@ -253,7 +271,7 @@ fn show_preset_combo_sized(
     layer_idx: usize,
     combo_w: f32,
 ) {
-    let layer_seed = state.project.settings.seed.wrapping_add(layer_idx as u32);
+    let layer_seed = state.project.layers[layer_idx].seed;
     let current_paint = state.project.layers[layer_idx].paint.clone();
 
     // Determine current preset name by checking built-in then project presets
@@ -1275,6 +1293,16 @@ fn show_file_buttons(ui: &mut egui::Ui, source: &mut TextureSource, kind: &str) 
 }
 
 /// Open a file dialog and load a texture, returning an EmbeddedTexture.
+/// Convert a u32 seed to a fixed 6-letter uppercase string (base-26).
+fn seed_to_alpha(mut seed: u32) -> String {
+    let mut chars = [b'A'; 6];
+    for c in chars.iter_mut().rev() {
+        *c = b'A' + (seed % 26) as u8;
+        seed /= 26;
+    }
+    String::from_utf8_lossy(&chars).into_owned()
+}
+
 fn pick_and_load_texture() -> Option<EmbeddedTexture> {
     let path = rfd::FileDialog::new()
         .add_filter("Image", &["png", "tga", "exr"])
