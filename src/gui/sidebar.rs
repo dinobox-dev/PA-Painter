@@ -229,6 +229,7 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
 
     // ── Project Settings ──
     section_header(ui, "Settings");
+    let old_settings = state.project.settings.clone();
     ui.indent("settings_content", |ui: &mut egui::Ui| {
         let combo_w = 110.0;
 
@@ -303,6 +304,18 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
             2,
         );
     });
+
+    // Type A remerge: normal_mode, background_mode, normal_strength changed
+    // Resolution changes require full re-render (different global hash).
+    {
+        let s = &state.project.settings;
+        if s.normal_mode != old_settings.normal_mode
+            || s.background_mode != old_settings.background_mode
+            || s.normal_strength != old_settings.normal_strength
+        {
+            state.pending_remerge = true;
+        }
+    }
 
     ui.separator();
 }
