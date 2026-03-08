@@ -397,6 +397,31 @@ pub fn export_stroke_id_png(ids: &[u32], resolution: u32, path: &Path) -> Result
     Ok(())
 }
 
+/// Export a stroke time map as an RGB PNG.
+/// R = stroke_time_order (normalized stroke sequence), G = stroke_time_arc (arc-length progress),
+/// B = 0 (reserved for layer order in future).
+pub fn export_stroke_time_png(
+    order: &[f32],
+    arc: &[f32],
+    resolution: u32,
+    path: &Path,
+) -> Result<(), OutputError> {
+    let pixels: Vec<u8> = order
+        .iter()
+        .zip(arc.iter())
+        .flat_map(|(&o, &a)| {
+            [
+                (o.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (a.clamp(0.0, 1.0) * 255.0).round() as u8,
+                0u8,
+            ]
+        })
+        .collect();
+
+    image::save_buffer(path, &pixels, resolution, resolution, image::ColorType::Rgb8)?;
+    Ok(())
+}
+
 // ── EXR Export Functions ──
 
 /// Export a height map as a single-channel float32 EXR (linear).
@@ -439,6 +464,27 @@ pub fn export_color_exr(
         })
         .map_err(|e| OutputError::ExrError(e.to_string()))?;
     }
+
+    Ok(())
+}
+
+/// Export a stroke time map as a float32 EXR.
+/// R = stroke_time_order, G = stroke_time_arc, B = 0 (reserved for layer order).
+pub fn export_stroke_time_exr(
+    order: &[f32],
+    arc: &[f32],
+    resolution: u32,
+    path: &Path,
+) -> Result<(), OutputError> {
+    use exr::prelude::*;
+
+    let res = resolution as usize;
+
+    write_rgb_file(path, res, res, |x, y| {
+        let idx = y * res + x;
+        (order[idx], arc[idx], 0.0f32)
+    })
+    .map_err(|e| OutputError::ExrError(e.to_string()))?;
 
     Ok(())
 }
@@ -516,6 +562,26 @@ pub fn export_all(
         global.resolution,
         &output_dir.join("stroke_id_map.png"),
     )?;
+
+    // Stroke time map
+    match format {
+        ExportFormat::Png => {
+            export_stroke_time_png(
+                &global.stroke_time_order,
+                &global.stroke_time_arc,
+                global.resolution,
+                &output_dir.join("stroke_time_map.png"),
+            )?;
+        }
+        ExportFormat::Exr => {
+            export_stroke_time_exr(
+                &global.stroke_time_order,
+                &global.stroke_time_arc,
+                global.resolution,
+                &output_dir.join("stroke_time_map.exr"),
+            )?;
+        }
+    }
 
     Ok(())
 }

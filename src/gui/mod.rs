@@ -470,6 +470,8 @@ impl PainterApp {
             height: result.height,
             normal_map: result.normal_map,
             stroke_id: result.stroke_id,
+            stroke_time_order: result.stroke_time_order,
+            stroke_time_arc: result.stroke_time_arc,
             resolution: r,
             elapsed: std::time::Duration::ZERO,
             computed_normals: None,

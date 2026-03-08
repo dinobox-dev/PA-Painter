@@ -8,7 +8,7 @@ use practical_arcana_painter::asset_io::{
 use practical_arcana_painter::glb_export;
 use practical_arcana_painter::output::{
     export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
-    normalize_height_map,
+    export_stroke_time_png, normalize_height_map,
 };
 use practical_arcana_painter::project::{
     load_project, save_project, utc_now_iso8601, OutputCache, Project,
@@ -140,6 +140,8 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                     height: output.height,
                     normal_map: output.normal_map,
                     stroke_id: vec![0; pixel_count],
+                    stroke_time_order: vec![0.0; pixel_count],
+                    stroke_time_arc: vec![0.0; pixel_count],
                     resolution: r,
                     elapsed: std::time::Duration::ZERO,
                     computed_normals: None,
@@ -427,8 +429,17 @@ pub fn export_maps_to(state: &mut AppState, dir: &Path) {
         state.status_message = format!("Export failed: {e:?}");
         return;
     }
+    if let Err(e) = export_stroke_time_png(
+        &gen.stroke_time_order,
+        &gen.stroke_time_arc,
+        res,
+        &dir.join("stroke_time_map.png"),
+    ) {
+        state.status_message = format!("Export failed: {e:?}");
+        return;
+    }
 
-    state.status_message = format!("Exported 4 maps to {}", dir.display());
+    state.status_message = format!("Exported 5 maps to {}", dir.display());
 }
 
 /// Export a 3D preview GLB with paint textures baked onto the mesh.
