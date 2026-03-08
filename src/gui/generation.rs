@@ -352,10 +352,12 @@ fn run_pipeline(
     }
 
     let layer_refs: Vec<&LayerMaps> = layer_maps.iter().collect();
+    let layer_wet: Vec<f32> = vec![0.0; layer_maps.len()]; // TODO: read from Layer.wet
     let layer_settings: Vec<LayerCompositeSettings> =
         vec![LayerCompositeSettings::default(); layer_maps.len()];
     merge_layers(
         &layer_refs,
+        &layer_wet,
         &layer_settings,
         &mut global,
         input.settings.background_mode,

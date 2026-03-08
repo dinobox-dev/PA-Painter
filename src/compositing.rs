@@ -304,8 +304,6 @@ pub struct StrokeAppearance {
     /// Per-pixel normal clamp: skip pixels whose mesh normal deviates too
     /// far from the stroke's reference normal. `None` = disabled.
     pub normal_break_threshold: Option<f32>,
-    /// Wet-on-wet subtractive mixing strength (0.0–1.0).
-    pub wet_on_wet: f32,
 }
 
 /// Kubelka-Munk approximate subtractive mix between two colors.
@@ -443,32 +441,13 @@ pub fn composite_stroke(
                 let prev_h = global.height[idx];
                 let same_stroke = global.stroke_id[idx] == stroke_id;
 
-                // Wet-on-wet height yielding: same formula as color mixing
-                // (wet_on_wet × prev_h) so thick wet paint resists more.
-                // Skip yielding when revisiting the same stroke (segment overlap).
-                let new_h = if same_stroke {
-                    h.max(prev_h)
-                } else if h >= prev_h {
-                    h
-                } else {
-                    let yield_ratio = appearance.wet_on_wet * prev_h.min(1.0);
-                    lerp(prev_h, h, yield_ratio)
-                };
+                // Height: always max. Within a layer all paint is wet,
+                // so the surface settles to the highest point.
+                let new_h = h.max(prev_h);
                 global.height[idx] = new_h;
 
-                // Paint load and object normal: blend proportionally to
-                // height ownership. Gradients are computed post-compositing
-                // from the global height map (see compute_height_gradients).
-                let blend_t = if prev_h <= 0.0 {
-                    1.0
-                } else if h >= prev_h {
-                    1.0
-                } else {
-                    let span = prev_h - h;
-                    if span > 1e-8 { (prev_h - new_h) / span } else { 0.0 }
-                };
-
-                if blend_t > 0.0 {
+                // Paint load and object normal: winner-takes-all by height.
+                if prev_h <= 0.0 || h >= prev_h {
                     if !global.paint_load.is_empty() {
                         let r = bilinear_sample(
                             &local_height.remaining,
@@ -477,33 +456,27 @@ pub fn composite_stroke(
                             lx_f,
                             ly_f,
                         );
-                        global.paint_load[idx] = lerp(global.paint_load[idx], r, blend_t);
+                        global.paint_load[idx] = r;
                     }
 
                     if let Some(sn) = stroke_normal {
                         if !global.object_normal.is_empty() {
-                            let prev_n = global.object_normal[idx];
-                            global.object_normal[idx] = [
-                                lerp(prev_n[0], sn[0], blend_t),
-                                lerp(prev_n[1], sn[1], blend_t),
-                                lerp(prev_n[2], sn[2], blend_t),
-                            ];
+                            global.object_normal[idx] = sn;
                         }
                     }
                 }
 
+                // Color: always subtractive mix when overlapping existing paint.
+                // Within a layer, strokes are wet and pigments mix on contact.
                 let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h);
                 if transparent {
                     if global.stroke_id[idx] == 0 {
-                        // First paint on virgin pixel: set color directly
                         global.color[idx] =
                             Color::new(stroke_color.r, stroke_color.g, stroke_color.b, opacity);
                     } else {
-                        // Over-paint: blend paint colors, alpha accumulates (Porter-Duff "over")
                         let prev = global.color[idx];
-                        let blended = if !same_stroke && appearance.wet_on_wet > 0.0 && prev_h > 0.0
-                        {
-                            let mix_ratio = appearance.wet_on_wet * prev_h.min(1.0);
+                        let blended = if !same_stroke && prev_h > 0.0 {
+                            let mix_ratio = prev_h.min(1.0);
                             subtractive_mix(prev, stroke_color, mix_ratio)
                         } else {
                             stroke_color
@@ -517,8 +490,8 @@ pub fn composite_stroke(
                     }
                 } else {
                     let existing = global.color[idx];
-                    let blended = if !same_stroke && appearance.wet_on_wet > 0.0 && prev_h > 0.0 {
-                        let mix_ratio = appearance.wet_on_wet * prev_h.min(1.0);
+                    let blended = if !same_stroke && prev_h > 0.0 {
+                        let mix_ratio = prev_h.min(1.0);
                         subtractive_mix(existing, stroke_color, mix_ratio)
                     } else {
                         stroke_color
@@ -883,7 +856,6 @@ pub fn composite_layer(
                 normal: stroke_normals[i],
                 transparent,
                 normal_break_threshold: scaled.normal_break_threshold,
-                wet_on_wet: scaled.wet_on_wet,
             },
             normal_data,
             global,
@@ -896,7 +868,8 @@ pub fn composite_layer(
 /// This is the per-layer rendering entry point for the independent-layer
 /// pipeline. Unlike [`composite_layer()`], which writes directly into shared
 /// [`GlobalMaps`], this function returns an isolated result with transparent
-/// background. Intra-layer wet-on-wet mixing is preserved.
+/// background. Intra-layer strokes always use max-height and subtractive
+/// color mixing (all paint within a layer is considered wet).
 ///
 /// The returned `LayerMaps` can be cached and reused when the layer's
 /// parameters haven't changed, enabling fast re-compositing via
@@ -958,10 +931,16 @@ pub fn render_layer(
 /// this function — typically via [`GlobalMaps::new()`] and
 /// [`fill_base_color_region()`].
 ///
+/// `layer_wet` controls the surface wetness of each layer (parallel to
+/// `layers`). When painting on top of a wet surface (`wet` → 1.0), paint
+/// mixes subtractively with max-height physics. On a dry surface
+/// (`wet` → 0.0), paint stacks (heights accumulate) with opaque color.
+///
 /// After merging, call [`compute_height_gradients()`] on the result to
 /// populate gradient fields (Sobel runs on the final merged height map).
 pub fn merge_layers(
     layers: &[&LayerMaps],
+    layer_wet: &[f32],
     settings: &[LayerCompositeSettings],
     global: &mut GlobalMaps,
     background_mode: BackgroundMode,
@@ -969,8 +948,12 @@ pub fn merge_layers(
     let size = (global.resolution * global.resolution) as usize;
     let transparent = background_mode == BackgroundMode::Transparent;
 
-    for (layer, layer_settings) in layers.iter().zip(settings.iter()) {
+    // Track per-pixel surface wetness: updated as each layer is merged.
+    let mut surface_wet = vec![0.0f32; size];
+
+    for (i, layer) in layers.iter().enumerate() {
         debug_assert_eq!(layer.resolution, global.resolution);
+        let layer_opacity = settings.get(i).map_or(1.0, |s| s.opacity);
 
         for idx in 0..size {
             let h_above = layer.height[idx];
@@ -979,67 +962,50 @@ pub fn merge_layers(
             }
 
             let h_below = global.height[idx];
+            let wet = surface_wet[idx];
 
-            // ── Height competition ──
-            let new_h = if h_above >= h_below {
+            // ── Height ──
+            // wet=1: max (wet surface — paint displaces fluid below)
+            // wet=0: accumulate (dry surface — paint stacks on solid)
+            let new_h = if h_below <= 0.0 {
                 h_above
             } else {
-                let yield_r = layer_settings.wet_on_wet * h_below.min(1.0);
-                lerp(h_below, h_above, yield_r)
+                let max_h = h_above.max(h_below);
+                let sum_h = h_above + h_below;
+                lerp(sum_h, max_h, wet)
             };
 
-            // Height ownership ratio for paint_load / object_normal blending
-            let blend_t = if h_below <= 0.0 {
-                1.0
-            } else if h_above >= h_below {
-                1.0
-            } else {
-                let span = h_below - h_above;
-                if span > 1e-8 {
-                    (h_below - new_h) / span
-                } else {
-                    0.0
+            // Paint load and object normal: winner-takes-all by height
+            if h_below <= 0.0 || h_above >= h_below {
+                if !global.paint_load.is_empty() {
+                    global.paint_load[idx] = layer.paint_load[idx];
                 }
-            };
+                if !global.object_normal.is_empty() {
+                    global.object_normal[idx] = layer.object_normal[idx];
+                }
+            }
 
             global.height[idx] = new_h;
 
-            // ── Paint load blending ──
-            if !global.paint_load.is_empty() {
-                global.paint_load[idx] =
-                    lerp(global.paint_load[idx], layer.paint_load[idx], blend_t);
-            }
-
-            // ── Object normal blending ──
-            if !global.object_normal.is_empty() {
-                let prev_n = global.object_normal[idx];
-                let above_n = layer.object_normal[idx];
-                global.object_normal[idx] = [
-                    lerp(prev_n[0], above_n[0], blend_t),
-                    lerp(prev_n[1], above_n[1], blend_t),
-                    lerp(prev_n[2], above_n[2], blend_t),
-                ];
-            }
-
-            // ── Color blending ──
+            // ── Color ──
+            // wet=1: subtractive mix (pigments blend on wet surface)
+            // wet=0: opaque over (paint covers dried surface)
             let above_color = layer.color[idx];
-            let mix_ratio = layer_settings.wet_on_wet * h_below.min(1.0);
-            let blended = if mix_ratio > 0.0 && h_below > 0.0 {
+            let blended = if h_below > 0.0 && wet > 0.0 {
+                let mix_ratio = wet * h_below.min(1.0);
                 subtractive_mix(global.color[idx], above_color, mix_ratio)
             } else {
                 above_color
             };
 
             let opacity =
-                smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h_above) * layer_settings.opacity;
+                smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h_above) * layer_opacity;
 
             if transparent {
                 if global.stroke_id[idx] == 0 {
-                    // First paint on this pixel
                     global.color[idx] =
                         Color::new(blended.r, blended.g, blended.b, opacity);
                 } else {
-                    // Over-paint: Porter-Duff "over"
                     let prev = global.color[idx];
                     global.color[idx] = Color::new(
                         lerp(prev.r, blended.r, opacity),
@@ -1053,6 +1019,9 @@ pub fn merge_layers(
             }
 
             global.stroke_id[idx] = layer.stroke_id[idx];
+
+            // Update surface wetness to this layer's value
+            surface_wet[idx] = layer_wet.get(i).copied().unwrap_or(0.0);
         }
     }
 }

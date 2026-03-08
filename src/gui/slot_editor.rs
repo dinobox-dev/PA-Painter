@@ -135,15 +135,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.label(egui::RichText::new("Layout").weak());
         slider_row(
             ui,
-            "wet_on_wet",
-            &mut layer.paint.wet_on_wet,
-            0.0..=1.0,
-            "Wet-on-Wet",
-            Some(0.01),
-            2,
-        );
-        slider_row(
-            ui,
             "stroke_spacing",
             &mut layer.paint.stroke_spacing,
             0.1..=3.0,

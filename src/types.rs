@@ -391,12 +391,6 @@ pub struct StrokeParams {
     /// 0.0 = no effect (default, backward compatible).
     #[serde(default)]
     pub viscosity: f32,
-    /// Wet-on-wet mixing (0.0–1.0). Controls subtractive color blending
-    /// and height yielding between overlapping strokes / layers.
-    /// 0.0 = dry (max-height physics, opaque layering).
-    /// 1.0 = fully wet (later strokes dominate height, colors mix subtractively).
-    #[serde(default)]
-    pub wet_on_wet: f32,
     pub seed: u32,
 }
 
@@ -417,7 +411,6 @@ impl Default for StrokeParams {
             overlap_ratio: None,
             overlap_dist_factor: None,
             viscosity: 0.0,
-            wet_on_wet: 0.0,
             seed: 42,
         }
     }
@@ -446,7 +439,6 @@ impl StrokeParams {
             overlap_dist_factor: paint.overlap_dist_factor.map(|v| v.max(0.01)),
             color_variation: paint.color_variation.clamp(0.0, 1.0),
             viscosity: paint.viscosity.clamp(0.0, 1.0),
-            wet_on_wet: paint.wet_on_wet.clamp(0.0, 1.0),
             seed,
         }
     }
@@ -561,13 +553,6 @@ pub struct PaintValues {
     #[serde(default)]
     pub viscosity: f32,
 
-    // Layer interaction
-    /// Wet-on-wet mixing (0.0–1.0). Controls subtractive color blending
-    /// and height yielding between overlapping strokes / layers.
-    /// 0.0 = dry (max-height physics, opaque layering). 1.0 = fully wet
-    /// (later layer dominates height, colors mix subtractively).
-    #[serde(default)]
-    pub wet_on_wet: f32,
 }
 
 impl Default for PaintValues {
@@ -617,7 +602,6 @@ impl Hash for PaintValues {
         self.overlap_dist_factor.map(|v| v.to_bits()).hash(state);
         self.color_variation.to_bits().hash(state);
         self.viscosity.to_bits().hash(state);
-        self.wet_on_wet.to_bits().hash(state);
     }
 }
 
@@ -725,7 +709,7 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: default_layout.color_variation,
                         viscosity: 0.0,
-                        wet_on_wet: 0.0,
+
                     },
                 },
                 PaintPreset {
@@ -745,7 +729,7 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.1,
                         viscosity: 0.0,
-                        wet_on_wet: 0.0,
+
                     },
                 },
                 PaintPreset {
@@ -765,7 +749,7 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.15,
                         viscosity: 0.0,
-                        wet_on_wet: 0.0,
+
                     },
                 },
                 PaintPreset {
@@ -785,7 +769,7 @@ impl PresetLibrary {
                         overlap_dist_factor: Some(0.2),
                         color_variation: 0.08,
                         viscosity: 0.4,
-                        wet_on_wet: 0.0,
+
                     },
                 },
                 PaintPreset {
@@ -805,7 +789,7 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.1,
                         viscosity: 0.0,
-                        wet_on_wet: 0.0,
+
                     },
                 },
                 PaintPreset {
@@ -851,7 +835,7 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.1,
                         viscosity: 0.0,
-                        wet_on_wet: 0.0,
+
                     },
                 },
                 PaintPreset {
@@ -871,7 +855,7 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.1,
                         viscosity: 0.0,
-                        wet_on_wet: 0.0,
+
                     },
                 },
                 PaintPreset {
@@ -891,7 +875,7 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.15,
                         viscosity: 0.0,
-                        wet_on_wet: 0.0,
+
                     },
                 },
             ],
@@ -1044,23 +1028,15 @@ impl ResolutionPreset {
 /// Per-layer compositing settings for [`merge_layers()`](crate::compositing::merge_layers).
 ///
 /// Controls how a layer blends with accumulated layers below it.
-/// Separate from [`PaintValues::wet_on_wet`] which controls intra-layer
-/// stroke mixing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerCompositeSettings {
-    /// Inter-layer wet-on-wet strength.
-    /// 0.0 = dry (Porter-Duff over), 1.0 = full subtractive mixing.
-    pub wet_on_wet: f32,
     /// Layer-wide opacity multiplier (0.0–1.0).
     pub opacity: f32,
 }
 
 impl Default for LayerCompositeSettings {
     fn default() -> Self {
-        Self {
-            wet_on_wet: 0.0,
-            opacity: 1.0,
-        }
+        Self { opacity: 1.0 }
     }
 }
 
