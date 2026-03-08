@@ -1041,6 +1041,29 @@ impl ResolutionPreset {
     }
 }
 
+/// Per-layer compositing settings for [`merge_layers()`](crate::compositing::merge_layers).
+///
+/// Controls how a layer blends with accumulated layers below it.
+/// Separate from [`PaintValues::wet_on_wet`] which controls intra-layer
+/// stroke mixing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerCompositeSettings {
+    /// Inter-layer wet-on-wet strength.
+    /// 0.0 = dry (Porter-Duff over), 1.0 = full subtractive mixing.
+    pub wet_on_wet: f32,
+    /// Layer-wide opacity multiplier (0.0–1.0).
+    pub opacity: f32,
+}
+
+impl Default for LayerCompositeSettings {
+    fn default() -> Self {
+        Self {
+            wet_on_wet: 0.0,
+            opacity: 1.0,
+        }
+    }
+}
+
 /// Global output settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutputSettings {

@@ -16,8 +16,8 @@ use crate::stroke_color::ColorTextureRef;
 use crate::stroke_color::{compute_stroke_color, sample_bilinear};
 use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
 use crate::types::{
-    BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal, NormalMode,
-    OutputSettings, PaintLayer, StrokePath, TextureSource,
+    BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal,
+    LayerCompositeSettings, NormalMode, OutputSettings, PaintLayer, StrokePath, TextureSource,
 };
 use crate::uv_mask::UvMask;
 
@@ -948,6 +948,112 @@ pub fn render_layer(
         gradient_y: global.gradient_y,
         paint_load: global.paint_load,
         resolution,
+    }
+}
+
+/// Merge independently rendered [`LayerMaps`] into a [`GlobalMaps`].
+///
+/// Layers are applied in slice order (index 0 = bottom). The caller should
+/// initialize `global` with base colors and background mode before calling
+/// this function — typically via [`GlobalMaps::new()`] and
+/// [`fill_base_color_region()`].
+///
+/// After merging, call [`compute_height_gradients()`] on the result to
+/// populate gradient fields (Sobel runs on the final merged height map).
+pub fn merge_layers(
+    layers: &[&LayerMaps],
+    settings: &[LayerCompositeSettings],
+    global: &mut GlobalMaps,
+    background_mode: BackgroundMode,
+) {
+    let size = (global.resolution * global.resolution) as usize;
+    let transparent = background_mode == BackgroundMode::Transparent;
+
+    for (layer, layer_settings) in layers.iter().zip(settings.iter()) {
+        debug_assert_eq!(layer.resolution, global.resolution);
+
+        for idx in 0..size {
+            let h_above = layer.height[idx];
+            if h_above <= 0.0 {
+                continue;
+            }
+
+            let h_below = global.height[idx];
+
+            // ── Height competition ──
+            let new_h = if h_above >= h_below {
+                h_above
+            } else {
+                let yield_r = layer_settings.wet_on_wet * h_below.min(1.0);
+                lerp(h_below, h_above, yield_r)
+            };
+
+            // Height ownership ratio for paint_load / object_normal blending
+            let blend_t = if h_below <= 0.0 {
+                1.0
+            } else if h_above >= h_below {
+                1.0
+            } else {
+                let span = h_below - h_above;
+                if span > 1e-8 {
+                    (h_below - new_h) / span
+                } else {
+                    0.0
+                }
+            };
+
+            global.height[idx] = new_h;
+
+            // ── Paint load blending ──
+            if !global.paint_load.is_empty() {
+                global.paint_load[idx] =
+                    lerp(global.paint_load[idx], layer.paint_load[idx], blend_t);
+            }
+
+            // ── Object normal blending ──
+            if !global.object_normal.is_empty() {
+                let prev_n = global.object_normal[idx];
+                let above_n = layer.object_normal[idx];
+                global.object_normal[idx] = [
+                    lerp(prev_n[0], above_n[0], blend_t),
+                    lerp(prev_n[1], above_n[1], blend_t),
+                    lerp(prev_n[2], above_n[2], blend_t),
+                ];
+            }
+
+            // ── Color blending ──
+            let above_color = layer.color[idx];
+            let mix_ratio = layer_settings.wet_on_wet * h_below.min(1.0);
+            let blended = if mix_ratio > 0.0 && h_below > 0.0 {
+                subtractive_mix(global.color[idx], above_color, mix_ratio)
+            } else {
+                above_color
+            };
+
+            let opacity =
+                smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h_above) * layer_settings.opacity;
+
+            if transparent {
+                if global.stroke_id[idx] == 0 {
+                    // First paint on this pixel
+                    global.color[idx] =
+                        Color::new(blended.r, blended.g, blended.b, opacity);
+                } else {
+                    // Over-paint: Porter-Duff "over"
+                    let prev = global.color[idx];
+                    global.color[idx] = Color::new(
+                        lerp(prev.r, blended.r, opacity),
+                        lerp(prev.g, blended.g, opacity),
+                        lerp(prev.b, blended.b, opacity),
+                        prev.a + opacity * (1.0 - prev.a),
+                    );
+                }
+            } else {
+                global.color[idx] = lerp_color(global.color[idx], blended, opacity);
+            }
+
+            global.stroke_id[idx] = layer.stroke_id[idx];
+        }
     }
 }
 
