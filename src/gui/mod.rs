@@ -33,6 +33,10 @@ pub struct PainterApp {
     state: AppState,
     checkerboard: Option<egui::TextureHandle>,
     render_state: Option<egui_wgpu::RenderState>,
+    /// Previous frame's show_result state for toggle change detection.
+    prev_show_result: bool,
+    /// Hash of base texture state for 3D preview invalidation when show_result is off.
+    prev_base_tex_hash: u64,
 }
 
 impl PainterApp {
@@ -46,6 +50,8 @@ impl PainterApp {
             state: AppState::new(),
             checkerboard: None,
             render_state: cc.wgpu_render_state.clone(),
+            prev_show_result: true,
+            prev_base_tex_hash: 0,
         }
     }
 
@@ -222,7 +228,7 @@ impl PainterApp {
 
         // Upload color and normal textures to 3D preview
         if let Some(ref rs) = self.render_state {
-            if self.state.mesh_preview.gpu_ready {
+            if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result {
                 mesh_preview::upload_color_texture(rs, &result.color, r as usize);
                 mesh_preview::upload_normal_texture(rs, &result.normal_map, r as usize);
             }
@@ -274,6 +280,92 @@ impl PainterApp {
 
     /// Re-merge cached LayerMaps on the main thread (instant).
     ///
+    /// Hash of visible layers' base texture state (color, normal, group, order, visibility).
+    fn base_texture_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for layer in &self.state.project.layers {
+            layer.visible.hash(&mut h);
+            if layer.visible {
+                layer.order.hash(&mut h);
+                layer.group_name.hash(&mut h);
+                if let Ok(bytes) = serde_json::to_vec(&(&layer.base_color, &layer.base_normal)) {
+                    bytes.hash(&mut h);
+                }
+            }
+        }
+        h.finish()
+    }
+
+    /// Upload base-only textures to the 3D preview (no stroke results).
+    /// Composites visible layers' base color and base normal textures.
+    fn upload_base_only_to_3d(&self) {
+        let Some(ref rs) = self.render_state else { return };
+        if !self.state.mesh_preview.gpu_ready { return; }
+
+        let settings = &self.state.project.settings;
+        let resolution = settings.resolution_preset.resolution();
+        let materials = self.state.loaded_mesh.as_ref()
+            .map(|m| m.materials.as_slice())
+            .unwrap_or(&[]);
+
+        // Collect visible layers sorted by order
+        let mut sorted_layers: Vec<&practical_arcana_painter::types::Layer> = self.state.project.layers
+            .iter()
+            .filter(|l| l.visible)
+            .collect();
+        sorted_layers.sort_by_key(|l| l.order);
+
+        // Build UV masks
+        let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = self.state.loaded_mesh {
+            sorted_layers.iter().map(|layer| {
+                if layer.group_name == "__all__" {
+                    None
+                } else {
+                    mesh.groups.iter()
+                        .find(|g| g.name == layer.group_name)
+                        .map(|group| {
+                            let mut mask = UvMask::from_mesh_group(mesh, group, resolution);
+                            mask.dilate(2);
+                            mask
+                        })
+                }
+            }).collect()
+        } else {
+            sorted_layers.iter().map(|_| None).collect()
+        };
+        let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
+
+        // Fill base colors
+        let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
+        let mut global = GlobalMaps::new(
+            resolution,
+            &default_base,
+            settings.normal_mode,
+            settings.background_mode,
+        );
+        for (si, layer) in sorted_layers.iter().enumerate() {
+            let bc = resolve_base_color(&layer.base_color, materials);
+            let src = bc.as_source();
+            fill_base_color_region(&mut global, &src, mask_refs[si]);
+        }
+
+        // Base normal: flat normal + UDN blending
+        let mut normal_map = vec![[0.5_f32, 0.5, 1.0]; (resolution * resolution) as usize];
+        for (si, layer) in sorted_layers.iter().enumerate() {
+            let bn = resolve_base_normal(&layer.base_normal, materials);
+            if let Some(ref pixels) = bn.pixels {
+                blend_normals_udn(
+                    &mut normal_map, pixels, bn.width, bn.height,
+                    resolution, mask_refs[si],
+                );
+            }
+        }
+
+        mesh_preview::upload_color_texture(rs, &global.color, resolution as usize);
+        mesh_preview::upload_normal_texture(rs, &normal_map, resolution as usize);
+    }
+
     /// Used when only visibility, order, or dry changes — no re-rendering needed.
     /// Runs the merge → Sobel → normal map → UDN pipeline using cached per-layer
     /// render results. Skips silently if the cache is empty or incomplete.
@@ -448,7 +540,7 @@ impl PainterApp {
 
         // Upload to 3D preview
         if let Some(ref rs) = self.render_state {
-            if self.state.mesh_preview.gpu_ready {
+            if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result {
                 mesh_preview::upload_color_texture(rs, &global.color, r as usize);
                 mesh_preview::upload_normal_texture(rs, &normal_map, r as usize);
             }
@@ -496,11 +588,15 @@ impl PainterApp {
         self.state.mesh_preview.fit_to_mesh(mesh);
 
         // Sync GPU textures with current generation state
-        if let Some(ref gen) = self.state.generated {
-            mesh_preview::upload_color_texture(rs, &gen.color, gen.resolution as usize);
-            mesh_preview::upload_normal_texture(rs, &gen.normal_map, gen.resolution as usize);
+        if self.state.mesh_preview.show_result {
+            if let Some(ref gen) = self.state.generated {
+                mesh_preview::upload_color_texture(rs, &gen.color, gen.resolution as usize);
+                mesh_preview::upload_normal_texture(rs, &gen.normal_map, gen.resolution as usize);
+            } else {
+                self.upload_base_only_to_3d();
+            }
         } else {
-            mesh_preview::reset_textures_to_placeholder(rs);
+            self.upload_base_only_to_3d();
         }
     }
 }
@@ -615,6 +711,42 @@ impl eframe::App for PainterApp {
             self.state.pending_remerge = false;
             self.remerge(ctx);
         }
+
+        // ── 3D Result toggle: sync GPU textures when show_result changes ──
+        {
+            let show = self.state.mesh_preview.show_result;
+            if show != self.prev_show_result {
+                self.prev_show_result = show;
+                if show {
+                    // Re-upload generated results
+                    if let Some(ref rs) = self.render_state {
+                        if self.state.mesh_preview.gpu_ready {
+                            if let Some(ref gen) = self.state.generated {
+                                mesh_preview::upload_color_texture(
+                                    rs, &gen.color, gen.resolution as usize,
+                                );
+                                mesh_preview::upload_normal_texture(
+                                    rs, &gen.normal_map, gen.resolution as usize,
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    self.upload_base_only_to_3d();
+                    self.prev_base_tex_hash = self.base_texture_hash();
+                }
+            }
+
+            // When show_result is off, detect base texture changes
+            if !show {
+                let h = self.base_texture_hash();
+                if h != self.prev_base_tex_hash {
+                    self.prev_base_tex_hash = h;
+                    self.upload_base_only_to_3d();
+                }
+            }
+        }
+
         // ── Path overlay: async worker pattern ──
         // Poll for completed results first
         if let Some(poll_result) = self.state.path_worker.poll() {

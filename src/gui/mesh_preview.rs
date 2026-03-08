@@ -786,47 +786,6 @@ pub fn upload_normal_texture(
     }
 }
 
-// ── Reset textures to placeholder ──────────────────────────────────
-
-/// Replace the color and normal GPU textures with neutral placeholders.
-/// Call this when generated results are discarded (e.g. mesh hash mismatch).
-pub fn reset_textures_to_placeholder(render_state: &egui_wgpu::RenderState) {
-    let device = &render_state.device;
-    let queue = &render_state.queue;
-
-    let color_texture = create_placeholder_texture(device, queue);
-    let color_texture_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-    let normal_texture = create_placeholder_normal_texture(device, queue);
-    let normal_texture_view = normal_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-    let mut renderer = render_state.renderer.write();
-    if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
-        res.texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("mesh_texture_bg"),
-            layout: &res.texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&color_texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&res.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&normal_texture_view),
-                },
-            ],
-        });
-        res.color_texture = color_texture;
-        res.color_texture_view = color_texture_view;
-        res.normal_texture = normal_texture;
-        res.normal_texture_view = normal_texture_view;
-    }
-}
-
 // ── Render + Display ───────────────────────────────────────────────
 
 /// Render the 3D mesh offscreen and display the result as an egui texture.
