@@ -18,7 +18,7 @@ use state::{AppState, GuideTool};
 use practical_arcana_painter::compositing::{
     fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
 };
-use practical_arcana_painter::output::blend_normals_udn;
+use practical_arcana_painter::output::{blend_normals_udn, ExportFormat};
 use practical_arcana_painter::types::{
     BaseColorSource, Color, TextureSource, BASE_RESOLUTION,
 };
@@ -539,6 +539,101 @@ impl PainterApp {
             self.upload_base_only_to_3d();
         }
     }
+
+    fn show_export_settings_window(ctx: &egui::Context, state: &mut AppState) {
+        if !state.show_export_settings {
+            return;
+        }
+
+        let mut open = state.show_export_settings;
+        let weak = ctx.style().visuals.weak_text_color();
+
+        let frame = egui::Frame {
+            inner_margin: egui::Margin::same(16),
+            outer_margin: egui::Margin::ZERO,
+            corner_radius: egui::CornerRadius::same(8),
+            shadow: egui::Shadow {
+                offset: [0, 4],
+                blur: 16,
+                spread: 4,
+                color: egui::Color32::from_black_alpha(80),
+            },
+            fill: ctx.style().visuals.window_fill,
+            stroke: egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+        };
+
+        egui::Window::new("export_settings")
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .min_width(260.0)
+            .max_width(260.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .frame(frame)
+            .show(ctx, |ui: &mut egui::Ui| {
+                let es = &mut state.project.export_settings;
+                ui.spacing_mut().item_spacing.y = 4.0;
+
+                // ── Header ──
+                ui.vertical_centered(|ui: &mut egui::Ui| {
+                    ui.strong(egui::RichText::new("Export Settings").size(15.0));
+                });
+                ui.add_space(8.0);
+
+                // ── Texture Maps ──
+                ui.checkbox(&mut es.export_maps, "Texture Maps");
+                if es.export_maps {
+                    ui.indent("maps_indent", |ui: &mut egui::Ui| {
+                        ui.spacing_mut().item_spacing.y = 3.0;
+
+                        ui.horizontal(|ui: &mut egui::Ui| {
+                            ui.colored_label(weak, "Format");
+                            ui.selectable_value(&mut es.format, ExportFormat::Png, "PNG");
+                            ui.selectable_value(&mut es.format, ExportFormat::Exr, "EXR");
+                        });
+                        ui.add_space(2.0);
+                        ui.checkbox(&mut es.include_color, "Color");
+                        ui.checkbox(&mut es.include_normal, "Normal");
+                        ui.checkbox(&mut es.include_height, "Height");
+                        ui.checkbox(&mut es.include_stroke_id, "Stroke ID");
+                        ui.checkbox(&mut es.include_time_map, "Stroke Time");
+                    });
+                }
+
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                // ── 3D Model ──
+                ui.checkbox(&mut es.export_model, "3D Model");
+                if es.export_model {
+                    ui.indent("model_indent", |ui: &mut egui::Ui| {
+                        ui.spacing_mut().item_spacing.y = 3.0;
+                        ui.colored_label(weak, "Format: GLB");
+                        ui.add_space(2.0);
+                        ui.checkbox(&mut es.embed_color, "Embed color texture");
+                        ui.checkbox(&mut es.embed_normal, "Embed normal map");
+                    });
+                }
+
+                // ── Close ──
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.vertical_centered(|ui: &mut egui::Ui| {
+                    if ui
+                        .add(
+                            egui::Button::new("Close")
+                                .min_size(egui::Vec2::new(80.0, 28.0)),
+                        )
+                        .clicked()
+                    {
+                        open = false;
+                    }
+                });
+            });
+        state.show_export_settings = open;
+    }
 }
 
 impl eframe::App for PainterApp {
@@ -619,11 +714,19 @@ impl eframe::App for PainterApp {
         }
         if self.state.pending_export {
             self.state.pending_export = false;
-            dialogs::export_maps(&mut self.state);
-        }
-        if self.state.pending_export_glb {
-            self.state.pending_export_glb = false;
-            dialogs::export_glb(&mut self.state);
+            let es = &self.state.project.export_settings;
+            let do_maps = es.export_maps;
+            let do_model = es.export_model;
+            match (do_maps, do_model) {
+                (true, true) => dialogs::export_both(&mut self.state),
+                (true, false) => dialogs::export_maps(&mut self.state),
+                (false, true) => dialogs::export_glb(&mut self.state),
+                (false, false) => {
+                    self.state.status_message =
+                        "Nothing selected — enable Texture Maps or 3D Model in export settings"
+                            .to_string();
+                }
+            }
         }
         if self.state.pending_new {
             self.state.pending_new = false;
@@ -810,18 +913,11 @@ impl eframe::App for PainterApp {
                     ui.separator();
                     let has_gen = self.state.generated.is_some();
                     if ui
-                        .add_enabled(has_gen, egui::Button::new("Export Maps..."))
+                        .add_enabled(has_gen, egui::Button::new("Export..."))
                         .clicked()
                     {
                         ui.close();
                         self.state.pending_export = true;
-                    }
-                    if ui
-                        .add_enabled(has_gen, egui::Button::new("Export GLB..."))
-                        .clicked()
-                    {
-                        ui.close();
-                        self.state.pending_export_glb = true;
                     }
                     ui.separator();
                     let can_gen = !self.state.generation.is_running();
@@ -1265,11 +1361,15 @@ impl eframe::App for PainterApp {
             self.state.reload_summary = None;
         }
 
+        // ── Export Settings Window ──
+        Self::show_export_settings_window(ctx, &mut self.state);
+
         // ── Escape: deselect guide + return to Select tool ──
         // Runs after panels so popup consume_key takes priority.
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             self.state.selected_guide = None;
             self.state.guide_tool = GuideTool::Select;
+            self.state.show_export_settings = false;
         }
 
         // ── Auto-preview: detect Type C/D parameter changes ──

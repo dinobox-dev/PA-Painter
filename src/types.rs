@@ -1148,32 +1148,45 @@ impl Default for OutputSettings {
     }
 }
 
-/// Export settings — controls which maps to export and in what format.
+/// Export settings — controls what to export and in what format.
 ///
+/// Two independent axes: texture map images and 3D model file.
 /// Stored per-project; changes do NOT trigger re-generation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExportSettings {
-    /// Output format for color, height, and stroke time maps.
+    // ── Texture Maps ──
+    /// Export texture map images.
+    #[serde(default = "default_true")]
+    pub export_maps: bool,
+    /// Image format for texture maps.
     #[serde(default)]
     pub format: crate::output::ExportFormat,
-    /// Include color map in export.
+    /// Include color map.
     #[serde(default = "default_true")]
     pub include_color: bool,
-    /// Include normal map in export.
+    /// Include normal map.
     #[serde(default = "default_true")]
     pub include_normal: bool,
-    /// Include height map in export.
+    /// Include height map.
     #[serde(default = "default_true")]
     pub include_height: bool,
-    /// Include stroke ID map in export.
+    /// Include stroke ID map.
     #[serde(default)]
     pub include_stroke_id: bool,
-    /// Include stroke time map in export.
+    /// Include stroke time map.
     #[serde(default)]
     pub include_time_map: bool,
-    /// Export each layer individually (in addition to composite).
+
+    // ── 3D Model ──
+    /// Export 3D model file.
     #[serde(default)]
-    pub per_layer: bool,
+    pub export_model: bool,
+    /// Embed color texture in the 3D model.
+    #[serde(default = "default_true")]
+    pub embed_color: bool,
+    /// Embed normal map in the 3D model.
+    #[serde(default = "default_true")]
+    pub embed_normal: bool,
 }
 
 fn default_true() -> bool {
@@ -1183,13 +1196,16 @@ fn default_true() -> bool {
 impl Default for ExportSettings {
     fn default() -> Self {
         Self {
+            export_maps: true,
             format: crate::output::ExportFormat::Png,
             include_color: true,
             include_normal: true,
             include_height: true,
             include_stroke_id: false,
             include_time_map: false,
-            per_layer: false,
+            export_model: false,
+            embed_color: true,
+            embed_normal: true,
         }
     }
 }

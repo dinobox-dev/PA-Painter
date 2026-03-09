@@ -8,7 +8,8 @@ use practical_arcana_painter::asset_io::{
 use practical_arcana_painter::glb_export;
 use practical_arcana_painter::output::{
     export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
-    export_stroke_time_png, normalize_height_map,
+    export_stroke_time_png, normalize_height_map, ExportFormat,
+    export_color_exr, export_height_exr, export_stroke_time_exr,
 };
 use practical_arcana_painter::project::{
     load_project, save_project, utc_now_iso8601, OutputCache, Project,
@@ -411,48 +412,107 @@ pub fn export_maps_to(state: &mut AppState, dir: &Path) {
         return;
     };
 
+    let es = &state.project.export_settings;
     let res = gen.resolution;
     let with_alpha = state.project.settings.background_mode == BackgroundMode::Transparent;
+    let is_exr = es.format == ExportFormat::Exr;
+    let mut count = 0u32;
 
-    if let Err(e) = export_color_png(&gen.color, res, &dir.join("color_map.png"), with_alpha) {
-        state.status_message = format!("Export failed: {e:?}");
-        return;
+    if es.include_color {
+        let result = if is_exr {
+            export_color_exr(&gen.color, res, &dir.join("color_map.exr"), with_alpha)
+        } else {
+            export_color_png(&gen.color, res, &dir.join("color_map.png"), with_alpha)
+        };
+        if let Err(e) = result {
+            state.status_message = format!("Export failed: {e:?}");
+            return;
+        }
+        count += 1;
     }
-    if let Err(e) = export_height_png(&gen.height, res, &dir.join("height_map.png")) {
-        state.status_message = format!("Export failed: {e:?}");
-        return;
+    if es.include_height {
+        let normalized = normalize_height_map(&gen.height);
+        let result = if is_exr {
+            export_height_exr(&normalized, res, &dir.join("height_map.exr"))
+        } else {
+            export_height_png(&normalized, res, &dir.join("height_map.png"))
+        };
+        if let Err(e) = result {
+            state.status_message = format!("Export failed: {e:?}");
+            return;
+        }
+        count += 1;
     }
-    if let Err(e) = export_normal_png(&gen.normal_map, res, &dir.join("normal_map.png")) {
-        state.status_message = format!("Export failed: {e:?}");
-        return;
+    if es.include_normal {
+        if let Err(e) = export_normal_png(&gen.normal_map, res, &dir.join("normal_map.png")) {
+            state.status_message = format!("Export failed: {e:?}");
+            return;
+        }
+        count += 1;
     }
-    if let Err(e) = export_stroke_id_png(&gen.stroke_id, res, &dir.join("stroke_id_map.png")) {
-        state.status_message = format!("Export failed: {e:?}");
-        return;
+    if es.include_stroke_id {
+        if let Err(e) = export_stroke_id_png(&gen.stroke_id, res, &dir.join("stroke_id_map.png")) {
+            state.status_message = format!("Export failed: {e:?}");
+            return;
+        }
+        count += 1;
     }
-    if let Err(e) = export_stroke_time_png(
-        &gen.stroke_time_order,
-        &gen.stroke_time_arc,
-        res,
-        &dir.join("stroke_time_map.png"),
-    ) {
-        state.status_message = format!("Export failed: {e:?}");
-        return;
+    if es.include_time_map {
+        let result = if is_exr {
+            export_stroke_time_exr(
+                &gen.stroke_time_order,
+                &gen.stroke_time_arc,
+                res,
+                &dir.join("stroke_time_map.exr"),
+            )
+        } else {
+            export_stroke_time_png(
+                &gen.stroke_time_order,
+                &gen.stroke_time_arc,
+                res,
+                &dir.join("stroke_time_map.png"),
+            )
+        };
+        if let Err(e) = result {
+            state.status_message = format!("Export failed: {e:?}");
+            return;
+        }
+        count += 1;
     }
 
-    state.status_message = format!("Exported 5 maps to {}", dir.display());
+    if count == 0 {
+        state.status_message = "No maps selected for export".to_string();
+    } else {
+        state.status_message = format!("Exported {count} map(s) to {}", dir.display());
+    }
 }
 
-/// Export a 3D preview GLB with paint textures baked onto the mesh.
-pub fn export_glb(state: &mut AppState) {
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter("glTF Binary", &["glb"])
-        .set_file_name("preview.glb")
-        .save_file()
-    else {
+/// Export both texture maps and GLB to a user-selected folder.
+pub fn export_both(state: &mut AppState) {
+    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
         return;
     };
-    export_glb_to(state, &path);
+    export_maps_to(state, &dir);
+    // If maps export failed, status_message already set — skip GLB.
+    if state.status_message.starts_with("Export failed")
+        || state.status_message.starts_with("No maps")
+    {
+        return;
+    }
+    let glb_path = dir.join("preview.glb");
+    export_glb_to(state, &glb_path);
+    if !state.status_message.starts_with("GLB export failed") {
+        let maps_msg = state.status_message.clone();
+        state.status_message = format!("{maps_msg} + GLB");
+    }
+}
+
+/// Export a 3D preview GLB — pick folder, output as `preview.glb`.
+pub fn export_glb(state: &mut AppState) {
+    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+        return;
+    };
+    export_glb_to(state, &dir.join("preview.glb"));
 }
 
 /// Export a 3D preview GLB to the given path (no dialog).

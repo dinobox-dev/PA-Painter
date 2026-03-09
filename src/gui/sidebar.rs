@@ -587,30 +587,29 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
 
     let total_width = ui.available_width();
     let spacing = ui.spacing().item_spacing.x;
-    let btn_size = egui::Vec2::new((total_width - spacing) / 2.0, 32.0);
+    let gear_w = 28.0;
+    let btn_size = egui::Vec2::new(total_width - spacing - gear_w, 32.0);
 
     ui.horizontal(|ui| {
         ui.set_width(total_width);
 
-        let maps_btn = egui::Button::new("Export Maps")
+        let export_btn = egui::Button::new("Export")
             .min_size(btn_size)
             .truncate();
-        let maps_resp = ui.add_enabled(has_result, maps_btn);
-        if maps_resp.clicked() {
+        let export_resp = ui.add_enabled(has_result, export_btn);
+        if export_resp.clicked() {
             state.pending_export = true;
         }
 
-        let glb_btn = egui::Button::new("Export GLB")
-            .min_size(btn_size)
-            .truncate();
-        let glb_resp = ui.add_enabled(has_result, glb_btn);
-        if glb_resp.clicked() {
-            state.pending_export_glb = true;
+        if stale {
+            export_resp.on_hover_text("Result is outdated — parameters changed since last generation");
         }
 
-        if stale {
-            maps_resp.on_hover_text("Result is outdated — parameters changed since last generation");
-            glb_resp.on_hover_text("Result is outdated — parameters changed since last generation");
+        // ⚙ gear button
+        let gear_btn = egui::Button::new("\u{2699}")
+            .min_size(egui::Vec2::new(gear_w, 32.0));
+        if ui.add(gear_btn).clicked() {
+            state.show_export_settings = !state.show_export_settings;
         }
     });
 

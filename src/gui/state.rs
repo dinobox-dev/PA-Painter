@@ -245,7 +245,6 @@ pub struct AppState {
     pub pending_new: bool,
     pub pending_save: bool,
     pub pending_export: bool,
-    pub pending_export_glb: bool,
     pub pending_reload_mesh: bool,
     pub pending_replace_mesh: bool,
     /// Re-merge cached LayerMaps without re-rendering (visibility/order/dry change).
@@ -279,6 +278,9 @@ pub struct AppState {
     /// Suppresses auto-generation when true (set on generation failure to prevent retry loop).
     /// Reset when mesh or layers change.
     pub auto_gen_suppressed: bool,
+
+    // ── Export Settings Panel ──
+    pub show_export_settings: bool,
 
     // ── Undo/Redo ──
     pub undo: UndoHistory,
@@ -314,7 +316,6 @@ impl AppState {
             pending_new: false,
             pending_save: false,
             pending_export: false,
-            pending_export_glb: false,
             pending_reload_mesh: false,
             pending_replace_mesh: false,
             pending_remerge: false,
@@ -328,6 +329,7 @@ impl AppState {
             prev_render_hash: 0,
             auto_preview_timer: None,
             auto_gen_suppressed: false,
+            show_export_settings: false,
             undo: UndoHistory::default(),
         }
     }
