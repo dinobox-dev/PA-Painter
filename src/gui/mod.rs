@@ -29,8 +29,8 @@ pub struct PainterApp {
     state: AppState,
     checkerboard: Option<egui::TextureHandle>,
     render_state: Option<egui_wgpu::RenderState>,
-    /// Previous frame's show_result state for toggle change detection.
-    prev_show_result: bool,
+    /// Previous frame's result_mode for toggle change detection.
+    prev_result_mode: state::ResultMode,
     /// Hash of base texture state for 3D preview invalidation when show_result is off.
     prev_base_tex_hash: u64,
     /// Background remerge worker.
@@ -52,7 +52,7 @@ impl PainterApp {
             state: AppState::new(),
             checkerboard: None,
             render_state: cc.wgpu_render_state.clone(),
-            prev_show_result: true,
+            prev_result_mode: state::ResultMode::Paint,
             prev_base_tex_hash: 0,
             remerge_worker: generation::RemergeWorker::default(),
             prev_show_direction_field: false,
@@ -248,11 +248,17 @@ impl PainterApp {
             "gen_stroke_id",
         ));
 
-        // Upload color and normal textures to 3D preview
+        // Upload color, normal, and time textures to 3D preview
         if let Some(ref rs) = self.render_state {
-            if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result {
+            if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result() {
                 mesh_preview::upload_color_texture(rs, &result.color, r as usize);
                 mesh_preview::upload_normal_texture(rs, &result.normal_map, r as usize);
+                mesh_preview::upload_time_texture(
+                    rs,
+                    &result.stroke_time_order,
+                    &result.stroke_time_arc,
+                    result.resolution,
+                );
             }
         }
 
@@ -475,7 +481,7 @@ impl PainterApp {
 
         // Upload to 3D preview
         if let Some(ref rs) = self.render_state {
-            if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result {
+            if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result() {
                 mesh_preview::upload_color_texture(rs, &result.color, r as usize);
                 mesh_preview::upload_normal_texture(rs, &result.normal_map, r as usize);
             }
@@ -528,7 +534,7 @@ impl PainterApp {
         self.state.mesh_preview.fit_to_mesh(mesh);
 
         // Sync GPU textures with current generation state
-        if self.state.mesh_preview.show_result {
+        if self.state.mesh_preview.show_result() {
             if let Some(ref gen) = self.state.generated {
                 mesh_preview::upload_color_texture(rs, &gen.color, gen.resolution as usize);
                 mesh_preview::upload_normal_texture(rs, &gen.normal_map, gen.resolution as usize);
@@ -754,11 +760,12 @@ impl eframe::App for PainterApp {
             self.start_remerge();
         }
 
-        // ── 3D Result toggle: sync GPU textures when show_result changes ──
+        // ── 3D Result mode: sync GPU textures when result_mode changes ──
         {
-            let show = self.state.mesh_preview.show_result;
-            if show != self.prev_show_result {
-                self.prev_show_result = show;
+            let mode = self.state.mesh_preview.result_mode;
+            let show = self.state.mesh_preview.show_result();
+            if mode != self.prev_result_mode {
+                self.prev_result_mode = mode;
                 if show {
                     // Re-upload generated results
                     if let Some(ref rs) = self.render_state {
@@ -769,6 +776,12 @@ impl eframe::App for PainterApp {
                                 );
                                 mesh_preview::upload_normal_texture(
                                     rs, &gen.normal_map, gen.resolution as usize,
+                                );
+                                mesh_preview::upload_time_texture(
+                                    rs,
+                                    &gen.stroke_time_order,
+                                    &gen.stroke_time_arc,
+                                    gen.resolution,
                                 );
                             }
                         }

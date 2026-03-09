@@ -28,6 +28,11 @@ struct Uniforms {
     model: [[f32; 4]; 4],
     light_dir: [f32; 3],
     ambient: f32,
+    /// Current playback time for Drawing mode (0.0–1.0).
+    time: f32,
+    /// Display mode: 0 = Paint, 1 = Drawing.
+    mode: u32,
+    _pad: [f32; 2],
 }
 
 // ── Camera state (stored in AppState) ──────────────────────────────
@@ -54,10 +59,16 @@ pub struct MeshPreviewState {
     pub rendered_texture_id: Option<egui::TextureId>,
     /// Model transform that normalizes the mesh to a unit-scale centered at origin.
     pub model_transform: Mat4,
-    /// Whether to show the generated result textures on the 3D mesh.
-    pub show_result: bool,
+    /// What to display on the 3D mesh: None / Paint / Drawing.
+    pub result_mode: super::state::ResultMode,
     /// Whether to show the direction field arrow overlay on the 3D mesh.
     pub show_direction_field: bool,
+    /// Current playback time for Drawing mode (0.0–1.0).
+    pub time: f32,
+    /// Whether the time map animation is playing.
+    pub playing: bool,
+    /// Playback speed multiplier.
+    pub speed: f32,
 }
 
 impl Default for MeshPreviewState {
@@ -75,13 +86,21 @@ impl Default for MeshPreviewState {
             gpu_ready: false,
             rendered_texture_id: None,
             model_transform: Mat4::IDENTITY,
-            show_result: true,
+            result_mode: super::state::ResultMode::Paint,
             show_direction_field: false,
+            time: 0.0,
+            playing: true,
+            speed: 1.0,
         }
     }
 }
 
 impl MeshPreviewState {
+    /// Whether any generated result is shown (Paint or Drawing).
+    pub fn show_result(&self) -> bool {
+        self.result_mode != super::state::ResultMode::None
+    }
+
     /// Compute the camera eye position from spherical coordinates.
     fn eye(&self) -> Vec3 {
         let x = self.distance * self.yaw.cos() * self.pitch.cos();
@@ -141,10 +160,14 @@ struct MeshGpuResources {
     normal_texture: wgpu::Texture,
     #[allow(dead_code)] // Ownership anchor: texture_bind_group references this view.
     normal_texture_view: wgpu::TextureView,
-    #[allow(dead_code)] // Ownership anchor: TextureView and BindGroup reference this GPU resource.
+    #[allow(dead_code)]
     overlay_texture: wgpu::Texture,
-    #[allow(dead_code)] // Ownership anchor: texture_bind_group references this view.
+    #[allow(dead_code)]
     overlay_texture_view: wgpu::TextureView,
+    #[allow(dead_code)]
+    time_texture: wgpu::Texture,
+    #[allow(dead_code)]
+    time_texture_view: wgpu::TextureView,
     texture_bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -383,6 +406,44 @@ fn create_placeholder_overlay_texture(
     texture
 }
 
+fn create_placeholder_time_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> wgpu::Texture {
+    let size = wgpu::Extent3d {
+        width: 1,
+        height: 1,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mesh_placeholder_time"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    // R=0, G=0 → unpainted
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &[0u8, 0, 0, 0],
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4),
+            rows_per_image: Some(1),
+        },
+        size,
+    );
+    texture
+}
+
 struct RenderTargets {
     color_texture: wgpu::Texture,
     /// sRGB view used as render attachment (GPU applies linear→sRGB automatically).
@@ -456,6 +517,9 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         model: Mat4::IDENTITY.to_cols_array_2d(),
         light_dir: [0.0, 1.0, 0.0],
         ambient: 0.15,
+        time: 0.0,
+        mode: 0,
+        _pad: [0.0; 2],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("mesh_uniform_buf"),
@@ -494,6 +558,9 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
 
     let overlay_texture = create_placeholder_overlay_texture(device, queue);
     let overlay_texture_view = overlay_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let time_texture = create_placeholder_time_texture(device, queue);
+    let time_texture_view = time_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("mesh_sampler"),
@@ -542,6 +609,16 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
     let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -563,6 +640,10 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: wgpu::BindingResource::TextureView(&overlay_texture_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&time_texture_view),
             },
         ],
     });
@@ -639,6 +720,8 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         normal_texture_view,
         overlay_texture,
         overlay_texture_view,
+        time_texture,
+        time_texture_view,
         texture_bind_group,
         texture_bind_group_layout,
         sampler,
@@ -744,6 +827,7 @@ pub fn upload_color_texture(
         res.texture_bind_group = rebuild_texture_bind_group(
             device, &res.texture_bind_group_layout, &res.sampler,
             &view, &res.normal_texture_view, &res.overlay_texture_view,
+            &res.time_texture_view,
         );
         res.color_texture = texture;
         res.color_texture_view = view;
@@ -813,6 +897,7 @@ pub fn upload_normal_texture(
         res.texture_bind_group = rebuild_texture_bind_group(
             device, &res.texture_bind_group_layout, &res.sampler,
             &res.color_texture_view, &view, &res.overlay_texture_view,
+            &res.time_texture_view,
         );
         res.normal_texture = texture;
         res.normal_texture_view = view;
@@ -869,6 +954,7 @@ pub fn upload_overlay_texture(
         res.texture_bind_group = rebuild_texture_bind_group(
             device, &res.texture_bind_group_layout, &res.sampler,
             &res.color_texture_view, &res.normal_texture_view, &view,
+            &res.time_texture_view,
         );
         res.overlay_texture = texture;
         res.overlay_texture_view = view;
@@ -888,9 +974,75 @@ pub fn clear_overlay_texture(render_state: &egui_wgpu::RenderState) {
         res.texture_bind_group = rebuild_texture_bind_group(
             device, &res.texture_bind_group_layout, &res.sampler,
             &res.color_texture_view, &res.normal_texture_view, &view,
+            &res.time_texture_view,
         );
         res.overlay_texture = texture;
         res.overlay_texture_view = view;
+    }
+}
+
+/// Upload a stroke time map texture to the 3D preview.
+/// Encodes order in R and arc in G (both 0–1 → 0–255).
+pub fn upload_time_texture(
+    render_state: &egui_wgpu::RenderState,
+    order: &[f32],
+    arc: &[f32],
+    resolution: u32,
+) {
+    let device = &render_state.device;
+    let queue = &render_state.queue;
+    let n = (resolution * resolution) as usize;
+
+    let mut pixels = vec![0u8; n * 4];
+    for i in 0..n {
+        pixels[i * 4] = (order[i].clamp(0.0, 1.0) * 255.0) as u8;
+        pixels[i * 4 + 1] = (arc[i].clamp(0.0, 1.0) * 255.0) as u8;
+        // B=0, A=255
+        pixels[i * 4 + 3] = 255;
+    }
+
+    let size = wgpu::Extent3d {
+        width: resolution,
+        height: resolution,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mesh_time_tex"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &pixels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(resolution * 4),
+            rows_per_image: Some(resolution),
+        },
+        size,
+    );
+
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let mut renderer = render_state.renderer.write();
+    if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
+        res.texture_bind_group = rebuild_texture_bind_group(
+            device, &res.texture_bind_group_layout, &res.sampler,
+            &res.color_texture_view, &res.normal_texture_view, &res.overlay_texture_view,
+            &view,
+        );
+        res.time_texture = texture;
+        res.time_texture_view = view;
     }
 }
 
@@ -901,6 +1053,7 @@ fn rebuild_texture_bind_group(
     color_view: &wgpu::TextureView,
     normal_view: &wgpu::TextureView,
     overlay_view: &wgpu::TextureView,
+    time_view: &wgpu::TextureView,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("mesh_texture_bg"),
@@ -921,6 +1074,10 @@ fn rebuild_texture_bind_group(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: wgpu::BindingResource::TextureView(overlay_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(time_view),
             },
         ],
     })
@@ -1016,11 +1173,15 @@ pub fn show(
         ly.sin() * lp.cos(),
     );
 
+    let drawing = state.mesh_preview.result_mode == super::state::ResultMode::Drawing;
     let uniforms = Uniforms {
         mvp: mvp.to_cols_array_2d(),
         model: model.to_cols_array_2d(),
         light_dir: light_dir.into(),
         ambient: state.mesh_preview.ambient,
+        time: state.mesh_preview.time,
+        mode: if drawing { 1 } else { 0 },
+        _pad: [0.0; 2],
     };
 
     // Offscreen render

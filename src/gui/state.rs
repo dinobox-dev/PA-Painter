@@ -68,6 +68,18 @@ pub enum OrbitTarget {
     Light,
 }
 
+/// What to display on the 3D mesh surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResultMode {
+    /// No generated texture — show base mesh.
+    None,
+    /// Static paint result (color + normal + height).
+    #[default]
+    Paint,
+    /// Animated stroke time map playback.
+    Drawing,
+}
+
 /// Guide editing tool (active only in the Guide tab).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GuideTool {

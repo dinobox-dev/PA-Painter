@@ -265,6 +265,35 @@ fn strip_overlay_controls(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 /// 32px-tall text toggle button. Active = tinted background, inactive = plain.
+fn overlay_text_button_response(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
+    let font = egui::FontId::proportional(14.0);
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_string(), font.clone(), ui.visuals().text_color());
+    let text_size = galley.size();
+    let pad_x = 8.0;
+    let desired = Vec2::new(text_size.x + pad_x * 2.0, 32.0);
+    let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let p = ui.painter();
+        let cr = 4.0;
+        if active {
+            p.rect_filled(rect, cr, ui.visuals().selection.bg_fill);
+        } else if resp.hovered() {
+            p.rect_filled(rect, cr, ui.visuals().widgets.hovered.bg_fill);
+        }
+        let text_color = if active {
+            ui.visuals().selection.stroke.color
+        } else {
+            ui.visuals().text_color()
+        };
+        let text_pos = Pos2::new(rect.left() + pad_x, rect.center().y - text_size.y * 0.5);
+        p.galley(text_pos, galley, text_color);
+    }
+    resp
+}
+
 fn overlay_text_button(ui: &mut egui::Ui, label: &str, active: bool, on_click: impl FnOnce()) {
     let font = egui::FontId::proportional(14.0);
     let galley =
@@ -531,9 +560,24 @@ fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
     ui.separator();
 
     // 3D overlay toggles: Result (generated textures) and Direction (field arrows)
-    overlay_text_button(ui, "Result", state.mesh_preview.show_result, || {
-        state.mesh_preview.show_result = !state.mesh_preview.show_result;
-    });
+    {
+        use super::state::ResultMode;
+        let label = match state.mesh_preview.result_mode {
+            ResultMode::None => "Result: None",
+            ResultMode::Paint => "Result: Paint",
+            ResultMode::Drawing => "Result: Drawing",
+        };
+        let active = state.mesh_preview.result_mode != ResultMode::None;
+        let response = overlay_text_button_response(ui, label, active);
+        if response.clicked() {
+            // Cycle: None → Paint → Drawing → None
+            state.mesh_preview.result_mode = match state.mesh_preview.result_mode {
+                ResultMode::None => ResultMode::Paint,
+                ResultMode::Paint => ResultMode::Drawing,
+                ResultMode::Drawing => ResultMode::None,
+            };
+        }
+    }
     overlay_text_button(ui, "Direction", state.mesh_preview.show_direction_field, || {
         state.mesh_preview.show_direction_field = !state.mesh_preview.show_direction_field;
     });
@@ -650,6 +694,18 @@ fn show_3d_view(
     render_state: Option<&egui_wgpu::RenderState>,
 ) {
     let view_rect = ui.available_rect_before_wrap();
+
+    // Advance time map playback
+    if state.mesh_preview.result_mode == super::state::ResultMode::Drawing
+        && state.mesh_preview.playing
+    {
+        let dt = ui.input(|i| i.unstable_dt).min(0.1);
+        state.mesh_preview.time += dt * state.mesh_preview.speed * 0.2;
+        if state.mesh_preview.time > 1.05 {
+            state.mesh_preview.time = 0.0; // loop
+        }
+        ui.ctx().request_repaint();
+    }
 
     if let Some(rs) = render_state {
         if state.mesh_preview.gpu_ready {

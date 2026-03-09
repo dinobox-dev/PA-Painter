@@ -3,6 +3,8 @@ struct Uniforms {
     model: mat4x4<f32>,
     light_dir: vec3<f32>,
     ambient: f32,
+    time: f32,
+    mode: u32,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -10,6 +12,7 @@ struct Uniforms {
 @group(1) @binding(1) var s_color: sampler;
 @group(1) @binding(2) var t_normal: texture_2d<f32>;
 @group(1) @binding(3) var t_overlay: texture_2d<f32>;
+@group(1) @binding(4) var t_time: texture_2d<f32>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -52,7 +55,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let n = normalize(mix(N, world_normal, normal_sample.a));
     let ndotl = max(dot(n, u.light_dir), 0.0);
     let lighting = u.ambient + (1.0 - u.ambient) * ndotl;
-    let base = tex_color.rgb * lighting;
+    var base = tex_color.rgb * lighting;
+
+    // Drawing mode: reveal strokes over time
+    if u.mode == 1u {
+        let time_sample = textureSample(t_time, s_color, in.uv);
+        let order = time_sample.r;
+        let arc = time_sample.g;
+        // Combine order + arc for sub-stroke resolution
+        let pixel_time = order + arc * 0.002;
+        let edge = 0.02;
+        let reveal = smoothstep(pixel_time - edge, pixel_time, u.time);
+        // Unpainted pixels (order==0 && arc==0) stay hidden until time > 0
+        let painted = step(0.004, order + arc);
+        base = mix(vec3(0.15), base, reveal * painted);
+    }
+
     // Alpha-blend overlay (direction field arrows, etc.) over lit surface
     let overlay = textureSample(t_overlay, s_color, in.uv);
     let final_color = mix(base, overlay.rgb, overlay.a);
