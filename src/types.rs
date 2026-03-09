@@ -1176,6 +1176,9 @@ pub struct ExportSettings {
     /// Include stroke time map.
     #[serde(default)]
     pub include_time_map: bool,
+    /// Export each layer as separate texture files (in addition to composite).
+    #[serde(default)]
+    pub per_layer: bool,
 
     // ── 3D Model ──
     /// Export 3D model file.
@@ -1203,6 +1206,7 @@ impl Default for ExportSettings {
             include_height: true,
             include_stroke_id: false,
             include_time_map: false,
+            per_layer: false,
             export_model: false,
             embed_color: true,
             embed_normal: true,

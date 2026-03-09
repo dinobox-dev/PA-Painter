@@ -10,7 +10,7 @@ use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
 use crate::asset_io::linear_to_srgb;
-use crate::compositing::GlobalMaps;
+use crate::compositing::{GlobalMaps, LayerMaps};
 use crate::object_normal::MeshNormalData;
 use crate::stroke_color::hsv_to_rgb;
 use crate::math::smoothstep;
@@ -490,6 +490,147 @@ pub fn export_stroke_time_exr(
     .map_err(|e| OutputError::ExrError(e.to_string()))?;
 
     Ok(())
+}
+
+// ── Per-Layer Export ──
+
+/// Metadata for a single layer, written into `manifest.json`.
+#[derive(Debug, Serialize)]
+pub struct LayerManifestEntry {
+    pub index: usize,
+    pub name: String,
+    pub group: String,
+    pub order: i32,
+    pub visible: bool,
+    pub dry: f32,
+}
+
+/// Write `manifest.json` with layer metadata and file listing.
+pub fn export_manifest(
+    layers: &[LayerManifestEntry],
+    format: ExportFormat,
+    output_dir: &Path,
+) -> Result<(), OutputError> {
+    let ext = match format {
+        ExportFormat::Png => "png",
+        ExportFormat::Exr => "exr",
+    };
+
+    #[derive(Serialize)]
+    struct Manifest<'a> {
+        layers: &'a [LayerManifestEntry],
+        format: &'a str,
+    }
+
+    let manifest = Manifest {
+        layers,
+        format: ext,
+    };
+
+    let json = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(output_dir.join("manifest.json"), json)?;
+    Ok(())
+}
+
+/// Export a single layer's texture maps (color, height, normal).
+///
+/// Files are named `layer_{index}_{map}.{ext}` (e.g. `layer_0_color.png`).
+/// Normal map is generated from the layer's gradient data using the same
+/// Sobel-based approach as the composite normal map.
+pub fn export_layer_maps(
+    layer: &LayerMaps,
+    index: usize,
+    format: ExportFormat,
+    normal_strength: f32,
+    normal_mode: NormalMode,
+    normal_data: Option<&MeshNormalData>,
+    include_color: bool,
+    include_height: bool,
+    include_normal: bool,
+    include_time_map: bool,
+    output_dir: &Path,
+) -> Result<u32, OutputError> {
+    let res = layer.resolution;
+    let prefix = format!("layer_{index}");
+    let mut count = 0u32;
+
+    if include_color {
+        // Per-layer color always has alpha (transparent where unpainted).
+        match format {
+            ExportFormat::Png => export_color_png(
+                &layer.color,
+                res,
+                &output_dir.join(format!("{prefix}_color.png")),
+                true,
+            )?,
+            ExportFormat::Exr => export_color_exr(
+                &layer.color,
+                res,
+                &output_dir.join(format!("{prefix}_color.exr")),
+                true,
+            )?,
+        }
+        count += 1;
+    }
+
+    if include_height {
+        let normalized = normalize_height_map(&layer.height);
+        match format {
+            ExportFormat::Png => export_height_png(
+                &normalized,
+                res,
+                &output_dir.join(format!("{prefix}_height.png")),
+            )?,
+            ExportFormat::Exr => export_height_exr(
+                &normalized,
+                res,
+                &output_dir.join(format!("{prefix}_height.exr")),
+            )?,
+        }
+        count += 1;
+    }
+
+    if include_normal {
+        let normals = match (normal_mode, normal_data) {
+            (NormalMode::DepictedForm, Some(nd)) => generate_normal_map_depicted_form(
+                &layer.gradient_x,
+                &layer.gradient_y,
+                nd,
+                &layer.object_normal,
+                &layer.paint_load,
+                res,
+                normal_strength,
+            ),
+            _ => generate_normal_map(
+                &layer.gradient_x,
+                &layer.gradient_y,
+                res,
+                normal_strength,
+            ),
+        };
+        export_normal_png(&normals, res, &output_dir.join(format!("{prefix}_normal.png")))?;
+        count += 1;
+    }
+
+    if include_time_map {
+        match format {
+            ExportFormat::Png => export_stroke_time_png(
+                &layer.stroke_time_order,
+                &layer.stroke_time_arc,
+                res,
+                &output_dir.join(format!("{prefix}_stroke_time.png")),
+            )?,
+            ExportFormat::Exr => export_stroke_time_exr(
+                &layer.stroke_time_order,
+                &layer.stroke_time_arc,
+                res,
+                &output_dir.join(format!("{prefix}_stroke_time.exr")),
+            )?,
+        }
+        count += 1;
+    }
+
+    Ok(count)
 }
 
 // ── Export All ──

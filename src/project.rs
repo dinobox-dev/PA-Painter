@@ -739,6 +739,7 @@ mod tests {
             layers: vec![],
             presets: PresetLibrary::built_in(),
             settings: OutputSettings::default(),
+            export_settings: ExportSettings::default(),
             mesh_bytes: None,
             cached_paths: None,
             path_cache_key: None,
@@ -760,6 +761,7 @@ mod tests {
                 normal_strength: 1.5,
                 ..OutputSettings::default()
             },
+            export_settings: ExportSettings::default(),
             mesh_bytes: None,
             cached_paths: None,
             path_cache_key: None,
