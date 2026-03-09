@@ -26,7 +26,8 @@ use crate::asset_io::{
     encode_pixels_as_srgb_png, linear_to_srgb, load_mesh_from_bytes, LoadedMesh,
 };
 use crate::types::{
-    Color, Layer, OutputSettings, PaintLayer, PresetLibrary, StrokePath, TextureSource,
+    Color, EmbeddedTexture, Layer, OutputSettings, PaintLayer, PresetLibrary, StrokePath,
+    TextureSource,
 };
 use crate::uv_mask::UvMask;
 
@@ -481,6 +482,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
                 .and_then(|bytes| decode_srgb_png_bytes(&bytes).ok());
             if let Some((pixels, w, h)) = decoded {
                 if let TextureSource::File(Some(ref mut tex)) = layer.base_color {
+                    tex.content_hash = EmbeddedTexture::compute_content_hash(&pixels);
                     tex.pixels = Arc::new(pixels);
                     tex.width = w;
                     tex.height = h;
@@ -496,6 +498,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
                 .and_then(|bytes| decode_linear_png_bytes(&bytes).ok());
             if let Some((pixels, w, h)) = decoded {
                 if let TextureSource::File(Some(ref mut tex)) = layer.base_normal {
+                    tex.content_hash = EmbeddedTexture::compute_content_hash(&pixels);
                     tex.pixels = Arc::new(pixels);
                     tex.width = w;
                     tex.height = h;

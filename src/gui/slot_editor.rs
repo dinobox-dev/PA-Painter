@@ -1087,6 +1087,7 @@ fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
     let has_normal_textures = layer_material(state, &group_name)
         .is_some_and(|mat| mat.normal_texture.is_some());
 
+    let old_normal = state.project.layers[layer_idx].base_normal.clone();
     let mode = current_mode(&state.project.layers[layer_idx].base_normal, false);
 
     ui.horizontal(|ui: &mut egui::Ui| {
@@ -1161,6 +1162,11 @@ fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
             &mut state.project.layers[layer_idx].base_normal,
             "normal",
         );
+    }
+
+    // base_normal affects merge stage — trigger remerge on change
+    if state.project.layers[layer_idx].base_normal != old_normal {
+        state.pending_remerge = true;
     }
 }
 
@@ -1314,11 +1320,13 @@ fn pick_and_load_texture() -> Option<EmbeddedTexture> {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "texture".to_string());
+            let content_hash = EmbeddedTexture::compute_content_hash(&tex.pixels);
             Some(EmbeddedTexture {
                 label,
                 pixels: Arc::new(tex.pixels),
                 width: tex.width,
                 height: tex.height,
+                content_hash,
             })
         }
         Err(e) => {

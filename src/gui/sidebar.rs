@@ -577,92 +577,43 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
     }); // indent
 }
 
-/// Draw the bottom-pinned section: Generate button.
+/// Draw the bottom-pinned section: Export buttons + thin progress bar underneath.
 pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
     ui.add_space(4.0);
 
-    // ── Generate ──
-    let running = state.generation.is_running();
-    if running {
-        let p = state.generation.progress();
-        let stage = state.generation.stage();
-        let stage_label = match stage {
-            super::generation::STAGE_NORMALS => "Preparing...",
-            super::generation::STAGE_MASKS => "Building UV masks...",
-            super::generation::STAGE_PATHS => "Generating paths...",
-            super::generation::STAGE_COMPOSITE => "Compositing...",
-            super::generation::STAGE_NORMAL_MAP => "Generating normal map...",
-            super::generation::STAGE_BLENDING => "Finalizing...",
-            _ => "Generating...",
-        };
-        let text = format!("{stage_label} {:.0}%", p * 100.0);
-        let size = egui::Vec2::new(ui.available_width(), 36.0);
-        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-        let painter = ui.painter();
-        let rounding = ui.visuals().widgets.inactive.corner_radius;
-        let bg = egui::Color32::from_gray(50);
-        let fill = egui::Color32::from_gray(80);
-        painter.rect_filled(rect, rounding, bg);
-        if p > 0.0 {
-            let fill_rect = egui::Rect::from_min_size(
-                rect.min,
-                egui::Vec2::new(rect.width() * p.clamp(0.0, 1.0), rect.height()),
-            );
-            // Round left corners always; round right corners only when full.
-            let fill_rounding = if p >= 0.99 {
-                rounding
-            } else {
-                egui::CornerRadius {
-                    nw: rounding.nw,
-                    sw: rounding.sw,
-                    ..Default::default()
-                }
-            };
-            painter.rect_filled(fill_rect, fill_rounding, fill);
+    // ── Export buttons ──
+    let has_result = state.generated.is_some();
+    let stale = has_result && state.stale_reason().is_some();
+
+    let total_width = ui.available_width();
+    let spacing = ui.spacing().item_spacing.x;
+    let btn_size = egui::Vec2::new((total_width - spacing) / 2.0, 32.0);
+
+    ui.horizontal(|ui| {
+        ui.set_width(total_width);
+
+        let maps_btn = egui::Button::new("Export Maps")
+            .min_size(btn_size)
+            .truncate();
+        let maps_resp = ui.add_enabled(has_result, maps_btn);
+        if maps_resp.clicked() {
+            state.pending_export = true;
         }
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            &text,
-            egui::FontId::proportional(14.0),
-            egui::Color32::from_gray(200),
-        );
-    } else {
-        let stale = state.stale_reason();
-        let (label, text_color, bg) = if let Some(reason) = stale {
-            (
-                format!("Generate ({reason})"),
-                egui::Color32::from_rgb(255, 220, 80),
-                egui::Color32::from_rgb(80, 65, 20),
-            )
-        } else {
-            (
-                "Generate".to_string(),
-                egui::Color32::WHITE,
-                egui::Color32::from_gray(60),
-            )
-        };
-        let size = egui::Vec2::new(ui.available_width(), 36.0);
-        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-        let painter = ui.painter();
-        let rounding = ui.visuals().widgets.inactive.corner_radius;
-        let fill = if response.hovered() {
-            bg.linear_multiply(1.3)
-        } else {
-            bg
-        };
-        painter.rect_filled(rect, rounding, fill);
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            &label,
-            egui::FontId::proportional(14.0),
-            text_color,
-        );
-        if response.on_hover_text("⌘G").clicked() {
-            state.pending_generate = true;
+
+        let glb_btn = egui::Button::new("Export GLB")
+            .min_size(btn_size)
+            .truncate();
+        let glb_resp = ui.add_enabled(has_result, glb_btn);
+        if glb_resp.clicked() {
+            state.pending_export_glb = true;
         }
-    }
+
+        if stale {
+            maps_resp.on_hover_text("Result is outdated — parameters changed since last generation");
+            glb_resp.on_hover_text("Result is outdated — parameters changed since last generation");
+        }
+    });
+
 }
 
 pub fn build_group_names(state: &AppState) -> Vec<String> {

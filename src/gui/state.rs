@@ -246,14 +246,10 @@ pub struct AppState {
     pub pending_save: bool,
     pub pending_export: bool,
     pub pending_export_glb: bool,
-    pub pending_generate: bool,
     pub pending_reload_mesh: bool,
     pub pending_replace_mesh: bool,
     /// Re-merge cached LayerMaps without re-rendering (visibility/order/dry change).
     pub pending_remerge: bool,
-    /// Chain: auto-export to pre-selected path after next generation completes.
-    pub post_gen_export_maps: Option<PathBuf>,
-    pub post_gen_export_glb: Option<PathBuf>,
 
     /// Mesh reload diff summary shown as a dismissible window.
     pub reload_summary: Option<ReloadSummary>,
@@ -280,8 +276,9 @@ pub struct AppState {
     pub prev_render_hash: u64,
     /// When a Type C/D parameter last changed (debounce timer start).
     pub auto_preview_timer: Option<Instant>,
-    /// Whether to auto-start full-res generation after preview completes.
-    pub pending_full_after_preview: bool,
+    /// Suppresses auto-generation when true (set on generation failure to prevent retry loop).
+    /// Reset when mesh or layers change.
+    pub auto_gen_suppressed: bool,
 
     // ── Undo/Redo ──
     pub undo: UndoHistory,
@@ -318,12 +315,9 @@ impl AppState {
             pending_save: false,
             pending_export: false,
             pending_export_glb: false,
-            pending_generate: false,
             pending_reload_mesh: false,
             pending_replace_mesh: false,
             pending_remerge: false,
-            post_gen_export_maps: None,
-            post_gen_export_glb: None,
             reload_summary: None,
             mesh_load_popup: None,
             group_dim_cache: GroupDimCache::default(),
@@ -333,7 +327,7 @@ impl AppState {
             generation_snapshot: None,
             prev_render_hash: 0,
             auto_preview_timer: None,
-            pending_full_after_preview: false,
+            auto_gen_suppressed: false,
             undo: UndoHistory::default(),
         }
     }
@@ -375,15 +369,18 @@ impl AppState {
                 self.selected_guide = None;
             }
         }
+
+        // Undo/redo may restore Type A settings (visibility, dry, normal_strength, etc.)
+        // that only affect merge — trigger remerge to cover those cases.
+        // Type C/D changes are handled by combined_render_hash detection in update().
+        self.pending_remerge = true;
     }
 
     /// Whether current results don't reflect current settings.
     /// Returns a label describing the state, or None if up-to-date.
     pub fn stale_reason(&self) -> Option<&'static str> {
         let Some(saved) = self.generation_snapshot else {
-            if !self.project.layers.is_empty() {
-                return Some("Not generated");
-            }
+            // No generation snapshot yet — auto-preview will handle it
             return None;
         };
         let current = generation_state_hash(
@@ -392,7 +389,7 @@ impl AppState {
             self.mesh_hash,
         );
         if saved != current {
-            return Some("Modified");
+            return Some("Outdated");
         }
         None
     }

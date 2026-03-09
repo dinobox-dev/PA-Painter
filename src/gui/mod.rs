@@ -69,6 +69,12 @@ impl PainterApp {
             layer.render_hash().hash(&mut hasher);
         }
         self.state.mesh_hash.hash(&mut hasher);
+        self.state
+            .project
+            .settings
+            .resolution_preset
+            .resolution()
+            .hash(&mut hasher);
         hasher.finish()
     }
 
@@ -76,12 +82,8 @@ impl PainterApp {
     const PREVIEW_RESOLUTION: u32 = 256;
     /// Debounce delay before starting auto-preview.
     const PREVIEW_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
-    /// Delay after preview before starting full-res generation.
-    const FULL_GEN_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
-
     fn start_generation(&mut self) {
         self.state.auto_preview_timer = None;
-        self.state.pending_full_after_preview = false;
         self.start_generation_at_resolution(
             self.state.project.settings.resolution_preset.resolution(),
             false,
@@ -251,12 +253,11 @@ impl PainterApp {
 
         if is_preview {
             // Preview: display result but don't update layer cache (preserve full-res cache).
-            // Schedule full-res follow-up after a short delay.
+            // Start full-res immediately (cancel/discard handles rapid parameter changes).
             self.state.status_message =
                 format!("Preview in {:.2}s", result.elapsed.as_secs_f32());
             self.state.generated = Some(result);
-            self.state.pending_full_after_preview = true;
-            self.state.auto_preview_timer = Some(std::time::Instant::now());
+            self.start_generation();
         } else {
             // Full-res: update layer cache for future reuse.
             self.state.generation.layer_cache = result.rendered_layers.clone();
@@ -271,15 +272,6 @@ impl PainterApp {
                 format!("Generated in {:.1}s", result.elapsed.as_secs_f32());
             self.state.generated = Some(result);
             self.state.dirty = true;
-            self.state.pending_full_after_preview = false;
-
-            // Chain: auto-export to pre-selected path if requested via Generate & Export
-            if let Some(dir) = self.state.post_gen_export_maps.take() {
-                dialogs::export_maps_to(&mut self.state, &dir);
-            }
-            if let Some(path) = self.state.post_gen_export_glb.take() {
-                dialogs::export_glb_to(&mut self.state, &path);
-            }
         }
 
         // If Type A settings changed while generation was running, remerge with current values
@@ -565,11 +557,11 @@ impl eframe::App for PainterApp {
             self.state.pending_save = true;
         }
 
-        // ── Cmd+G: Generate ──
+        // ── Cmd+G: Force full-res generation ──
         if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::G))
             && !self.state.generation.is_running()
         {
-            self.state.pending_generate = true;
+            self.start_generation();
         }
 
         // ── Backtick key: cycle viewport tabs ──
@@ -607,10 +599,6 @@ impl eframe::App for PainterApp {
         if self.state.pending_export_glb {
             self.state.pending_export_glb = false;
             dialogs::export_glb(&mut self.state);
-        }
-        if self.state.pending_generate {
-            self.state.pending_generate = false;
-            self.start_generation();
         }
         if self.state.pending_new {
             self.state.pending_new = false;
@@ -768,8 +756,8 @@ impl eframe::App for PainterApp {
                 Ok(result) => self.apply_generation_result(ctx, result),
                 Err(msg) => {
                     self.state.status_message = msg;
-                    self.state.post_gen_export_maps = None;
-                    self.state.post_gen_export_glb = None;
+                    // Suppress auto-gen to prevent retry loop on failure
+                    self.state.auto_gen_suppressed = true;
                 }
             }
         }
@@ -796,24 +784,15 @@ impl eframe::App for PainterApp {
                     }
                     ui.separator();
                     let has_gen = self.state.generated.is_some();
-                    let stale = self.state.stale_reason();
-                    let maps_label = match stale {
-                        Some(reason) if has_gen => format!("Export Maps... ({reason})"),
-                        _ => "Export Maps...".to_string(),
-                    };
                     if ui
-                        .add_enabled(has_gen, egui::Button::new(maps_label))
+                        .add_enabled(has_gen, egui::Button::new("Export Maps..."))
                         .clicked()
                     {
                         ui.close();
                         self.state.pending_export = true;
                     }
-                    let glb_label = match stale {
-                        Some(reason) if has_gen => format!("Export GLB... ({reason})"),
-                        _ => "Export GLB...".to_string(),
-                    };
                     if ui
-                        .add_enabled(has_gen, egui::Button::new(glb_label))
+                        .add_enabled(has_gen, egui::Button::new("Export GLB..."))
                         .clicked()
                     {
                         ui.close();
@@ -822,28 +801,11 @@ impl eframe::App for PainterApp {
                     ui.separator();
                     let can_gen = !self.state.generation.is_running();
                     if ui
-                        .add_enabled(can_gen, egui::Button::new("Generate & Export Maps..."))
+                        .add_enabled(can_gen, egui::Button::new("Force Full-Res  ⌘G"))
                         .clicked()
                     {
                         ui.close();
-                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                            self.state.post_gen_export_maps = Some(dir);
-                            self.state.pending_generate = true;
-                        }
-                    }
-                    if ui
-                        .add_enabled(can_gen, egui::Button::new("Generate & Export GLB..."))
-                        .clicked()
-                    {
-                        ui.close();
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("glTF Binary", &["glb"])
-                            .set_file_name("preview.glb")
-                            .save_file()
-                        {
-                            self.state.post_gen_export_glb = Some(path);
-                            self.state.pending_generate = true;
-                        }
+                        self.start_generation();
                     }
                 });
                 ui.menu_button("Edit", |ui: &mut egui::Ui| {
@@ -1293,24 +1255,24 @@ impl eframe::App for PainterApp {
             {
                 // Render-affecting parameter changed — reset debounce timer
                 self.state.auto_preview_timer = Some(std::time::Instant::now());
-                self.state.pending_full_after_preview = false;
+                // Parameter changed → allow auto-gen again
+                self.state.auto_gen_suppressed = false;
             }
             self.state.prev_render_hash = current_render_hash;
 
-            // Debounce → start preview or full-res
+            // Auto-trigger first generation when mesh is loaded but nothing generated yet
+            if self.state.generated.is_none()
+                && !self.state.generation.is_running()
+                && !self.state.auto_gen_suppressed
+                && self.state.auto_preview_timer.is_none()
+            {
+                self.start_preview_generation();
+            }
+
+            // Debounce → start preview
             if let Some(timer) = self.state.auto_preview_timer {
                 let elapsed = timer.elapsed();
-                if self.state.pending_full_after_preview {
-                    // Preview already displayed — escalate to full-res after delay
-                    if elapsed >= Self::FULL_GEN_DELAY && !self.state.generation.is_running() {
-                        self.state.auto_preview_timer = None;
-                        self.state.pending_full_after_preview = false;
-                        self.start_generation();
-                    } else {
-                        ctx.request_repaint();
-                    }
-                } else if elapsed >= Self::PREVIEW_DEBOUNCE {
-                    // Debounce expired — start low-res preview
+                if elapsed >= Self::PREVIEW_DEBOUNCE {
                     self.start_preview_generation();
                     self.state.auto_preview_timer = None;
                 } else {

@@ -50,6 +50,7 @@ fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<bool, String> {
         state.textures.stroke_id = None;
         state.generated = None;
         state.path_overlay.clear();
+        state.auto_gen_suppressed = false;
     }
 
     state.loaded_mesh = Some(Arc::new(mesh));
@@ -83,6 +84,7 @@ fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool {
         state.textures.stroke_id = None;
         state.generated = None;
         state.path_overlay.clear();
+        state.auto_gen_suppressed = false;
     }
 
     state.loaded_mesh = Some(Arc::new(mesh));
@@ -121,8 +123,6 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
             state.dirty = false;
             state.generation_snapshot = None;
             state.generation.discard();
-            state.post_gen_export_maps = None;
-            state.post_gen_export_glb = None;
             state.textures.color = None;
             state.textures.height = None;
             state.textures.normal = None;
@@ -167,6 +167,7 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                 ));
             } else {
                 state.generated = None;
+                state.auto_gen_suppressed = false;
             }
 
             true
@@ -525,11 +526,13 @@ fn auto_map_glb(mat: &MeshMaterialInfo, idx: usize) -> (TextureSource, TextureSo
 /// Returns (color, normal, is_default).
 fn auto_map_mtl(mat: &MeshMaterialInfo) -> (TextureSource, TextureSource, bool) {
     let color = if let Some(ref tex) = mat.base_color_texture {
+        let content_hash = EmbeddedTexture::compute_content_hash(&tex.pixels);
         TextureSource::File(Some(EmbeddedTexture {
             label: mat.name.clone(),
             pixels: Arc::new(tex.pixels.clone()),
             width: tex.width,
             height: tex.height,
+            content_hash,
         }))
     } else if mat.has_explicit_color {
         let f = mat.base_color_factor;
@@ -538,11 +541,13 @@ fn auto_map_mtl(mat: &MeshMaterialInfo) -> (TextureSource, TextureSource, bool) 
         TextureSource::Solid([0.5, 0.5, 0.5])
     };
     let normal = if let Some(ref tex) = mat.normal_texture {
+        let content_hash = EmbeddedTexture::compute_content_hash(&tex.pixels);
         TextureSource::File(Some(EmbeddedTexture {
             label: format!("{}_normal", mat.name),
             pixels: Arc::new(tex.pixels.clone()),
             width: tex.width,
             height: tex.height,
+            content_hash,
         }))
     } else {
         TextureSource::None
@@ -789,10 +794,9 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
         state.dirty = false;
         state.selected_guide = None;
         state.generated = None;
+        state.auto_gen_suppressed = false;
         state.generation_snapshot = None;
         state.generation.discard();
-        state.post_gen_export_maps = None;
-        state.post_gen_export_glb = None;
         state.textures.color = None;
         state.textures.height = None;
         state.textures.normal = None;

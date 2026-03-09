@@ -124,11 +124,13 @@ impl GenerationManager {
     }
 
     /// Current generation progress (0.0–1.0).
+    #[allow(dead_code)]
     pub fn progress(&self) -> f32 {
         f32::from_bits(self.progress.load(Ordering::Relaxed))
     }
 
     /// Current pipeline stage identifier.
+    #[allow(dead_code)]
     pub fn stage(&self) -> u8 {
         self.stage.load(Ordering::Relaxed)
     }

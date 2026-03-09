@@ -1024,28 +1024,31 @@ fn draw_arrowhead(painter: &egui::Painter, tip: Pos2, dir: glam::Vec2, color: Co
     painter.line_segment([tip, right], egui::Stroke::new(2.0, color));
 }
 
-/// Draw a stale/not-generated badge in the top-left corner of the viewport.
+/// Draw a status badge in the top-left corner of the viewport.
+/// Shows "Updating..." while generation is running, or stale reason if outdated.
 fn draw_stale_badge(painter: &egui::Painter, state: &AppState, rect: Rect) {
-    if let Some(reason) = state.stale_reason() {
-        let font = egui::FontId::proportional(11.0);
-        let galley = painter.layout_no_wrap(reason.to_string(), font.clone(), Color32::WHITE);
-        let badge_rect = Rect::from_min_size(
-            Pos2::new(rect.left() + 8.0, rect.top() + 8.0),
-            Vec2::new(galley.size().x + 12.0, galley.size().y + 6.0),
-        );
-        painter.rect_filled(
-            badge_rect,
-            4.0,
-            Color32::from_rgba_unmultiplied(180, 140, 30, 200),
-        );
-        painter.text(
-            badge_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            reason,
-            font,
-            Color32::WHITE,
-        );
-    }
+    let (label, bg_color) = if state.generation.is_running() {
+        ("Updating...", Color32::from_rgba_unmultiplied(60, 120, 180, 200))
+    } else if let Some(reason) = state.stale_reason() {
+        (reason, Color32::from_rgba_unmultiplied(180, 140, 30, 200))
+    } else {
+        return;
+    };
+
+    let font = egui::FontId::proportional(11.0);
+    let galley = painter.layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE);
+    let badge_rect = Rect::from_min_size(
+        Pos2::new(rect.left() + 8.0, rect.top() + 8.0),
+        Vec2::new(galley.size().x + 12.0, galley.size().y + 6.0),
+    );
+    painter.rect_filled(badge_rect, 4.0, bg_color);
+    painter.text(
+        badge_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        font,
+        Color32::WHITE,
+    );
 }
 
 /// Common pan/zoom handling for 2D viewport modes.

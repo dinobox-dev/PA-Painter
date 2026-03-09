@@ -194,12 +194,32 @@ pub struct EmbeddedTexture {
     pub pixels: Arc<Vec<[f32; 4]>>,
     pub width: u32,
     pub height: u32,
+    /// Hash of pixel data, computed once on load. Included in serialization
+    /// so that `render_hash()` and `PartialEq` can detect content changes
+    /// without inspecting the full pixel buffer.
+    #[serde(default)]
+    pub content_hash: u64,
 }
 
-/// Compare by label + dimensions only (pixel data is too large).
+impl EmbeddedTexture {
+    /// Compute a hash over the pixel data.
+    pub fn compute_content_hash(pixels: &[[f32; 4]]) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for px in pixels {
+            for ch in px {
+                ch.to_bits().hash(&mut hasher);
+            }
+        }
+        hasher.finish()
+    }
+}
+
 impl PartialEq for EmbeddedTexture {
     fn eq(&self, other: &Self) -> bool {
-        self.label == other.label && self.width == other.width && self.height == other.height
+        self.content_hash == other.content_hash
+            && self.width == other.width
+            && self.height == other.height
     }
 }
 
@@ -239,11 +259,13 @@ pub fn checkerboard_warning_texture() -> EmbeddedTexture {
             pixels.push(if (tx + ty) % 2 == 0 { magenta } else { black });
         }
     }
+    let content_hash = EmbeddedTexture::compute_content_hash(&pixels);
     EmbeddedTexture {
         label: "__checkerboard__".to_string(),
         pixels: Arc::new(pixels),
         width: size,
         height: size,
+        content_hash,
     }
 }
 
@@ -1197,20 +1219,34 @@ mod tests {
     }
 
     #[test]
-    fn embedded_texture_partial_eq_ignores_pixels() {
+    fn embedded_texture_partial_eq_uses_content_hash() {
+        let px1 = vec![[1.0; 4]];
+        let px2 = vec![[0.0; 4]];
         let t1 = EmbeddedTexture {
             label: "a.png".to_string(),
-            pixels: Arc::new(vec![[1.0; 4]]),
+            content_hash: EmbeddedTexture::compute_content_hash(&px1),
+            pixels: Arc::new(px1),
             width: 1,
             height: 1,
         };
         let t2 = EmbeddedTexture {
             label: "a.png".to_string(),
-            pixels: Arc::new(vec![[0.0; 4]]),
+            content_hash: EmbeddedTexture::compute_content_hash(&px2),
+            pixels: Arc::new(px2),
             width: 1,
             height: 1,
         };
-        assert_eq!(t1, t2, "PartialEq should compare label+dims only");
+        assert_ne!(t1, t2, "Different pixel data should produce different content_hash");
+
+        let px3 = vec![[1.0; 4]];
+        let t3 = EmbeddedTexture {
+            label: "b.png".to_string(), // different label, same pixels
+            content_hash: EmbeddedTexture::compute_content_hash(&px3),
+            pixels: Arc::new(px3),
+            width: 1,
+            height: 1,
+        };
+        assert_eq!(t1, t3, "Same content_hash + dims should be equal regardless of label");
     }
 
     #[test]
