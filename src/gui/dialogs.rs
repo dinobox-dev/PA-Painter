@@ -10,6 +10,7 @@ use practical_arcana_painter::output::{
     export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
     export_stroke_time_png, normalize_height_map, ExportFormat,
     export_color_exr, export_height_exr, export_stroke_time_exr,
+    export_layer_maps, export_manifest, LayerManifestEntry,
 };
 use practical_arcana_painter::project::{
     load_project, save_project, utc_now_iso8601, OutputCache, Project,
@@ -478,6 +479,68 @@ pub fn export_maps_to(state: &mut AppState, dir: &Path) {
             return;
         }
         count += 1;
+    }
+
+    // ── Per-Layer Export ──
+    if es.per_layer {
+        let mut sorted_layers: Vec<&Layer> =
+            state.project.layers.iter().filter(|l| l.visible).collect();
+        sorted_layers.sort_by_key(|l| l.order);
+
+        let normal_strength = state.project.settings.normal_strength;
+        let normal_mode = state.project.settings.normal_mode;
+        let normal_data = state
+            .cached_mesh_normals
+            .as_ref()
+            .map(|(_, nd)| nd.as_ref());
+
+        let mut manifest_entries = Vec::new();
+        for (idx, layer) in sorted_layers.iter().enumerate() {
+            let hash = layer.render_hash();
+            let Some((_, maps)) = state
+                .generation
+                .layer_cache
+                .iter()
+                .find(|(h, _)| *h == hash)
+            else {
+                continue; // cache miss — skip this layer
+            };
+
+            match export_layer_maps(
+                maps,
+                idx,
+                es.format,
+                normal_strength,
+                normal_mode,
+                normal_data,
+                es.include_color,
+                es.include_height,
+                es.include_normal,
+                es.include_time_map,
+                dir,
+            ) {
+                Ok(n) => count += n,
+                Err(e) => {
+                    state.status_message = format!("Export failed (layer {}): {e:?}", layer.name);
+                    return;
+                }
+            }
+
+            manifest_entries.push(LayerManifestEntry {
+                index: idx,
+                name: layer.name.clone(),
+                group: layer.group_name.clone(),
+                order: layer.order,
+                visible: layer.visible,
+                dry: layer.dry,
+            });
+        }
+
+        if let Err(e) = export_manifest(&manifest_entries, es.format, dir) {
+            state.status_message = format!("Export failed (manifest): {e:?}");
+            return;
+        }
+        count += 1; // manifest.json
     }
 
     if count == 0 {

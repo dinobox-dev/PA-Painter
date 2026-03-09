@@ -597,6 +597,8 @@ impl PainterApp {
                         ui.checkbox(&mut es.include_height, "Height");
                         ui.checkbox(&mut es.include_stroke_id, "Stroke ID");
                         ui.checkbox(&mut es.include_time_map, "Stroke Time");
+                        ui.add_space(4.0);
+                        ui.checkbox(&mut es.per_layer, "Per Layer");
                     });
                 }
 
