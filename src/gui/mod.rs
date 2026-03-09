@@ -84,6 +84,7 @@ impl PainterApp {
     const PREVIEW_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
     fn start_generation(&mut self) {
         self.state.auto_preview_timer = None;
+        self.state.generation.progressive_queue.clear();
         self.start_generation_at_resolution(
             self.state.project.settings.resolution_preset.resolution(),
             false,
@@ -91,6 +92,20 @@ impl PainterApp {
     }
 
     fn start_preview_generation(&mut self) {
+        // Build progressive resolution queue: 256 → 512 → 1024 → … → full-res.
+        // Each step doubles until reaching the target. Steps at or below PREVIEW_RESOLUTION
+        // are skipped (the initial preview covers those).
+        let full = self.state.project.settings.resolution_preset.resolution();
+        let mut queue = Vec::new();
+        let mut r = Self::PREVIEW_RESOLUTION * 2; // first step after initial preview
+        while r < full {
+            queue.push(r);
+            r *= 2;
+        }
+        // Final full-res is always added (handled as is_preview=false when dequeued).
+        queue.push(full);
+        self.state.generation.progressive_queue = queue;
+
         self.start_generation_at_resolution(Self::PREVIEW_RESOLUTION, true);
     }
 
@@ -253,11 +268,21 @@ impl PainterApp {
 
         if is_preview {
             // Preview: display result but don't update layer cache (preserve full-res cache).
-            // Start full-res immediately (cancel/discard handles rapid parameter changes).
+            // Advance to the next progressive resolution step.
             self.state.status_message =
-                format!("Preview in {:.2}s", result.elapsed.as_secs_f32());
+                format!("Preview {}px in {:.2}s", result.resolution, result.elapsed.as_secs_f32());
             self.state.generated = Some(result);
-            self.start_generation();
+
+            // Pop the next step from the progressive queue.
+            if let Some(next_res) = self.state.generation.progressive_queue.first().copied() {
+                self.state.generation.progressive_queue.remove(0);
+                let full = self.state.project.settings.resolution_preset.resolution();
+                let is_final = next_res >= full;
+                self.start_generation_at_resolution(next_res, !is_final);
+            } else {
+                // Queue empty (e.g. manual Cmd+G or direct call) — fall back to full-res.
+                self.start_generation();
+            }
         } else {
             // Full-res: update layer cache for future reuse.
             self.state.generation.layer_cache = result.rendered_layers.clone();

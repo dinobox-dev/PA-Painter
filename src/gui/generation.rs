@@ -100,6 +100,10 @@ pub struct GenerationManager {
     pub cache_global_hash: u64,
     /// Whether the current run is a low-res preview (skip cache update on completion).
     pub is_preview: bool,
+    /// Queue of remaining progressive resolution steps (ascending).
+    /// Each completed preview pops the front and starts the next.
+    /// Empty means the current run is the final (full-res) step.
+    pub progressive_queue: Vec<u32>,
 }
 
 impl Default for GenerationManager {
@@ -114,6 +118,7 @@ impl Default for GenerationManager {
             path_cache: Vec::new(),
             cache_global_hash: 0,
             is_preview: false,
+            progressive_queue: Vec::new(),
         }
     }
 }
