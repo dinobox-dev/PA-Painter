@@ -398,11 +398,112 @@ pub fn save_project_action(state: &mut AppState) {
     }
 }
 
+/// Derive the export subfolder name from the project file path.
+/// Returns `"untitled"` if no project has been saved yet.
+fn export_folder_name(state: &AppState) -> String {
+    state
+        .project_path
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+        .unwrap_or("untitled")
+        .to_string()
+}
+
+/// Build the list of filenames that will be written for a given export config.
+fn planned_export_files(state: &AppState, include_glb: bool) -> Vec<String> {
+    let es = &state.project.export_settings;
+    let ext = match es.format {
+        ExportFormat::Png => "png",
+        ExportFormat::Exr => "exr",
+    };
+    let mut files = Vec::new();
+
+    if es.export_maps || include_glb {
+        if es.include_color {
+            files.push(format!("color_map.{ext}"));
+        }
+        if es.include_height {
+            files.push(format!("height_map.{ext}"));
+        }
+        if es.include_normal {
+            files.push("normal_map.png".to_string());
+        }
+        if es.include_stroke_id {
+            files.push("stroke_id_map.png".to_string());
+        }
+        if es.include_time_map {
+            files.push(format!("stroke_time_map.{ext}"));
+        }
+    }
+
+    if es.per_layer {
+        let visible_count = state.project.layers.iter().filter(|l| l.visible).count();
+        for i in 0..visible_count {
+            if es.include_color {
+                files.push(format!("layer_{i}_color.{ext}"));
+            }
+            if es.include_height {
+                files.push(format!("layer_{i}_height.{ext}"));
+            }
+            if es.include_normal {
+                files.push(format!("layer_{i}_normal.png"));
+            }
+            if es.include_time_map {
+                files.push(format!("layer_{i}_stroke_time.{ext}"));
+            }
+        }
+        files.push("manifest.json".to_string());
+    }
+
+    if include_glb && es.export_model {
+        files.push("preview.glb".to_string());
+    }
+
+    files
+}
+
+/// Check if any of the planned export files already exist in `dir`.
+/// If so, show a confirmation dialog with the conflict count.
+/// Returns `false` if the user cancels.
+fn confirm_overwrite(dir: &Path, planned_files: &[String]) -> bool {
+    if !dir.exists() {
+        return true;
+    }
+    let conflicts: usize = planned_files
+        .iter()
+        .filter(|name| dir.join(name).exists())
+        .count();
+    if conflicts == 0 {
+        return true;
+    }
+    rfd::MessageDialog::new()
+        .set_title("Overwrite existing files?")
+        .set_description(format!(
+            "{conflicts} file(s) will be overwritten in \"{}\".",
+            dir.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("folder"),
+        ))
+        .set_buttons(rfd::MessageButtons::OkCancel)
+        .show()
+        == rfd::MessageDialogResult::Ok
+}
+
 /// Export generated maps to a user-selected folder as PNG files.
 pub fn export_maps(state: &mut AppState) {
-    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+    let Some(parent) = rfd::FileDialog::new().pick_folder() else {
         return;
     };
+    let dir = parent.join(export_folder_name(state));
+    let planned = planned_export_files(state, false);
+    if !confirm_overwrite(&dir, &planned) {
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        state.status_message = format!("Failed to create folder: {e}");
+        return;
+    }
     export_maps_to(state, &dir);
 }
 
@@ -552,9 +653,18 @@ pub fn export_maps_to(state: &mut AppState, dir: &Path) {
 
 /// Export both texture maps and GLB to a user-selected folder.
 pub fn export_both(state: &mut AppState) {
-    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+    let Some(parent) = rfd::FileDialog::new().pick_folder() else {
         return;
     };
+    let dir = parent.join(export_folder_name(state));
+    let planned = planned_export_files(state, true);
+    if !confirm_overwrite(&dir, &planned) {
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        state.status_message = format!("Failed to create folder: {e}");
+        return;
+    }
     export_maps_to(state, &dir);
     // If maps export failed, status_message already set — skip GLB.
     if state.status_message.starts_with("Export failed")
@@ -572,9 +682,18 @@ pub fn export_both(state: &mut AppState) {
 
 /// Export a 3D preview GLB — pick folder, output as `preview.glb`.
 pub fn export_glb(state: &mut AppState) {
-    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+    let Some(parent) = rfd::FileDialog::new().pick_folder() else {
         return;
     };
+    let dir = parent.join(export_folder_name(state));
+    let planned = vec!["preview.glb".to_string()];
+    if !confirm_overwrite(&dir, &planned) {
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        state.status_message = format!("Failed to create folder: {e}");
+        return;
+    }
     export_glb_to(state, &dir.join("preview.glb"));
 }
 
