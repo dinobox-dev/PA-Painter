@@ -1148,6 +1148,52 @@ impl Default for OutputSettings {
     }
 }
 
+/// Export settings — controls which maps to export and in what format.
+///
+/// Stored per-project; changes do NOT trigger re-generation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExportSettings {
+    /// Output format for color, height, and stroke time maps.
+    #[serde(default)]
+    pub format: crate::output::ExportFormat,
+    /// Include color map in export.
+    #[serde(default = "default_true")]
+    pub include_color: bool,
+    /// Include normal map in export.
+    #[serde(default = "default_true")]
+    pub include_normal: bool,
+    /// Include height map in export.
+    #[serde(default = "default_true")]
+    pub include_height: bool,
+    /// Include stroke ID map in export.
+    #[serde(default)]
+    pub include_stroke_id: bool,
+    /// Include stroke time map in export.
+    #[serde(default)]
+    pub include_time_map: bool,
+    /// Export each layer individually (in addition to composite).
+    #[serde(default)]
+    pub per_layer: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for ExportSettings {
+    fn default() -> Self {
+        Self {
+            format: crate::output::ExportFormat::Png,
+            include_color: true,
+            include_normal: true,
+            include_height: true,
+            include_stroke_id: false,
+            include_time_map: false,
+            per_layer: false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

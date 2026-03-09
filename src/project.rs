@@ -26,8 +26,8 @@ use crate::asset_io::{
     encode_pixels_as_srgb_png, linear_to_srgb, load_mesh_from_bytes, LoadedMesh,
 };
 use crate::types::{
-    Color, EmbeddedTexture, Layer, OutputSettings, PaintLayer, PresetLibrary, StrokePath,
-    TextureSource,
+    Color, EmbeddedTexture, ExportSettings, Layer, OutputSettings, PaintLayer, PresetLibrary,
+    StrokePath, TextureSource,
 };
 use crate::uv_mask::UvMask;
 
@@ -109,6 +109,8 @@ struct ProjectData {
     layers: Vec<Layer>,
     presets: PresetLibrary,
     settings: OutputSettings,
+    #[serde(default)]
+    export_settings: ExportSettings,
 }
 
 /// Snapshot of the state that was used to generate the cached paths.
@@ -126,6 +128,7 @@ pub struct Project {
     pub layers: Vec<Layer>,
     pub presets: PresetLibrary,
     pub settings: OutputSettings,
+    pub export_settings: ExportSettings,
     /// Raw mesh file bytes for embedding in .pap ZIP.
     /// Populated on new project / load, written to `assets/mesh.*` on save.
     pub mesh_bytes: Option<Vec<u8>>,
@@ -152,6 +155,7 @@ impl Default for Project {
             layers: Vec::new(),
             presets: PresetLibrary::default(),
             settings: OutputSettings::default(),
+            export_settings: ExportSettings::default(),
             mesh_bytes: None,
             cached_paths: None,
             path_cache_key: None,
@@ -349,6 +353,7 @@ pub fn save_project(
         layers: project.layers.clone(),
         presets: project.presets.clone(),
         settings: project.settings.clone(),
+        export_settings: project.export_settings.clone(),
     };
     let project_json = serde_json::to_string_pretty(&data)?;
     zip.start_file("project.json", options)?;
@@ -526,6 +531,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
         layers,
         presets: data.presets,
         settings: data.settings,
+        export_settings: data.export_settings,
         mesh_bytes,
         cached_paths: None,
         path_cache_key: None,

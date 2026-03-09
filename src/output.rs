@@ -7,6 +7,8 @@ use std::path::Path;
 
 use glam::Vec2;
 
+use serde::{Deserialize, Serialize};
+
 use crate::asset_io::linear_to_srgb;
 use crate::compositing::GlobalMaps;
 use crate::object_normal::MeshNormalData;
@@ -33,8 +35,9 @@ pub enum OutputError {
 // ── Export Format ──
 
 /// Output format selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExportFormat {
+    #[default]
     Png,
     Exr,
 }
