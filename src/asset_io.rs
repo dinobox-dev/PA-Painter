@@ -140,8 +140,8 @@ fn obj_load_options() -> tobj::LoadOptions {
 }
 
 fn load_obj(path: &Path) -> Result<LoadedMesh, MeshError> {
-    let raw = std::fs::read(path)
-        .map_err(|e| MeshError::ParseError(format!("Failed to open: {e}")))?;
+    let raw =
+        std::fs::read(path).map_err(|e| MeshError::ParseError(format!("Failed to open: {e}")))?;
     let text = String::from_utf8_lossy(&raw);
     let obj_dir = path.parent();
 
@@ -323,29 +323,32 @@ fn mtl_to_material_info(
         match load_texture(&full) {
             Ok(tex) => Some(tex),
             Err(e) => {
-                eprintln!("MTL: failed to load diffuse texture '{}': {e}", full.display());
+                eprintln!(
+                    "MTL: failed to load diffuse texture '{}': {e}",
+                    full.display()
+                );
                 None
             }
         }
     });
 
-    let normal_texture = mat
-        .normal_texture
-        .as_ref()
-        .and_then(|tex_path| {
-            let full = if let Some(dir) = obj_dir {
-                dir.join(tex_path)
-            } else {
-                PathBuf::from(tex_path)
-            };
-            match load_texture(&full) {
-                Ok(tex) => Some(tex),
-                Err(e) => {
-                    eprintln!("MTL: failed to load normal texture '{}': {e}", full.display());
-                    None
-                }
+    let normal_texture = mat.normal_texture.as_ref().and_then(|tex_path| {
+        let full = if let Some(dir) = obj_dir {
+            dir.join(tex_path)
+        } else {
+            PathBuf::from(tex_path)
+        };
+        match load_texture(&full) {
+            Ok(tex) => Some(tex),
+            Err(e) => {
+                eprintln!(
+                    "MTL: failed to load normal texture '{}': {e}",
+                    full.display()
+                );
+                None
             }
-        });
+        }
+    });
 
     MeshMaterialInfo {
         name,
@@ -524,11 +527,9 @@ fn build_mesh_from_gltf(
                 .unwrap_or_else(|| format!("material_{prim_idx}"));
 
             let f = base_color_factor;
-            let is_glb_default = (f[0] - 1.0).abs() < 0.01
-                && (f[1] - 1.0).abs() < 0.01
-                && (f[2] - 1.0).abs() < 0.01;
-            let has_explicit_color =
-                base_color_texture.is_some() || !is_glb_default;
+            let is_glb_default =
+                (f[0] - 1.0).abs() < 0.01 && (f[1] - 1.0).abs() < 0.01 && (f[2] - 1.0).abs() < 0.01;
+            let has_explicit_color = base_color_texture.is_some() || !is_glb_default;
             materials.push(MeshMaterialInfo {
                 name: mat_name,
                 base_color_factor,
@@ -713,7 +714,11 @@ pub fn decode_srgb_png_bytes(bytes: &[u8]) -> Result<(Vec<[f32; 4]>, u32, u32), 
 }
 
 /// Encode linear RGBA pixels as a linear (no gamma) PNG (for normal map textures).
-pub fn encode_pixels_as_linear_png(pixels: &[[f32; 4]], width: u32, height: u32) -> Option<Vec<u8>> {
+pub fn encode_pixels_as_linear_png(
+    pixels: &[[f32; 4]],
+    width: u32,
+    height: u32,
+) -> Option<Vec<u8>> {
     let rgba: Vec<u8> = pixels
         .iter()
         .flat_map(|p| {

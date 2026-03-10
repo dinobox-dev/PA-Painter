@@ -4,7 +4,9 @@ use eframe::egui_wgpu;
 use practical_arcana_painter::types::{GuideType, TextureSource};
 
 use super::mesh_preview;
-use super::state::{AppState, DrawOrder, GroupDimKey, GuideTool, MapMode, ResultMode, SetupMapMode, ViewportTab};
+use super::state::{
+    AppState, DrawOrder, GroupDimKey, GuideTool, MapMode, ResultMode, SetupMapMode, ViewportTab,
+};
 use super::textures::{linear_to_raw_u8, linear_to_srgb_u8};
 use super::widgets::{slider_row, toolbar_icon_button};
 
@@ -144,7 +146,11 @@ fn resolve_setup_texture(
     is_color: bool,
     mesh: Option<&practical_arcana_painter::asset_io::LoadedMesh>,
 ) -> Option<egui::TextureHandle> {
-    let name = if is_color { "setup_base_color" } else { "setup_base_normal" };
+    let name = if is_color {
+        "setup_base_color"
+    } else {
+        "setup_base_normal"
+    };
     match source {
         TextureSource::None => {
             // Color: gray 50%; Normal: flat normal (0.5, 0.5, 1.0) = #8080FF
@@ -184,15 +190,23 @@ fn resolve_setup_texture(
         }
         TextureSource::File(opt) => {
             let et = opt.as_ref()?;
-            let convert = if is_color { linear_to_srgb_u8 } else { linear_to_raw_u8 };
-            let pixels: Vec<Color32> = et.pixels.iter().map(|p| {
-                Color32::from_rgba_unmultiplied(
-                    convert(p[0]),
-                    convert(p[1]),
-                    convert(p[2]),
-                    (p[3].clamp(0.0, 1.0) * 255.0) as u8,
-                )
-            }).collect();
+            let convert = if is_color {
+                linear_to_srgb_u8
+            } else {
+                linear_to_raw_u8
+            };
+            let pixels: Vec<Color32> = et
+                .pixels
+                .iter()
+                .map(|p| {
+                    Color32::from_rgba_unmultiplied(
+                        convert(p[0]),
+                        convert(p[1]),
+                        convert(p[2]),
+                        (p[3].clamp(0.0, 1.0) * 255.0) as u8,
+                    )
+                })
+                .collect();
             Some(ctx.load_texture(
                 name,
                 egui::ColorImage::new([et.width as usize, et.height as usize], pixels),
@@ -207,7 +221,11 @@ fn update_setup_base_texture(ctx: &egui::Context, state: &mut AppState) {
     let is_color = state.setup_map_mode == SetupMapMode::Color;
     let desired_key = state.selected_layer.and_then(|idx| {
         let layer = state.project.layers.get(idx)?;
-        let src = if is_color { &layer.base_color } else { &layer.base_normal };
+        let src = if is_color {
+            &layer.base_color
+        } else {
+            &layer.base_normal
+        };
         Some((idx, is_color, texture_source_hash(src)))
     });
 
@@ -217,7 +235,11 @@ fn update_setup_base_texture(ctx: &egui::Context, state: &mut AppState) {
 
     state.setup_base_tex = desired_key.and_then(|(idx, is_color, _)| {
         let layer = state.project.layers.get(idx)?;
-        let src = if is_color { &layer.base_color } else { &layer.base_normal };
+        let src = if is_color {
+            &layer.base_color
+        } else {
+            &layer.base_normal
+        };
         resolve_setup_texture(ctx, src, is_color, state.loaded_mesh.as_deref())
     });
     state.setup_base_key = desired_key;
@@ -486,7 +508,13 @@ fn strip_setup(ui: &mut egui::Ui, state: &mut AppState) {
     let no_text = !ui.ctx().wants_keyboard_input();
     let tools = [
         (GuideTool::Select, egui::Key::Num1, "1", CURSOR, "Select"),
-        (GuideTool::AddDirectional, egui::Key::Num2, "2", COMPASS, "Directional"),
+        (
+            GuideTool::AddDirectional,
+            egui::Key::Num2,
+            "2",
+            COMPASS,
+            "Directional",
+        ),
         (GuideTool::AddRadial, egui::Key::Num3, "3", TARGET, "Radial"),
         (GuideTool::AddVortex, egui::Key::Num4, "4", SPIRAL, "Vortex"),
     ];
@@ -506,14 +534,24 @@ fn strip_setup(ui: &mut egui::Ui, state: &mut AppState) {
     ui.separator();
 
     // Base texture mode: Color / Normal
-    overlay_text_button(ui, "Col", state.setup_map_mode == SetupMapMode::Color, || {
-        state.setup_map_mode = SetupMapMode::Color;
-        state.setup_base_key = None; // force cache refresh
-    });
-    overlay_text_button(ui, "Nrm", state.setup_map_mode == SetupMapMode::Normal, || {
-        state.setup_map_mode = SetupMapMode::Normal;
-        state.setup_base_key = None;
-    });
+    overlay_text_button(
+        ui,
+        "Col",
+        state.setup_map_mode == SetupMapMode::Color,
+        || {
+            state.setup_map_mode = SetupMapMode::Color;
+            state.setup_base_key = None; // force cache refresh
+        },
+    );
+    overlay_text_button(
+        ui,
+        "Nrm",
+        state.setup_map_mode == SetupMapMode::Normal,
+        || {
+            state.setup_map_mode = SetupMapMode::Normal;
+            state.setup_base_key = None;
+        },
+    );
 
     ui.separator();
     strip_overlay_controls(ui, state);
@@ -521,25 +559,31 @@ fn strip_setup(ui: &mut egui::Ui, state: &mut AppState) {
 
 fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 4.0;
-    use egui_phosphor::fill::*;
     use super::state::OrbitTarget;
+    use egui_phosphor::fill::*;
     let no_text = !ui.ctx().wants_keyboard_input();
 
     let targets = [
-        (OrbitTarget::Object, egui::Key::Num1, "1", CAMERA_ROTATE, "Camera"),
+        (
+            OrbitTarget::Object,
+            egui::Key::Num1,
+            "1",
+            CAMERA_ROTATE,
+            "Camera",
+        ),
         (OrbitTarget::Light, egui::Key::Num2, "2", SUN, "Light"),
     ];
     // Effective target reflects temporary override (e.g. middle-click camera)
-    let effective_target = state.mesh_preview.orbit_target_override
+    let effective_target = state
+        .mesh_preview
+        .orbit_target_override
         .unwrap_or(state.mesh_preview.orbit_target);
     for (target, key, num, icon, tooltip) in &targets {
         let pressed = no_text
             && ui
                 .ctx()
                 .input_mut(|i| i.consume_key(egui::Modifiers::NONE, *key));
-        if toolbar_icon_button(ui, effective_target == *target, icon, num, tooltip)
-            || pressed
-        {
+        if toolbar_icon_button(ui, effective_target == *target, icon, num, tooltip) || pressed {
             state.mesh_preview.orbit_target = *target;
             state.mesh_preview.orbit_target_override = None;
         }
@@ -577,22 +621,31 @@ fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
             };
         }
     }
-    overlay_text_button(ui, "Direction", state.mesh_preview.show_direction_field, || {
-        state.mesh_preview.show_direction_field = !state.mesh_preview.show_direction_field;
-    });
+    overlay_text_button(
+        ui,
+        "Direction",
+        state.mesh_preview.show_direction_field,
+        || {
+            state.mesh_preview.show_direction_field = !state.mesh_preview.show_direction_field;
+        },
+    );
 }
 
 // ── Playback bar (Drawing mode) ─────────────────────────────────────
 
 fn draw_playback_bar(ui: &mut egui::Ui, state: &mut AppState) {
-    use egui_phosphor::fill::*;
     use super::state::PlaybackMode;
+    use egui_phosphor::fill::*;
 
     ui.vertical(|ui: &mut egui::Ui| {
         // Row 1: Play/Pause, Stop, Loop mode, progress slider, time label
         ui.horizontal(|ui: &mut egui::Ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            let icon = if state.mesh_preview.playing { PAUSE } else { PLAY };
+            let icon = if state.mesh_preview.playing {
+                PAUSE
+            } else {
+                PLAY
+            };
             if ui.button(egui::RichText::new(icon).size(16.0)).clicked() {
                 state.mesh_preview.playing = !state.mesh_preview.playing;
                 // Reset pingpong direction and re-enable play for Once mode restart
@@ -613,7 +666,8 @@ fn draw_playback_bar(ui: &mut egui::Ui, state: &mut AppState) {
                 PlaybackMode::PingPong => (ARROWS_LEFT_RIGHT, "Ping-Pong"),
                 PlaybackMode::Once => (ARROW_RIGHT, "Once"),
             };
-            let btn = ui.button(egui::RichText::new(mode_icon).size(16.0))
+            let btn = ui
+                .button(egui::RichText::new(mode_icon).size(16.0))
                 .on_hover_text(mode_tip);
             if btn.clicked() {
                 state.mesh_preview.playback_mode = match state.mesh_preview.playback_mode {
@@ -686,8 +740,16 @@ fn draw_playback_bar(ui: &mut egui::Ui, state: &mut AppState) {
                 .selected_text(order_label)
                 .width(90.0)
                 .show_ui(ui, |ui: &mut egui::Ui| {
-                    ui.selectable_value(&mut state.mesh_preview.draw_order, DrawOrder::Sequential, "Sequential");
-                    ui.selectable_value(&mut state.mesh_preview.draw_order, DrawOrder::Random, "Random");
+                    ui.selectable_value(
+                        &mut state.mesh_preview.draw_order,
+                        DrawOrder::Sequential,
+                        "Sequential",
+                    );
+                    ui.selectable_value(
+                        &mut state.mesh_preview.draw_order,
+                        DrawOrder::Random,
+                        "Random",
+                    );
                 });
         });
     });
@@ -698,7 +760,9 @@ fn playback_max_time(state: &AppState) -> f32 {
     let draw = state.mesh_preview.draw_time;
     let gap = state.mesh_preview.gap;
     let chunk = state.mesh_preview.chunk_size.max(1) as f32;
-    let num_groups = (state.mesh_preview.stroke_count as f32 / chunk).ceil().max(1.0);
+    let num_groups = (state.mesh_preview.stroke_count as f32 / chunk)
+        .ceil()
+        .max(1.0);
     // Last group starts at (num_groups-1) * (draw+gap), finishes at + draw
     ((num_groups - 1.0) * (draw + gap) + draw + 0.05).max(0.1)
 }
@@ -816,9 +880,7 @@ fn show_3d_view(
     let view_rect = ui.available_rect_before_wrap();
 
     // Advance time map playback
-    if state.mesh_preview.result_mode == ResultMode::Drawing
-        && state.mesh_preview.playing
-    {
+    if state.mesh_preview.result_mode == ResultMode::Drawing && state.mesh_preview.playing {
         use super::state::PlaybackMode;
         let dt = ui.input(|i| i.unstable_dt).min(0.1);
         let max_t = playback_max_time(state);
@@ -1247,7 +1309,10 @@ fn draw_arrowhead(painter: &egui::Painter, tip: Pos2, dir: glam::Vec2, color: Co
 /// Shows "Updating..." while generation is running, or stale reason if outdated.
 fn draw_stale_badge(painter: &egui::Painter, state: &AppState, rect: Rect) {
     let (label, bg_color) = if state.generation.is_running() {
-        ("Updating...", Color32::from_rgba_unmultiplied(60, 120, 180, 200))
+        (
+            "Updating...",
+            Color32::from_rgba_unmultiplied(60, 120, 180, 200),
+        )
     } else if let Some(reason) = state.stale_reason() {
         (reason, Color32::from_rgba_unmultiplied(180, 140, 30, 200))
     } else {

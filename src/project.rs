@@ -393,8 +393,7 @@ pub fn save_project(
     // output/ — cached generation results as PNG
     if let Some(ref out) = output {
         // output/color.png — sRGB RGBA
-        let color_rgba: Vec<[f32; 4]> =
-            out.color.iter().map(|c| [c.r, c.g, c.b, c.a]).collect();
+        let color_rgba: Vec<[f32; 4]> = out.color.iter().map(|c| [c.r, c.g, c.b, c.a]).collect();
         if let Some(png) = encode_pixels_as_srgb_png(&color_rgba, out.resolution, out.resolution) {
             zip.start_file("output/color.png", options)?;
             zip.write_all(&png)?;
@@ -406,8 +405,7 @@ pub fn save_project(
             .iter()
             .map(|n| [n[0], n[1], n[2], 1.0])
             .collect();
-        if let Some(png) =
-            encode_pixels_as_linear_png(&normal_rgba, out.resolution, out.resolution)
+        if let Some(png) = encode_pixels_as_linear_png(&normal_rgba, out.resolution, out.resolution)
         {
             zip.start_file("output/normal.png", options)?;
             zip.write_all(&png)?;
@@ -623,14 +621,13 @@ fn load_output_maps(archive: &mut ZipArchive<std::fs::File>) -> Option<LoadedOut
         vec![0.0; color.len()]
     };
 
-    let normal_map =
-        if let Some(bytes) = read_bytes_optional(archive, "output/normal.png") {
-            decode_linear_png_bytes(&bytes)
-                .map(|(pixels, _, _)| pixels.into_iter().map(|p| [p[0], p[1], p[2]]).collect())
-                .unwrap_or_else(|_| vec![[0.5, 0.5, 1.0]; color.len()])
-        } else {
-            vec![[0.5, 0.5, 1.0]; color.len()]
-        };
+    let normal_map = if let Some(bytes) = read_bytes_optional(archive, "output/normal.png") {
+        decode_linear_png_bytes(&bytes)
+            .map(|(pixels, _, _)| pixels.into_iter().map(|p| [p[0], p[1], p[2]]).collect())
+            .unwrap_or_else(|_| vec![[0.5, 0.5, 1.0]; color.len()])
+    } else {
+        vec![[0.5, 0.5, 1.0]; color.len()]
+    };
 
     let stroke_time_order =
         if let Some(bytes) = read_bytes_optional(archive, "output/stroke_time_order.png") {
@@ -682,16 +679,12 @@ fn encode_height_png16(height: &[f32], resolution: u32) -> Option<Vec<u8>> {
         .iter()
         .map(|&h| (h.clamp(0.0, 1.0) * 65535.0).round() as u16)
         .collect();
-    let img = image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_vec(
-        resolution, resolution, pixels,
-    )?;
+    let img =
+        image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_vec(resolution, resolution, pixels)?;
     let dyn_img = image::DynamicImage::ImageLuma16(img);
     let mut png = Vec::new();
     dyn_img
-        .write_to(
-            &mut std::io::Cursor::new(&mut png),
-            image::ImageFormat::Png,
-        )
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
         .ok()?;
     Some(png)
 }
@@ -825,10 +818,7 @@ mod tests {
         let result = load_project(&path).unwrap();
 
         assert_eq!(result.project.manifest.version, "1");
-        assert_eq!(
-            result.project.manifest.app_name,
-            "Practical Arcana Painter"
-        );
+        assert_eq!(result.project.manifest.app_name, "Practical Arcana Painter");
         assert_eq!(result.project.layers.len(), 0);
         assert!(result.output.is_none());
     }
@@ -875,8 +865,12 @@ mod tests {
             .collect();
 
         let project = make_project_with_layers();
-        let time_order: Vec<f32> = (0..pixel_count).map(|i| i as f32 / pixel_count as f32).collect();
-        let time_arc: Vec<f32> = (0..pixel_count).map(|i| (i as f32 / pixel_count as f32) * 0.5).collect();
+        let time_order: Vec<f32> = (0..pixel_count)
+            .map(|i| i as f32 / pixel_count as f32)
+            .collect();
+        let time_arc: Vec<f32> = (0..pixel_count)
+            .map(|i| (i as f32 / pixel_count as f32) * 0.5)
+            .collect();
         let output = OutputCache {
             color: &color,
             height: &height,
@@ -899,10 +893,7 @@ mod tests {
 
         // Height uses 16-bit PNG — should be very precise
         for (a, b) in height.iter().zip(loaded.height.iter()) {
-            assert!(
-                (a - b).abs() < 0.001,
-                "height mismatch: {a} vs {b}"
-            );
+            assert!((a - b).abs() < 0.001, "height mismatch: {a} vs {b}");
         }
     }
 

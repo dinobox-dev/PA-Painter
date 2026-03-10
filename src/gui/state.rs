@@ -419,11 +419,8 @@ impl AppState {
             // No generation snapshot yet — auto-preview will handle it
             return None;
         };
-        let current = generation_state_hash(
-            &self.project.layers,
-            &self.project.settings,
-            self.mesh_hash,
-        );
+        let current =
+            generation_state_hash(&self.project.layers, &self.project.settings, self.mesh_hash);
         if saved != current {
             return Some("Outdated");
         }

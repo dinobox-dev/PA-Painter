@@ -19,9 +19,7 @@ use practical_arcana_painter::compositing::{
     fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
 };
 use practical_arcana_painter::output::{blend_normals_udn, ExportFormat};
-use practical_arcana_painter::types::{
-    BaseColorSource, Color, TextureSource, BASE_RESOLUTION,
-};
+use practical_arcana_painter::types::{BaseColorSource, Color, TextureSource, BASE_RESOLUTION};
 use practical_arcana_painter::uv_mask::UvMask;
 
 /// Count unique non-zero order values in a stroke time map (= number of strokes).
@@ -148,10 +146,7 @@ impl PainterApp {
         let cached_normals = self.state.cached_mesh_normals.clone(); // (u32, Arc) clone
 
         // Resolve per-layer base color and normal from TextureSource.
-        let materials: &[_] = mesh
-            .as_ref()
-            .map(|m| m.materials.as_slice())
-            .unwrap_or(&[]);
+        let materials: &[_] = mesh.as_ref().map(|m| m.materials.as_slice()).unwrap_or(&[]);
         let visible_layers: Vec<&practical_arcana_painter::types::Layer> = self
             .state
             .project
@@ -168,7 +163,10 @@ impl PainterApp {
         let layer_base_normals: Vec<_> = visible_layers
             .iter()
             .map(|l| {
-                practical_arcana_painter::compositing::resolve_base_normal(&l.base_normal, materials)
+                practical_arcana_painter::compositing::resolve_base_normal(
+                    &l.base_normal,
+                    materials,
+                )
             })
             .collect();
 
@@ -266,8 +264,7 @@ impl PainterApp {
         ));
 
         // Always update stroke_count from the time data
-        self.state.mesh_preview.stroke_count =
-            count_unique_strokes(&result.stroke_time_order);
+        self.state.mesh_preview.stroke_count = count_unique_strokes(&result.stroke_time_order);
 
         // Upload color, normal, and time textures to 3D preview
         if let Some(ref rs) = self.render_state {
@@ -298,8 +295,11 @@ impl PainterApp {
         if is_preview {
             // Preview: display result but don't update layer cache (preserve full-res cache).
             // Advance to the next progressive resolution step.
-            self.state.status_message =
-                format!("Preview {}px in {:.2}s", result.resolution, result.elapsed.as_secs_f32());
+            self.state.status_message = format!(
+                "Preview {}px in {:.2}s",
+                result.resolution,
+                result.elapsed.as_secs_f32()
+            );
             self.state.generated = Some(result);
 
             // Pop the next step from the progressive queue.
@@ -392,7 +392,9 @@ impl PainterApp {
         let resolution = 512u32;
         let arrow_spacing = 32u32;
         let pixels = practical_arcana_painter::direction_field::render_direction_field_overlay(
-            &all_guides, resolution, arrow_spacing,
+            &all_guides,
+            resolution,
+            arrow_spacing,
         );
         mesh_preview::upload_overlay_texture(render_state, &pixels, resolution);
     }
@@ -400,17 +402,27 @@ impl PainterApp {
     /// Upload base-only textures to the 3D preview (no stroke results).
     /// Composites visible layers' base color and base normal textures.
     fn upload_base_only_to_3d(&self) {
-        let Some(ref rs) = self.render_state else { return };
-        if !self.state.mesh_preview.gpu_ready { return; }
+        let Some(ref rs) = self.render_state else {
+            return;
+        };
+        if !self.state.mesh_preview.gpu_ready {
+            return;
+        }
 
         let settings = &self.state.project.settings;
         let resolution = settings.resolution_preset.resolution();
-        let materials = self.state.loaded_mesh.as_ref()
+        let materials = self
+            .state
+            .loaded_mesh
+            .as_ref()
             .map(|m| m.materials.as_slice())
             .unwrap_or(&[]);
 
         // Collect visible layers sorted by order
-        let mut sorted_layers: Vec<&practical_arcana_painter::types::Layer> = self.state.project.layers
+        let mut sorted_layers: Vec<&practical_arcana_painter::types::Layer> = self
+            .state
+            .project
+            .layers
             .iter()
             .filter(|l| l.visible)
             .collect();
@@ -418,19 +430,23 @@ impl PainterApp {
 
         // Build UV masks
         let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = self.state.loaded_mesh {
-            sorted_layers.iter().map(|layer| {
-                if layer.group_name == "__all__" {
-                    None
-                } else {
-                    mesh.groups.iter()
-                        .find(|g| g.name == layer.group_name)
-                        .map(|group| {
-                            let mut mask = UvMask::from_mesh_group(mesh, group, resolution);
-                            mask.dilate(2);
-                            mask
-                        })
-                }
-            }).collect()
+            sorted_layers
+                .iter()
+                .map(|layer| {
+                    if layer.group_name == "__all__" {
+                        None
+                    } else {
+                        mesh.groups
+                            .iter()
+                            .find(|g| g.name == layer.group_name)
+                            .map(|group| {
+                                let mut mask = UvMask::from_mesh_group(mesh, group, resolution);
+                                mask.dilate(2);
+                                mask
+                            })
+                    }
+                })
+                .collect()
         } else {
             sorted_layers.iter().map(|_| None).collect()
         };
@@ -456,8 +472,12 @@ impl PainterApp {
             let bn = resolve_base_normal(&layer.base_normal, materials);
             if let Some(ref pixels) = bn.pixels {
                 blend_normals_udn(
-                    &mut normal_map, pixels, bn.width, bn.height,
-                    resolution, mask_refs[si],
+                    &mut normal_map,
+                    pixels,
+                    bn.width,
+                    bn.height,
+                    resolution,
+                    mask_refs[si],
                 );
             }
         }
@@ -490,21 +510,33 @@ impl PainterApp {
 
         // Update textures
         self.state.textures.color = Some(textures::color_buffer_to_handle(
-            ctx, &result.color, r, r, "remerge_color",
+            ctx,
+            &result.color,
+            r,
+            r,
+            "remerge_color",
         ));
         self.state.textures.height = Some(textures::height_buffer_to_handle(
-            ctx, &result.height, r, "remerge_height",
+            ctx,
+            &result.height,
+            r,
+            "remerge_height",
         ));
         self.state.textures.normal = Some(textures::normal_map_to_handle(
-            ctx, &result.normal_map, r, "remerge_normal",
+            ctx,
+            &result.normal_map,
+            r,
+            "remerge_normal",
         ));
         self.state.textures.stroke_id = Some(textures::stroke_id_to_handle(
-            ctx, &result.stroke_id, r, "remerge_stroke_id",
+            ctx,
+            &result.stroke_id,
+            r,
+            "remerge_stroke_id",
         ));
 
         // Always update stroke_count from the time data
-        self.state.mesh_preview.stroke_count =
-            count_unique_strokes(&result.stroke_time_order);
+        self.state.mesh_preview.stroke_count = count_unique_strokes(&result.stroke_time_order);
 
         // Upload to 3D preview
         if let Some(ref rs) = self.render_state {
@@ -674,10 +706,7 @@ impl PainterApp {
                 ui.add_space(4.0);
                 ui.vertical_centered(|ui: &mut egui::Ui| {
                     if ui
-                        .add(
-                            egui::Button::new("Close")
-                                .min_size(egui::Vec2::new(80.0, 28.0)),
-                        )
+                        .add(egui::Button::new("Close").min_size(egui::Vec2::new(80.0, 28.0)))
                         .clicked()
                     {
                         open = false;
@@ -852,11 +881,7 @@ impl PainterApp {
                                     );
                                 }
 
-                                let enabled = popup
-                                    .layer_enabled
-                                    .get(i)
-                                    .copied()
-                                    .unwrap_or(true);
+                                let enabled = popup.layer_enabled.get(i).copied().unwrap_or(true);
                                 let text_color = if enabled {
                                     ui.visuals().text_color()
                                 } else {
@@ -923,19 +948,13 @@ impl PainterApp {
                         let pad = ((ui.available_width() - total) / 2.0).max(0.0);
                         ui.add_space(pad);
                         if ui
-                            .add(
-                                egui::Button::new("  OK  ")
-                                    .min_size(egui::Vec2::new(btn_w, 28.0)),
-                            )
+                            .add(egui::Button::new("  OK  ").min_size(egui::Vec2::new(btn_w, 28.0)))
                             .clicked()
                         {
                             apply_popup = true;
                         }
                         if ui
-                            .add(
-                                egui::Button::new("Cancel")
-                                    .min_size(egui::Vec2::new(btn_w, 28.0)),
-                            )
+                            .add(egui::Button::new("Cancel").min_size(egui::Vec2::new(btn_w, 28.0)))
                             .clicked()
                         {
                             dismiss_popup = true;
@@ -1110,10 +1129,14 @@ impl PainterApp {
                     if self.state.mesh_preview.gpu_ready {
                         if let Some(ref gen) = self.state.generated {
                             mesh_preview::upload_color_texture(
-                                rs, &gen.color, gen.resolution as usize,
+                                rs,
+                                &gen.color,
+                                gen.resolution as usize,
                             );
                             mesh_preview::upload_normal_texture(
-                                rs, &gen.normal_map, gen.resolution as usize,
+                                rs,
+                                &gen.normal_map,
+                                gen.resolution as usize,
                             );
                             let sc = mesh_preview::upload_time_texture(
                                 rs,
@@ -1247,9 +1270,7 @@ impl PainterApp {
                                     None
                                 },
                             };
-                            self.state
-                                .path_overlay
-                                .set_pending(selected, layer, seed);
+                            self.state.path_overlay.set_pending(selected, layer, seed);
                             self.state.path_worker.start(input);
                         }
                     }
@@ -1562,8 +1583,7 @@ fn source_label_with_chip(
             ];
             ui.spacing_mut().item_spacing.x = 4.0;
             let chip_size = egui::vec2(14.0, 14.0);
-            let (rect, _) =
-                ui.allocate_exact_size(chip_size, egui::Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(chip_size, egui::Sense::hover());
             ui.painter().rect_filled(
                 rect,
                 2.0,

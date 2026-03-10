@@ -11,9 +11,9 @@ use glam::Vec2;
 
 use crate::direction_field::DirectionField;
 use crate::math::rotate_vec2;
-use crate::object_normal::MeshNormalData;
 #[cfg(test)]
 use crate::object_normal::sample_object_normal;
+use crate::object_normal::MeshNormalData;
 use crate::rng::SeededRng;
 use crate::stretch_map::StretchMap;
 use crate::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
@@ -349,7 +349,15 @@ pub fn generate_paths(
     mask: Option<&UvMask>,
     stretch_map: Option<&StretchMap>,
 ) -> Vec<StrokePath> {
-    generate_paths_cancellable(layer, layer_index, color_tex, normal_data, mask, stretch_map, None)
+    generate_paths_cancellable(
+        layer,
+        layer_index,
+        color_tex,
+        normal_data,
+        mask,
+        stretch_map,
+        None,
+    )
 }
 
 /// Like [`generate_paths`] but accepts an optional cancellation token.
@@ -391,7 +399,8 @@ pub fn generate_paths_cancellable(
         (Vec2::splat(-margin), Vec2::splat(1.0 + margin))
     };
 
-    let seeds = generate_seeds_poisson_in(&scaled, resolution, seed_lo, seed_hi, stretch_map, cancel);
+    let seeds =
+        generate_seeds_poisson_in(&scaled, resolution, seed_lo, seed_hi, stretch_map, cancel);
     if is_cancelled(cancel) {
         return Vec::new();
     }
@@ -500,7 +509,8 @@ mod tests {
     #[test]
     fn seed_poisson_coverage() {
         let layer = make_layer();
-        let seeds = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
+        let seeds =
+            generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
         // Poisson disk should produce a reasonable number of seeds
         assert!(
             seeds.len() > 50 && seeds.len() < 1000,
@@ -512,7 +522,8 @@ mod tests {
     #[test]
     fn seeds_poisson_within_bounds() {
         let layer = make_layer();
-        let seeds = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
+        let seeds =
+            generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
         assert!(!seeds.is_empty());
         for seed in &seeds {
             assert!(
@@ -527,8 +538,10 @@ mod tests {
     #[test]
     fn seed_poisson_determinism() {
         let layer = make_layer();
-        let seeds1 = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
-        let seeds2 = generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
+        let seeds1 =
+            generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
+        let seeds2 =
+            generate_seeds_poisson_in(&layer.params, 512, Vec2::ZERO, Vec2::ONE, None, None);
         assert_eq!(seeds1.len(), seeds2.len());
         for (a, b) in seeds1.iter().zip(seeds2.iter()) {
             assert_eq!(a.x, b.x);

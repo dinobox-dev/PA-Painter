@@ -574,7 +574,6 @@ pub struct PaintValues {
     /// Paint viscosity (0.0–1.0). See [`StrokeParams::viscosity`].
     #[serde(default)]
     pub viscosity: f32,
-
 }
 
 impl Default for PaintValues {
@@ -720,15 +719,13 @@ impl Layer {
         p.max_stroke_length.to_bits().hash(&mut hasher);
         p.angle_variation.to_bits().hash(&mut hasher);
         p.max_turn_angle.to_bits().hash(&mut hasher);
-        p.color_break_threshold.map(|v| v.to_bits()).hash(&mut hasher);
+        p.color_break_threshold
+            .map(|v| v.to_bits())
+            .hash(&mut hasher);
         p.overlap_ratio.map(|v| v.to_bits()).hash(&mut hasher);
         p.overlap_dist_factor.map(|v| v.to_bits()).hash(&mut hasher);
         // Non-PaintValues path-affecting fields
-        if let Ok(bytes) = serde_json::to_vec(&(
-            &self.guides,
-            &self.group_name,
-            &self.base_color,
-        )) {
+        if let Ok(bytes) = serde_json::to_vec(&(&self.guides, &self.group_name, &self.base_color)) {
             bytes.hash(&mut hasher);
         }
         self.seed.hash(&mut hasher);
@@ -795,7 +792,6 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: default_layout.color_variation,
                         viscosity: 0.0,
-
                     },
                 },
                 PaintPreset {
@@ -815,7 +811,6 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.1,
                         viscosity: 0.0,
-
                     },
                 },
                 PaintPreset {
@@ -835,7 +830,6 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.15,
                         viscosity: 0.0,
-
                     },
                 },
                 PaintPreset {
@@ -855,7 +849,6 @@ impl PresetLibrary {
                         overlap_dist_factor: Some(0.2),
                         color_variation: 0.08,
                         viscosity: 0.4,
-
                     },
                 },
                 PaintPreset {
@@ -875,7 +868,6 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.1,
                         viscosity: 0.0,
-
                     },
                 },
                 PaintPreset {
@@ -921,7 +913,6 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.1,
                         viscosity: 0.0,
-
                     },
                 },
                 PaintPreset {
@@ -941,7 +932,6 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.1,
                         viscosity: 0.0,
-
                     },
                 },
                 PaintPreset {
@@ -961,7 +951,6 @@ impl PresetLibrary {
                         overlap_dist_factor: None,
                         color_variation: 0.15,
                         viscosity: 0.0,
-
                     },
                 },
             ],
@@ -1302,7 +1291,10 @@ mod tests {
             width: 1,
             height: 1,
         };
-        assert_ne!(t1, t2, "Different pixel data should produce different content_hash");
+        assert_ne!(
+            t1, t2,
+            "Different pixel data should produce different content_hash"
+        );
 
         let px3 = vec![[1.0; 4]];
         let t3 = EmbeddedTexture {
@@ -1312,7 +1304,10 @@ mod tests {
             width: 1,
             height: 1,
         };
-        assert_eq!(t1, t3, "Same content_hash + dims should be equal regardless of label");
+        assert_eq!(
+            t1, t3,
+            "Same content_hash + dims should be equal regardless of label"
+        );
     }
 
     #[test]

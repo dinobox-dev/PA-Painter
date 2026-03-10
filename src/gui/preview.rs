@@ -158,12 +158,7 @@ impl PathOverlayCache {
 
     /// Check if the cache for the given layer index is stale.
     /// Returns false if a worker is already computing with matching parameters.
-    pub fn is_stale_for_layer(
-        &self,
-        layer_index: usize,
-        layer: &Layer,
-        seed: u32,
-    ) -> bool {
+    pub fn is_stale_for_layer(&self, layer_index: usize, layer: &Layer, seed: u32) -> bool {
         // If the completed cache already matches, not stale.
         let cache_hit = self
             .caches

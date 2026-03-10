@@ -701,8 +701,7 @@ mod tests {
             generate_normal_map, generate_normal_map_depicted_form, normalize_height_map,
         };
         use crate::types::{
-            Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings, PaintLayer,
-            StrokeParams,
+            Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings, PaintLayer, StrokeParams,
         };
 
         let mesh = make_cube_sphere(24, 0.5);

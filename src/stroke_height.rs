@@ -357,5 +357,4 @@ mod tests {
             max_c - min_c
         );
     }
-
 }

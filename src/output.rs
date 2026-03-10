@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::asset_io::linear_to_srgb;
 use crate::compositing::{GlobalMaps, LayerMaps};
+use crate::math::smoothstep;
 use crate::object_normal::MeshNormalData;
 use crate::stroke_color::hsv_to_rgb;
-use crate::math::smoothstep;
 use crate::types::{BackgroundMode, Color, HsvColor, NormalMode, OutputSettings};
 use crate::uv_mask::UvMask;
 
@@ -421,7 +421,13 @@ pub fn export_stroke_time_png(
         })
         .collect();
 
-    image::save_buffer(path, &pixels, resolution, resolution, image::ColorType::Rgb8)?;
+    image::save_buffer(
+        path,
+        &pixels,
+        resolution,
+        resolution,
+        image::ColorType::Rgb8,
+    )?;
     Ok(())
 }
 
@@ -601,14 +607,13 @@ pub fn export_layer_maps(
                 res,
                 normal_strength,
             ),
-            _ => generate_normal_map(
-                &layer.gradient_x,
-                &layer.gradient_y,
-                res,
-                normal_strength,
-            ),
+            _ => generate_normal_map(&layer.gradient_x, &layer.gradient_y, res, normal_strength),
         };
-        export_normal_png(&normals, res, &output_dir.join(format!("{prefix}_normal.png")))?;
+        export_normal_png(
+            &normals,
+            res,
+            &output_dir.join(format!("{prefix}_normal.png")),
+        )?;
         count += 1;
     }
 

@@ -106,7 +106,10 @@ pub fn compute_stretch_map(mesh: &LoadedMesh, resolution: u32) -> StretchMap {
     };
 
     let inv_median = if median > 1e-10 { 1.0 / median } else { 1.0 };
-    let data: Vec<f32> = data.iter().map(|&v| if v > 0.0 { v * inv_median } else { 0.0 }).collect();
+    let data: Vec<f32> = data
+        .iter()
+        .map(|&v| if v > 0.0 { v * inv_median } else { 0.0 })
+        .collect();
 
     StretchMap { data, resolution }
 }

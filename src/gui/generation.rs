@@ -10,19 +10,19 @@ use practical_arcana_painter::compositing::{
     compute_height_gradients, fill_base_color_region, merge_layers, render_layer, GlobalMaps,
     LayerMaps,
 };
+use practical_arcana_painter::compositing::{resolve_base_color, resolve_base_normal};
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
-use practical_arcana_painter::stretch_map::{compute_stretch_map, StretchMap};
 use practical_arcana_painter::output::{
     blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
 };
 use practical_arcana_painter::path_placement::generate_paths_cancellable;
+use practical_arcana_painter::stretch_map::{compute_stretch_map, StretchMap};
 use practical_arcana_painter::stroke_color::ColorTextureRef;
 use practical_arcana_painter::types::{
     BackgroundMode, BaseColorSource, Color, Layer, LayerBaseColor, LayerBaseNormal,
     LayerCompositeSettings, NormalMode, OutputSettings, PaintLayer, StrokePath,
 };
 use practical_arcana_painter::uv_mask::UvMask;
-use practical_arcana_painter::compositing::{resolve_base_color, resolve_base_normal};
 
 /// All data needed for a generation run. Fully owned, Send + 'static.
 pub struct GenInput {
@@ -311,7 +311,11 @@ fn run_pipeline(
             if let Some((_, maps)) = input.cached_layers.iter().find(|(h, _)| *h == render_h) {
                 return LayerCacheState::RenderHit(Arc::clone(maps));
             }
-            let path_h = input.layer_path_hashes.get(layer_index).copied().unwrap_or(0);
+            let path_h = input
+                .layer_path_hashes
+                .get(layer_index)
+                .copied()
+                .unwrap_or(0);
             if let Some((_, paths)) = input.cached_paths.iter().find(|(h, _)| *h == path_h) {
                 return LayerCacheState::PathHit(Arc::clone(paths));
             }
@@ -388,7 +392,11 @@ fn run_pipeline(
     let mut all_paths: Vec<(u64, Arc<Vec<StrokePath>>)> = Vec::with_capacity(sorted.len());
     let mut fresh_path_idx = 0;
     for (sorted_idx, &(layer_index, _)) in sorted.iter().enumerate() {
-        let path_hash = input.layer_path_hashes.get(layer_index).copied().unwrap_or(0);
+        let path_hash = input
+            .layer_path_hashes
+            .get(layer_index)
+            .copied()
+            .unwrap_or(0);
         match &cache_states[sorted_idx] {
             LayerCacheState::RenderHit(maps) => {
                 result_maps.push(Arc::clone(maps));

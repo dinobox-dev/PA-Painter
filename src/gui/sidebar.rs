@@ -189,10 +189,8 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
             let info_label_w = 64.0;
 
             let info_row = |ui: &mut egui::Ui, label: &str, value: &str| {
-                let (rect, _) = ui.allocate_exact_size(
-                    egui::Vec2::new(row_w, 14.0),
-                    egui::Sense::hover(),
-                );
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::Vec2::new(row_w, 14.0), egui::Sense::hover());
                 if ui.is_rect_visible(rect) {
                     let p = ui.painter();
                     p.text(
@@ -216,8 +214,16 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
             info_row(ui, "Triangles", &fmt_thousands(mesh.indices.len() / 3));
             info_row(ui, "Groups", &mesh.groups.len().to_string());
 
-            let n_textures = mesh.materials.iter().filter(|m| m.base_color_texture.is_some()).count();
-            let n_normals = mesh.materials.iter().filter(|m| m.normal_texture.is_some()).count();
+            let n_textures = mesh
+                .materials
+                .iter()
+                .filter(|m| m.base_color_texture.is_some())
+                .count();
+            let n_normals = mesh
+                .materials
+                .iter()
+                .filter(|m| m.normal_texture.is_some())
+                .count();
             if n_textures > 0 || n_normals > 0 {
                 info_row(ui, "Textures", &n_textures.to_string());
                 info_row(ui, "Normals", &n_normals.to_string());
@@ -346,18 +352,21 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
                 }
                 if resp.on_hover_text("Add Layer").clicked() && has_mesh {
                     let next_seed = state.project.layers.len() as u32;
-                    state.project.layers.insert(0, Layer {
-                        name: "__all__".to_string(),
-                        visible: true,
-                        group_name: "__all__".to_string(),
-                        order: 0, // reassigned below
-                        paint: PaintValues::default(),
-                        guides: vec![],
-                        base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
-                        base_normal: TextureSource::None,
-                        dry: 1.0,
-                        seed: next_seed,
-                    });
+                    state.project.layers.insert(
+                        0,
+                        Layer {
+                            name: "__all__".to_string(),
+                            visible: true,
+                            group_name: "__all__".to_string(),
+                            order: 0, // reassigned below
+                            paint: PaintValues::default(),
+                            guides: vec![],
+                            base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+                            base_normal: TextureSource::None,
+                            dry: 1.0,
+                            seed: next_seed,
+                        },
+                    );
                     // Reassign: index 0 (top of UI) = highest order (painted last = on top)
                     let n = state.project.layers.len() as i32;
                     for (i, layer) in state.project.layers.iter_mut().enumerate() {
@@ -593,26 +602,23 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         ui.set_width(total_width);
 
-        let export_btn = egui::Button::new("Export")
-            .min_size(btn_size)
-            .truncate();
+        let export_btn = egui::Button::new("Export").min_size(btn_size).truncate();
         let export_resp = ui.add_enabled(has_result, export_btn);
         if export_resp.clicked() {
             state.pending_export = true;
         }
 
         if stale {
-            export_resp.on_hover_text("Result is outdated — parameters changed since last generation");
+            export_resp
+                .on_hover_text("Result is outdated — parameters changed since last generation");
         }
 
         // ⚙ gear button
-        let gear_btn = egui::Button::new("\u{2699}")
-            .min_size(egui::Vec2::new(gear_w, 32.0));
+        let gear_btn = egui::Button::new("\u{2699}").min_size(egui::Vec2::new(gear_w, 32.0));
         if ui.add(gear_btn).clicked() {
             state.show_export_settings = !state.show_export_settings;
         }
     });
-
 }
 
 pub fn build_group_names(state: &AppState) -> Vec<String> {

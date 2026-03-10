@@ -349,10 +349,7 @@ pub fn render_direction_field_overlay(
     while cy < resolution {
         let mut cx = offset;
         while cx < resolution {
-            let uv = Vec2::new(
-                (cx as f32 + 0.5) * inv_res,
-                (cy as f32 + 0.5) * inv_res,
-            );
+            let uv = Vec2::new((cx as f32 + 0.5) * inv_res, (cy as f32 + 0.5) * inv_res);
             let dir = direction_at(uv, guides);
             if dir.length_squared() < 1e-6 {
                 cx += arrow_spacing;
@@ -383,14 +380,7 @@ pub fn render_direction_field_overlay(
 }
 
 /// Draw an anti-aliased line into an RGBA pixel buffer using distance-based alpha.
-fn draw_line_aa(
-    pixels: &mut [u8],
-    res: usize,
-    p0: Vec2,
-    p1: Vec2,
-    width: f32,
-    color: [u8; 4],
-) {
+fn draw_line_aa(pixels: &mut [u8], res: usize, p0: Vec2, p1: Vec2, width: f32, color: [u8; 4]) {
     let dx = p1.x - p0.x;
     let dy = p1.y - p0.y;
     let len = (dx * dx + dy * dy).sqrt();

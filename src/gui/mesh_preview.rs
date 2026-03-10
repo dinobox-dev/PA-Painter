@@ -159,8 +159,7 @@ impl MeshPreviewState {
         // Normalize: translate mesh center to origin, then scale so diagonal = 2.0
         let scale = if extent > 1e-6 { 2.0 / extent } else { 1.0 };
         self.model_transform =
-            Mat4::from_scale(Vec3::splat(scale))
-                * Mat4::from_translation(-mesh_center);
+            Mat4::from_scale(Vec3::splat(scale)) * Mat4::from_translation(-mesh_center);
 
         // Camera orbits the origin at a fixed distance (works for any model now)
         self.center = Vec3::ZERO;
@@ -396,10 +395,7 @@ fn create_placeholder_normal_texture(device: &wgpu::Device, queue: &wgpu::Queue)
 }
 
 /// 1×1 fully transparent overlay (no effect on final color).
-fn create_placeholder_overlay_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> wgpu::Texture {
+fn create_placeholder_overlay_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
     let size = wgpu::Extent3d {
         width: 1,
         height: 1,
@@ -433,10 +429,7 @@ fn create_placeholder_overlay_texture(
     texture
 }
 
-fn create_placeholder_time_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> wgpu::Texture {
+fn create_placeholder_time_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
     let size = wgpu::Extent3d {
         width: 1,
         height: 1,
@@ -855,8 +848,12 @@ pub fn upload_color_texture(
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
         res.texture_bind_group = rebuild_texture_bind_group(
-            device, &res.texture_bind_group_layout, &res.sampler,
-            &view, &res.normal_texture_view, &res.overlay_texture_view,
+            device,
+            &res.texture_bind_group_layout,
+            &res.sampler,
+            &view,
+            &res.normal_texture_view,
+            &res.overlay_texture_view,
             &res.time_texture_view,
         );
         res.color_texture = texture;
@@ -925,8 +922,12 @@ pub fn upload_normal_texture(
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
         res.texture_bind_group = rebuild_texture_bind_group(
-            device, &res.texture_bind_group_layout, &res.sampler,
-            &res.color_texture_view, &view, &res.overlay_texture_view,
+            device,
+            &res.texture_bind_group_layout,
+            &res.sampler,
+            &res.color_texture_view,
+            &view,
+            &res.overlay_texture_view,
             &res.time_texture_view,
         );
         res.normal_texture = texture;
@@ -982,8 +983,12 @@ pub fn upload_overlay_texture(
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
         res.texture_bind_group = rebuild_texture_bind_group(
-            device, &res.texture_bind_group_layout, &res.sampler,
-            &res.color_texture_view, &res.normal_texture_view, &view,
+            device,
+            &res.texture_bind_group_layout,
+            &res.sampler,
+            &res.color_texture_view,
+            &res.normal_texture_view,
+            &view,
             &res.time_texture_view,
         );
         res.overlay_texture = texture;
@@ -1002,8 +1007,12 @@ pub fn clear_overlay_texture(render_state: &egui_wgpu::RenderState) {
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
         res.texture_bind_group = rebuild_texture_bind_group(
-            device, &res.texture_bind_group_layout, &res.sampler,
-            &res.color_texture_view, &res.normal_texture_view, &view,
+            device,
+            &res.texture_bind_group_layout,
+            &res.sampler,
+            &res.color_texture_view,
+            &res.normal_texture_view,
+            &view,
             &res.time_texture_view,
         );
         res.overlay_texture = texture;
@@ -1132,8 +1141,12 @@ pub fn upload_time_texture(
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
         res.texture_bind_group = rebuild_texture_bind_group(
-            device, &res.texture_bind_group_layout, &res.sampler,
-            &res.color_texture_view, &res.normal_texture_view, &res.overlay_texture_view,
+            device,
+            &res.texture_bind_group_layout,
+            &res.sampler,
+            &res.color_texture_view,
+            &res.normal_texture_view,
+            &res.overlay_texture_view,
             &view,
         );
         res.time_texture = texture;
@@ -1206,7 +1219,9 @@ pub fn show(
     }
 
     // Resolve effective orbit target (override takes precedence)
-    let effective_target = state.mesh_preview.orbit_target_override
+    let effective_target = state
+        .mesh_preview
+        .orbit_target_override
         .unwrap_or(state.mesh_preview.orbit_target);
 
     // Primary drag: use effective target; middle drag: always camera orbit
@@ -1226,8 +1241,7 @@ pub fn show(
                     -std::f32::consts::FRAC_PI_2 + 0.01,
                     std::f32::consts::FRAC_PI_2 - 0.01,
                 );
-                state.mesh_preview.yaw =
-                    state.mesh_preview.yaw.rem_euclid(std::f32::consts::TAU);
+                state.mesh_preview.yaw = state.mesh_preview.yaw.rem_euclid(std::f32::consts::TAU);
             }
             super::state::OrbitTarget::Light => {
                 state.mesh_preview.light_yaw -= delta.x * 0.01;
@@ -1236,8 +1250,10 @@ pub fn show(
                     -std::f32::consts::FRAC_PI_2 + 0.01,
                     std::f32::consts::FRAC_PI_2 - 0.01,
                 );
-                state.mesh_preview.light_yaw =
-                    state.mesh_preview.light_yaw.rem_euclid(std::f32::consts::TAU);
+                state.mesh_preview.light_yaw = state
+                    .mesh_preview
+                    .light_yaw
+                    .rem_euclid(std::f32::consts::TAU);
             }
         }
     }
@@ -1263,11 +1279,7 @@ pub fn show(
     // Light direction from independent spherical coordinates
     let ly = state.mesh_preview.light_yaw;
     let lp = state.mesh_preview.light_pitch;
-    let light_dir = Vec3::new(
-        ly.cos() * lp.cos(),
-        lp.sin(),
-        ly.sin() * lp.cos(),
-    );
+    let light_dir = Vec3::new(ly.cos() * lp.cos(), lp.sin(), ly.sin() * lp.cos());
 
     let drawing = state.mesh_preview.result_mode == super::state::ResultMode::Drawing;
     let uniforms = Uniforms {
@@ -1280,7 +1292,9 @@ pub fn show(
         draw_time: state.mesh_preview.draw_time,
         num_groups: {
             let chunk = state.mesh_preview.chunk_size.max(1) as f32;
-            (state.mesh_preview.stroke_count as f32 / chunk).ceil().max(1.0)
+            (state.mesh_preview.stroke_count as f32 / chunk)
+                .ceil()
+                .max(1.0)
         },
         gap: state.mesh_preview.gap,
         _pad: [0.0; 3],
@@ -1397,5 +1411,4 @@ pub fn show(
             egui::Color32::WHITE,
         );
     }
-
 }

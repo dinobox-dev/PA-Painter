@@ -7,10 +7,9 @@ use practical_arcana_painter::asset_io::{
 };
 use practical_arcana_painter::glb_export;
 use practical_arcana_painter::output::{
-    export_color_png, export_height_png, export_normal_png, export_stroke_id_png,
-    export_stroke_time_png, normalize_height_map, ExportFormat,
-    export_color_exr, export_height_exr, export_stroke_time_exr,
-    export_layer_maps, export_manifest, LayerManifestEntry,
+    export_color_exr, export_color_png, export_height_exr, export_height_png, export_layer_maps,
+    export_manifest, export_normal_png, export_stroke_id_png, export_stroke_time_exr,
+    export_stroke_time_png, normalize_height_map, ExportFormat, LayerManifestEntry,
 };
 use practical_arcana_painter::project::{
     load_project, save_project, utc_now_iso8601, OutputCache, Project,
@@ -156,16 +155,29 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                 // Create texture handles so UV View displays the maps
                 let gen = state.generated.as_ref().unwrap();
                 state.textures.color = Some(textures::color_buffer_to_handle(
-                    ctx, &gen.color, r, r, "loaded_color",
+                    ctx,
+                    &gen.color,
+                    r,
+                    r,
+                    "loaded_color",
                 ));
                 state.textures.height = Some(textures::height_buffer_to_handle(
-                    ctx, &gen.height, r, "loaded_height",
+                    ctx,
+                    &gen.height,
+                    r,
+                    "loaded_height",
                 ));
                 state.textures.normal = Some(textures::normal_map_to_handle(
-                    ctx, &gen.normal_map, r, "loaded_normal",
+                    ctx,
+                    &gen.normal_map,
+                    r,
+                    "loaded_normal",
                 ));
                 state.textures.stroke_id = Some(textures::stroke_id_to_handle(
-                    ctx, &gen.stroke_id, r, "loaded_stroke_id",
+                    ctx,
+                    &gen.stroke_id,
+                    r,
+                    "loaded_stroke_id",
                 ));
             } else {
                 state.generated = None;
@@ -483,9 +495,7 @@ fn confirm_overwrite(dir: &Path, planned_files: &[String]) -> bool {
         .set_title("Overwrite existing files?")
         .set_description(format!(
             "{conflicts} file(s) will be overwritten in \"{}\".",
-            dir.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("folder"),
+            dir.file_name().and_then(|n| n.to_str()).unwrap_or("folder"),
         ))
         .set_buttons(rfd::MessageButtons::OkCancel)
         .show()
@@ -796,9 +806,8 @@ fn auto_map_mtl(mat: &MeshMaterialInfo) -> (TextureSource, TextureSource, bool) 
     } else {
         TextureSource::None
     };
-    let is_default = !mat.has_explicit_color
-        && mat.base_color_texture.is_none()
-        && mat.normal_texture.is_none();
+    let is_default =
+        !mat.has_explicit_color && mat.base_color_texture.is_none() && mat.normal_texture.is_none();
     (color, normal, is_default)
 }
 
@@ -870,7 +879,10 @@ fn build_mesh_load_popup(
     let mappings = if !mesh.materials.is_empty() {
         build_mappings(&layer_names, &mesh.materials, is_glb)
     } else {
-        layer_names.iter().map(|n| default_layer_mapping(n)).collect()
+        layer_names
+            .iter()
+            .map(|n| default_layer_mapping(n))
+            .collect()
     };
 
     let mappings_no_mtl = layer_names
@@ -884,8 +896,16 @@ fn build_mesh_load_popup(
         vertices: mesh.positions.len(),
         triangles: mesh.indices.len() / 3,
         groups: mesh.groups.len(),
-        n_textures: mesh.materials.iter().filter(|m| m.base_color_texture.is_some()).count(),
-        n_normals: mesh.materials.iter().filter(|m| m.normal_texture.is_some()).count(),
+        n_textures: mesh
+            .materials
+            .iter()
+            .filter(|m| m.base_color_texture.is_some())
+            .count(),
+        n_normals: mesh
+            .materials
+            .iter()
+            .filter(|m| m.normal_texture.is_some())
+            .count(),
         has_mtl,
         use_mtl: has_mtl,
         mappings,
@@ -1006,14 +1026,21 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
             if !popup.layer_enabled.get(i).copied().unwrap_or(true) {
                 continue;
             }
-            if let Some(layer) = state.project.layers.iter_mut().find(|l| l.group_name == lm.name) {
+            if let Some(layer) = state
+                .project
+                .layers
+                .iter_mut()
+                .find(|l| l.group_name == lm.name)
+            {
                 if matches!(layer.base_color, TextureSource::Solid(c) if (c[0] - 0.5).abs() < 0.01 && (c[1] - 0.5).abs() < 0.01 && (c[2] - 0.5).abs() < 0.01)
                     || matches!(layer.base_color, TextureSource::MeshMaterial(_))
                 {
                     layer.base_color = lm.base_color.clone();
                 }
-                if matches!(layer.base_normal, TextureSource::None | TextureSource::MeshMaterial(_))
-                {
+                if matches!(
+                    layer.base_normal,
+                    TextureSource::None | TextureSource::MeshMaterial(_)
+                ) {
                     layer.base_normal = lm.base_normal.clone();
                 }
             }
@@ -1075,4 +1102,3 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
         };
     }
 }
-

@@ -986,8 +986,8 @@ fn layer_material<'a>(
 /// Color source picker: [Mesh][File][Solid] + context UI.
 fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
     let group_name = state.project.layers[layer_idx].group_name.clone();
-    let has_color_textures = layer_material(state, &group_name)
-        .is_some_and(|mat| mat.base_color_texture.is_some());
+    let has_color_textures =
+        layer_material(state, &group_name).is_some_and(|mat| mat.base_color_texture.is_some());
 
     let mode = current_mode(&state.project.layers[layer_idx].base_color, true);
 
@@ -1036,8 +1036,7 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
                 state.project.layers[layer_idx].base_color,
                 TextureSource::Solid(_) | TextureSource::None
             ) {
-                state.project.layers[layer_idx].base_color =
-                    TextureSource::Solid([0.5, 0.5, 0.5]);
+                state.project.layers[layer_idx].base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
             }
         }
 
@@ -1066,8 +1065,7 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
             }
             TextureSource::None => {
                 // Shouldn't happen for color — treat as solid gray
-                state.project.layers[layer_idx].base_color =
-                    TextureSource::Solid([0.5, 0.5, 0.5]);
+                state.project.layers[layer_idx].base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
             }
         }
     });
@@ -1084,8 +1082,8 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
 /// Normal source picker: [Mesh][File][∅ None] + context UI.
 fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
     let group_name = state.project.layers[layer_idx].group_name.clone();
-    let has_normal_textures = layer_material(state, &group_name)
-        .is_some_and(|mat| mat.normal_texture.is_some());
+    let has_normal_textures =
+        layer_material(state, &group_name).is_some_and(|mat| mat.normal_texture.is_some());
 
     let old_normal = state.project.layers[layer_idx].base_normal.clone();
     let mode = current_mode(&state.project.layers[layer_idx].base_normal, false);

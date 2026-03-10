@@ -443,9 +443,11 @@ pub fn composite_stroke(
 
                 // Per-pixel normal clamp: skip this pixel if its mesh normal
                 // deviates too far from the stroke's reference face normal.
-                if let (Some(threshold), Some(nd), Some(sn)) =
-                    (appearance.normal_break_threshold, normal_data, stroke_normal)
-                {
+                if let (Some(threshold), Some(nd), Some(sn)) = (
+                    appearance.normal_break_threshold,
+                    normal_data,
+                    stroke_normal,
+                ) {
                     let uv = Vec2::new((gx as f32 + 0.5) / res_f, (gy as f32 + 0.5) / res_f);
                     if let Some(pixel_n) = try_sample_object_normal(nd, uv) {
                         let sn_vec = glam::Vec3::new(sn[0], sn[1], sn[2]);
@@ -468,13 +470,8 @@ pub fn composite_stroke(
                 // Paint load and object normal: winner-takes-all by height.
                 if prev_h <= 0.0 || h >= prev_h {
                     if !global.paint_load.is_empty() {
-                        let r = bilinear_sample(
-                            &local_height.remaining,
-                            local_w,
-                            local_h,
-                            lx_f,
-                            ly_f,
-                        );
+                        let r =
+                            bilinear_sample(&local_height.remaining, local_w, local_h, lx_f, ly_f);
                         global.paint_load[idx] = r;
                     }
 
@@ -746,7 +743,11 @@ pub fn compute_height_gradients(global: &mut GlobalMaps) {
             // Sample with boundary replacement: unpainted neighbours → centre
             let s = |sy: usize, sx: usize| {
                 let v = h[sy * res + sx];
-                if v <= 0.0 { c } else { v }
+                if v <= 0.0 {
+                    c
+                } else {
+                    v
+                }
             };
 
             let tl = s(yl, xl);
@@ -795,7 +796,14 @@ pub fn composite_layer(
             width: base_color.tex_width,
             height: base_color.tex_height,
         });
-        paths_owned = generate_paths(layer, layer_index, tex_ref.as_ref(), normal_data, mask, stretch_map);
+        paths_owned = generate_paths(
+            layer,
+            layer_index,
+            tex_ref.as_ref(),
+            normal_data,
+            mask,
+            stretch_map,
+        );
         &paths_owned
     };
 
@@ -867,12 +875,7 @@ pub fn composite_layer(
             };
             let stroke_length_px = (arc_len * resolution as f32).ceil() as usize;
             let jittered = jitter_brush_profile(&brush_profile, scaled.seed + i as u32, 0.15);
-            generate_stroke_height(
-                &jittered,
-                stroke_length_px,
-                &scaled,
-                scaled.seed + i as u32,
-            )
+            generate_stroke_height(&jittered, stroke_length_px, &scaled, scaled.seed + i as u32)
         })
         .collect();
 
@@ -1037,13 +1040,11 @@ pub fn merge_layers(
                 above_color
             };
 
-            let opacity =
-                smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h_above) * layer_opacity;
+            let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h_above) * layer_opacity;
 
             if transparent {
                 if global.stroke_id[idx] == 0 {
-                    global.color[idx] =
-                        Color::new(blended.r, blended.g, blended.b, opacity);
+                    global.color[idx] = Color::new(blended.r, blended.g, blended.b, opacity);
                 } else {
                     let prev = global.color[idx];
                     global.color[idx] = Color::new(
@@ -1506,15 +1507,7 @@ mod tests {
             &[],
             None,
         );
-        let maps2 = composite_all(
-            &[layer],
-            64,
-            &base,
-            &settings,
-            None,
-            &[],
-            None,
-        );
+        let maps2 = composite_all(&[layer], 64, &base, &settings, None, &[], None);
 
         assert_eq!(maps1.height, maps2.height);
         assert_eq!(maps1.stroke_id, maps2.stroke_id);
