@@ -154,7 +154,10 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                     gen_background_mode: state.project.settings.background_mode,
                 });
                 // Create texture handles so UV View displays the maps
-                let gen = state.generated.as_ref().unwrap();
+                let gen = state
+                    .generated
+                    .as_ref()
+                    .expect("generated data was just set above");
                 state.textures.color = Some(textures::color_buffer_to_handle(
                     ctx,
                     &gen.color,

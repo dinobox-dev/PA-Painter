@@ -279,7 +279,12 @@ impl PathOverlayWorker {
     /// Poll for a completed result. Returns `None` if still running or cancelled.
     pub fn poll(&mut self) -> Option<Result<PathOverlayResult, String>> {
         if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
-            match self.handle.take().unwrap().join() {
+            match self
+                .handle
+                .take()
+                .expect("worker handle was checked above")
+                .join()
+            {
                 Ok(Some(result)) => Some(Ok(result)),
                 Ok(None) => None, // cancelled
                 Err(e) => {
@@ -373,7 +378,7 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
                     .map(|v| [v.x, v.y])
                     .collect();
                 // Always include the last point for path continuity
-                let last = p.points.last().unwrap();
+                let last = p.points.last().expect("path always has at least one point");
                 let last_pt = [last.x, last.y];
                 if pts.last() != Some(&last_pt) {
                     pts.push(last_pt);

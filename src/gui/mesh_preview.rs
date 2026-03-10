@@ -1376,7 +1376,7 @@ pub fn show(
         let res = renderer
             .callback_resources
             .get::<MeshGpuResources>()
-            .unwrap();
+            .expect("MeshGpuResources must be initialized before rendering");
         let unorm_view = res
             .render_texture
             .create_view(&wgpu::TextureViewDescriptor {

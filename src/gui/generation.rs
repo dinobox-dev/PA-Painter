@@ -146,7 +146,12 @@ impl GenerationManager {
     pub fn poll(&mut self) -> Option<Result<GenResult, String>> {
         if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
             let total_elapsed = self.start_time.take().map(|t| t.elapsed());
-            match self.handle.take().unwrap().join() {
+            match self
+                .handle
+                .take()
+                .expect("worker handle was checked above")
+                .join()
+            {
                 Ok(Some(mut result)) => {
                     if let Some(elapsed) = total_elapsed {
                         result.elapsed = elapsed;
@@ -622,7 +627,12 @@ impl RemergeWorker {
 
     pub fn poll(&mut self) -> Option<RemergeResult> {
         if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
-            match self.handle.take().unwrap().join() {
+            match self
+                .handle
+                .take()
+                .expect("worker handle was checked above")
+                .join()
+            {
                 Ok(Some(result)) => Some(result),
                 Ok(None) => None,
                 Err(_) => None,
