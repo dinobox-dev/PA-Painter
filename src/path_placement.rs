@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use glam::Vec2;
+use log::{debug, info, warn};
 
 use crate::direction_field::DirectionField;
 use crate::math::rotate_vec2;
@@ -402,8 +403,10 @@ pub fn generate_paths_cancellable(
     let seeds =
         generate_seeds_poisson_in(&scaled, resolution, seed_lo, seed_hi, stretch_map, cancel);
     if is_cancelled(cancel) {
+        info!("Path generation cancelled after seed generation");
         return Vec::new();
     }
+    debug!("Generated {} seed points", seeds.len());
 
     // Filter seeds by mask
     let filtered_seeds: Vec<Vec2> = if let Some(m) = mask {
@@ -417,6 +420,11 @@ pub fn generate_paths_cancellable(
     for (i, seed_point) in filtered_seeds.iter().enumerate() {
         // Check cancellation every 256 seeds to avoid excessive atomic loads
         if i & 0xFF == 0 && is_cancelled(cancel) {
+            warn!(
+                "Path generation cancelled at seed {}/{}",
+                i,
+                filtered_seeds.len()
+            );
             return Vec::new();
         }
         if let Some(path) = trace_streamline(
@@ -458,6 +466,13 @@ pub fn generate_paths_cancellable(
     // Sort paths by seed point y-coordinate (top-to-bottom row order).
     // Critical for correct wet-on-wet compositing order in Phase 08.
     raw_paths.sort_by(|a, b| a[0].y.total_cmp(&b[0].y));
+
+    info!(
+        "Layer {}: {} paths generated from {} seeds",
+        layer_index,
+        raw_paths.len(),
+        filtered_seeds.len()
+    );
 
     // Convert to StrokePath (IDs are layer-local; made globally unique by compositing)
     raw_paths

@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use glam::Vec2;
-
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 
 use crate::asset_io::linear_to_srgb;
@@ -270,6 +270,7 @@ pub fn blend_normals_udn(
 
 /// Export a height map as a grayscale PNG (linear, no gamma).
 pub fn export_height_png(height: &[f32], resolution: u32, path: &Path) -> Result<(), OutputError> {
+    debug!("Exporting height PNG: {}", path.display());
     let pixels: Vec<u8> = height
         .iter()
         .map(|&h| (h.clamp(0.0, 1.0) * 255.0).round() as u8)
@@ -288,6 +289,11 @@ pub fn export_color_png(
     path: &Path,
     with_alpha: bool,
 ) -> Result<(), OutputError> {
+    debug!(
+        "Exporting color PNG: {} (alpha={})",
+        path.display(),
+        with_alpha
+    );
     if with_alpha {
         let pixels: Vec<u8> = color
             .iter()
@@ -337,6 +343,7 @@ pub fn export_normal_png(
     resolution: u32,
     path: &Path,
 ) -> Result<(), OutputError> {
+    debug!("Exporting normal PNG: {}", path.display());
     let pixels: Vec<u8> = normals
         .iter()
         .flat_map(|n| {
@@ -362,6 +369,7 @@ pub fn export_normal_png(
 /// Uses golden-angle hue spacing so adjacent stroke IDs receive visually dissimilar colors.
 /// ID 0 (unpainted) is black.
 pub fn export_stroke_id_png(ids: &[u32], resolution: u32, path: &Path) -> Result<(), OutputError> {
+    debug!("Exporting stroke ID PNG: {}", path.display());
     let mut unique: Vec<u32> = ids.iter().copied().filter(|&id| id != 0).collect();
     unique.sort_unstable();
     unique.dedup();
@@ -421,6 +429,7 @@ pub fn export_stroke_time_png(
     resolution: u32,
     path: &Path,
 ) -> Result<(), OutputError> {
+    debug!("Exporting stroke time PNG: {}", path.display());
     let pixels: Vec<u8> = order
         .iter()
         .zip(arc.iter())
@@ -447,6 +456,7 @@ pub fn export_stroke_time_png(
 
 /// Export a height map as a single-channel float32 EXR (linear).
 pub fn export_height_exr(height: &[f32], resolution: u32, path: &Path) -> Result<(), OutputError> {
+    debug!("Exporting height EXR: {}", path.display());
     use exr::prelude::*;
 
     let res = resolution as usize;
@@ -468,6 +478,11 @@ pub fn export_color_exr(
     path: &Path,
     with_alpha: bool,
 ) -> Result<(), OutputError> {
+    debug!(
+        "Exporting color EXR: {} (alpha={})",
+        path.display(),
+        with_alpha
+    );
     use exr::prelude::*;
 
     let res = resolution as usize;
@@ -497,6 +512,7 @@ pub fn export_stroke_time_exr(
     resolution: u32,
     path: &Path,
 ) -> Result<(), OutputError> {
+    debug!("Exporting stroke time EXR: {}", path.display());
     use exr::prelude::*;
 
     let res = resolution as usize;
@@ -561,6 +577,7 @@ pub fn export_layer_maps(
     opts: &LayerExportOptions<'_>,
     output_dir: &Path,
 ) -> Result<u32, OutputError> {
+    info!("Exporting layer {} maps to {}", index, output_dir.display());
     let res = layer.resolution;
     let prefix = format!("layer_{index}");
     let mut count = 0u32;
@@ -658,6 +675,11 @@ pub fn export_all(
     format: ExportFormat,
     normal_data: Option<&MeshNormalData>,
 ) -> Result<(), OutputError> {
+    info!(
+        "Exporting all maps to {} ({:?})",
+        output_dir.display(),
+        format
+    );
     std::fs::create_dir_all(output_dir)?;
 
     let normalized_height = normalize_height_map(&global.height);

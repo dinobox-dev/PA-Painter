@@ -3,6 +3,7 @@ mod gui;
 use eframe::egui;
 
 fn main() -> eframe::Result {
+    env_logger::init();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])

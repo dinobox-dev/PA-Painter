@@ -5,6 +5,7 @@
 //! No external glTF writer crate needed — uses `serde_json` for the JSON
 //! chunk and manual binary packing for the BIN chunk.
 
+use log::info;
 use std::io::Write;
 use std::path::Path;
 
@@ -32,6 +33,7 @@ pub fn export_preview_glb(
     displacement_scale: f32,
     path: &Path,
 ) -> Result<(), crate::output::OutputError> {
+    info!("Exporting preview GLB: {}", path.display());
     export_preview_glb_inner(
         mesh,
         color_map,

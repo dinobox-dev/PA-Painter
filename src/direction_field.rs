@@ -4,6 +4,7 @@
 //! source, sink, and vortex guides with distance-based influence falloff.
 
 use glam::Vec2;
+use log::debug;
 
 use crate::types::{Guide, GuideType};
 
@@ -176,6 +177,12 @@ pub fn direction_at(uv: Vec2, guides: &[Guide]) -> Vec2 {
 /// Returns a `Vec<Vec2>` of length resolution * resolution, row-major.
 /// Each element is a normalized direction vector.
 pub fn generate_direction_field(guides: &[Guide], resolution: u32) -> Vec<Vec2> {
+    debug!(
+        "Generating direction field: {} guides, {}×{} resolution",
+        guides.len(),
+        resolution,
+        resolution
+    );
     let res = resolution as usize;
     let mut field = Vec::with_capacity(res * res);
     let inv_res = 1.0 / resolution as f32;

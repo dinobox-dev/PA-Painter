@@ -2,6 +2,7 @@
 //! sRGB ↔ linear conversion.
 
 use glam::{Vec2, Vec3};
+use log::{debug, info, warn};
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -109,6 +110,7 @@ pub fn linear_to_srgb(l: f32) -> f32 {
 /// - Validates that a UV channel exists.
 /// - Does NOT validate non-overlapping UVs (too expensive; left to user).
 pub fn load_mesh(path: &Path) -> Result<LoadedMesh, MeshError> {
+    info!("Loading mesh: {}", path.display());
     match path
         .extension()
         .and_then(|e| e.to_str())
@@ -323,7 +325,7 @@ fn mtl_to_material_info(
         match load_texture(&full) {
             Ok(tex) => Some(tex),
             Err(e) => {
-                eprintln!(
+                warn!(
                     "MTL: failed to load diffuse texture '{}': {e}",
                     full.display()
                 );
@@ -341,7 +343,7 @@ fn mtl_to_material_info(
         match load_texture(&full) {
             Ok(tex) => Some(tex),
             Err(e) => {
-                eprintln!(
+                warn!(
                     "MTL: failed to load normal texture '{}': {e}",
                     full.display()
                 );
@@ -572,6 +574,7 @@ fn build_mesh_from_gltf(
 ///
 /// Returns texture in linear RGBA float [0, 1].
 pub fn load_texture(path: &Path) -> Result<LoadedTexture, TextureError> {
+    debug!("Loading texture: {}", path.display());
     match path
         .extension()
         .and_then(|e| e.to_str())

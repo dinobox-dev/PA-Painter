@@ -43,6 +43,8 @@ eframe = { version = "0.33", features = ["wgpu"] }
 rfd = "0.15"
 bytemuck = { version = "1", features = ["derive"] }
 egui-phosphor = { version = "0.11.0", default-features = false, features = ["fill"] }
+log = "0.4"
+env_logger = "0.11"
 
 [dev-dependencies]
 smallvec = "1"

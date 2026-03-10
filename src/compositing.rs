@@ -4,6 +4,7 @@
 //! paint layers into a single [`GlobalMaps`] struct, respecting layer ordering and masks.
 
 use glam::Vec2;
+use log::{debug, info};
 use rayon::prelude::*;
 
 use crate::brush_profile::{generate_brush_profile, jitter_brush_profile};
@@ -634,6 +635,13 @@ pub fn composite_all_with_paths(
     masks: &[Option<&UvMask>],
     stretch_map: Option<&StretchMap>,
 ) -> GlobalMaps {
+    info!(
+        "Compositing {} layers at {}×{} (cache={})",
+        layers.len(),
+        resolution,
+        resolution,
+        cached_paths.is_some()
+    );
     // Initialize with neutral gray; per-layer base colors are painted into regions below.
     let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
     let mut global = GlobalMaps::new(
@@ -711,6 +719,7 @@ pub fn composite_all_with_paths(
     }
 
     compute_height_gradients(&mut global);
+    info!("Compositing complete");
     global
 }
 
@@ -928,6 +937,10 @@ pub fn render_layer(
     stretch_map: Option<&StretchMap>,
     resolution: u32,
 ) -> LayerMaps {
+    debug!(
+        "Rendering layer {} at {}×{} resolution",
+        layer_index, resolution, resolution
+    );
     // Use GlobalMaps internally with DepictedForm (all fields allocated) and
     // Transparent background, then move the buffers into LayerMaps.
     let dummy_base = BaseColorSource::solid(Color::new(0.0, 0.0, 0.0, 0.0));
@@ -991,6 +1004,7 @@ pub fn merge_layers(
     global: &mut GlobalMaps,
     background_mode: BackgroundMode,
 ) {
+    debug!("Merging {} layers", layers.len());
     let size = (global.resolution * global.resolution) as usize;
     let transparent = background_mode == BackgroundMode::Transparent;
 

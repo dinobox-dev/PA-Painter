@@ -12,6 +12,7 @@
 //! - `output/height.png` — cached generated height map (16-bit grayscale)
 //! - `thumbnails/preview.png` — 256×256 preview thumbnail
 
+use log::{info, warn};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
@@ -338,6 +339,7 @@ pub fn save_project(
     path: &Path,
     output: Option<OutputCache<'_>>,
 ) -> Result<(), ProjectError> {
+    info!("Saving project to {}", path.display());
     // Write to a temp file first, then rename — prevents corruption if save fails midway.
     let tmp_path = path.with_extension("pap.tmp");
     let file = std::fs::File::create(&tmp_path)?;
@@ -459,6 +461,7 @@ pub fn save_project(
 /// Returns a [`LoadResult`] containing the project, the parsed mesh (if any),
 /// and cached output maps (if present).
 pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
+    info!("Loading project: {}", path.display());
     let file = std::fs::File::open(path)?;
     let mut archive = ZipArchive::new(file)?;
 
@@ -487,7 +490,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
         match load_mesh_from_bytes(bytes, fmt) {
             Ok(mesh) => Some(mesh),
             Err(e) => {
-                eprintln!("Warning: failed to load embedded mesh: {e}");
+                warn!("Failed to load embedded mesh: {e}");
                 None
             }
         }
@@ -511,7 +514,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
                     tex.height = h;
                 }
             } else {
-                eprintln!("Warning: failed to decode {entry_name}, demoting to File(None)");
+                warn!("Failed to decode {entry_name}, demoting to File(None)");
                 layer.base_color = TextureSource::File(None);
             }
         }
@@ -527,7 +530,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
                     tex.height = h;
                 }
             } else {
-                eprintln!("Warning: failed to decode {entry_name}, demoting to File(None)");
+                warn!("Failed to decode {entry_name}, demoting to File(None)");
                 layer.base_normal = TextureSource::File(None);
             }
         }

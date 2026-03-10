@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process;
 
+use log::{error, info};
+
 use practical_arcana_painter::asset_io::load_mesh;
 use practical_arcana_painter::compositing::{
     composite_all_with_paths, generate_all_paths, render_layer, resolve_base_color,
@@ -28,6 +30,8 @@ fn usage() -> ! {
 }
 
 fn main() {
+    env_logger::init();
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
         usage();
@@ -92,30 +96,29 @@ fn main() {
     }
 
     // Load project
-    eprintln!("Loading project: {}", project_path.display());
     let load_result = load_project(&project_path).unwrap_or_else(|e| {
-        eprintln!("Error loading project: {e:?}");
+        error!("Failed to load project: {e:?}");
         process::exit(1);
     });
     let mut project = load_result.project;
 
     let resolution = resolution_override.unwrap_or(project.settings.resolution_preset.resolution());
-    eprintln!("Resolution: {resolution}px");
-    eprintln!("Layers: {}", project.layers.len());
+    info!("Resolution: {resolution}px");
+    info!("Layers: {}", project.layers.len());
 
     // Load mesh: prefer embedded, fall back to file path
     let loaded_mesh = if let Some(mesh) = load_result.mesh {
-        eprintln!("Loaded mesh: {} groups", mesh.groups.len());
+        info!("Loaded embedded mesh: {} groups", mesh.groups.len());
         Some(mesh)
     } else {
         let mesh_file = resolve_asset_path(&project_path, &project.mesh_ref.path);
         match load_mesh(&mesh_file) {
             Ok(mesh) => {
-                eprintln!("Loaded mesh: {} groups", mesh.groups.len());
+                info!("Loaded mesh: {} groups", mesh.groups.len());
                 Some(mesh)
             }
             Err(e) => {
-                eprintln!("Warning: failed to load mesh: {e}");
+                error!("Failed to load mesh: {e}");
                 None
             }
         }
@@ -124,10 +127,10 @@ fn main() {
     let normal_data: Option<MeshNormalData> =
         if project.settings.normal_mode == NormalMode::DepictedForm {
             if let Some(ref mesh) = loaded_mesh {
-                eprintln!("Computing mesh normals...");
+                info!("Computing mesh normals...");
                 Some(compute_mesh_normal_data(mesh, resolution))
             } else {
-                eprintln!("  Falling back to SurfacePaint normals.");
+                info!("Falling back to SurfacePaint normals");
                 None
             }
         } else {
@@ -136,7 +139,7 @@ fn main() {
 
     // Compute stretch map for UV distortion compensation
     let stretch_data: Option<StretchMap> = loaded_mesh.as_ref().map(|mesh| {
-        eprintln!("Computing stretch map...");
+        info!("Computing stretch map...");
         compute_stretch_map(mesh, resolution)
     });
     let stretch_ref = stretch_data.as_ref();
@@ -167,7 +170,7 @@ fn main() {
         .collect();
 
     // Generate (with path cache)
-    eprintln!("Generating...");
+    info!("Generating...");
     if project.cached_paths_if_valid().is_none() {
         let paths = generate_all_paths(
             &layers,
@@ -191,7 +194,6 @@ fn main() {
     );
 
     // Export
-    eprintln!("Exporting to: {}", output_dir.display());
     export_all(
         &global,
         &project.settings,
@@ -200,13 +202,13 @@ fn main() {
         normal_data.as_ref(),
     )
     .unwrap_or_else(|e| {
-        eprintln!("Error exporting: {e:?}");
+        error!("Export failed: {e:?}");
         process::exit(1);
     });
 
     // Per-layer export
     if per_layer {
-        eprintln!("Exporting per-layer maps...");
+        info!("Exporting per-layer maps...");
         let mut manifest_entries = Vec::new();
         let visible_layers: Vec<_> = project.layers.iter().filter(|l| l.visible).collect();
 
@@ -247,7 +249,7 @@ fn main() {
                 &output_dir,
             )
             .unwrap_or_else(|e| {
-                eprintln!("Error exporting layer {}: {e:?}", layer.name);
+                error!("Export failed for layer {}: {e:?}", layer.name);
                 process::exit(1);
             });
 
@@ -262,12 +264,12 @@ fn main() {
         }
 
         export_manifest(&manifest_entries, format, &output_dir).unwrap_or_else(|e| {
-            eprintln!("Error exporting manifest: {e:?}");
+            error!("Manifest export failed: {e:?}");
             process::exit(1);
         });
     }
 
-    eprintln!("Done.");
+    info!("Done.");
 }
 
 fn resolve_asset_path(project_path: &Path, asset_path: &str) -> PathBuf {

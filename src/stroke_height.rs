@@ -3,6 +3,8 @@
 //! Maps each pixel's distance from stroke centerlines into height values,
 //! modulated by pressure curves, load variation, and Perlin noise.
 
+use log::trace;
+
 use crate::math::{interpolate_array, lerp, smoothstep};
 use crate::pressure::evaluate_pressure;
 use crate::types::StrokeParams;
@@ -38,6 +40,13 @@ pub fn generate_stroke_height(
     params: &StrokeParams,
     seed: u32,
 ) -> StrokeHeightResult {
+    trace!(
+        "Stroke height: {}×{} px, load={:.2}, viscosity={:.2}",
+        stroke_length_px,
+        brush_profile.len(),
+        params.load,
+        params.viscosity
+    );
     let brush_width_px = params.brush_width.round() as usize;
     let load = params.load;
     let body_wiggle = params.body_wiggle;
