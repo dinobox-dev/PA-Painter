@@ -4,7 +4,7 @@ use eframe::egui_wgpu;
 use practical_arcana_painter::types::{GuideType, TextureSource};
 
 use super::mesh_preview;
-use super::state::{AppState, GroupDimKey, GuideTool, MapMode, SetupMapMode, ViewportTab};
+use super::state::{AppState, DrawOrder, GroupDimKey, GuideTool, MapMode, ResultMode, SetupMapMode, ViewportTab};
 use super::textures::{linear_to_raw_u8, linear_to_srgb_u8};
 use super::widgets::{slider_row, toolbar_icon_button};
 
@@ -561,7 +561,6 @@ fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
 
     // 3D overlay toggles: Result (generated textures) and Direction (field arrows)
     {
-        use super::state::ResultMode;
         let label = match state.mesh_preview.result_mode {
             ResultMode::None => "Result: None",
             ResultMode::Paint => "Result: Paint",
@@ -581,6 +580,127 @@ fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
     overlay_text_button(ui, "Direction", state.mesh_preview.show_direction_field, || {
         state.mesh_preview.show_direction_field = !state.mesh_preview.show_direction_field;
     });
+}
+
+// ── Playback bar (Drawing mode) ─────────────────────────────────────
+
+fn draw_playback_bar(ui: &mut egui::Ui, state: &mut AppState) {
+    use egui_phosphor::fill::*;
+    use super::state::PlaybackMode;
+
+    ui.vertical(|ui: &mut egui::Ui| {
+        // Row 1: Play/Pause, Stop, Loop mode, progress slider, time label
+        ui.horizontal(|ui: &mut egui::Ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let icon = if state.mesh_preview.playing { PAUSE } else { PLAY };
+            if ui.button(egui::RichText::new(icon).size(16.0)).clicked() {
+                state.mesh_preview.playing = !state.mesh_preview.playing;
+                // Reset pingpong direction and re-enable play for Once mode restart
+                if state.mesh_preview.playing {
+                    state.mesh_preview.pingpong_forward = true;
+                }
+            }
+            // Stop/reset button
+            if ui.button(egui::RichText::new(STOP).size(16.0)).clicked() {
+                state.mesh_preview.playing = false;
+                state.mesh_preview.time = 0.0;
+                state.mesh_preview.pingpong_forward = true;
+            }
+
+            // Loop mode cycle button
+            let (mode_icon, mode_tip) = match state.mesh_preview.playback_mode {
+                PlaybackMode::Loop => (REPEAT, "Loop"),
+                PlaybackMode::PingPong => (ARROWS_LEFT_RIGHT, "Ping-Pong"),
+                PlaybackMode::Once => (ARROW_RIGHT, "Once"),
+            };
+            let btn = ui.button(egui::RichText::new(mode_icon).size(16.0))
+                .on_hover_text(mode_tip);
+            if btn.clicked() {
+                state.mesh_preview.playback_mode = match state.mesh_preview.playback_mode {
+                    PlaybackMode::Loop => PlaybackMode::PingPong,
+                    PlaybackMode::PingPong => PlaybackMode::Once,
+                    PlaybackMode::Once => PlaybackMode::Loop,
+                };
+            }
+
+            let max_time = playback_max_time(state);
+            let slider = egui::Slider::new(&mut state.mesh_preview.time, 0.0..=max_time)
+                .show_value(false)
+                .trailing_fill(true);
+            ui.add_sized(Vec2::new(200.0, 18.0), slider);
+
+            ui.label(format!("{:.1}s", state.mesh_preview.time));
+        });
+
+        // Row 2: Speed, Draw Time, Gap, Chunk, Draw Order
+        ui.horizontal(|ui: &mut egui::Ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+
+            ui.label("Speed");
+            ui.add(
+                egui::DragValue::new(&mut state.mesh_preview.speed)
+                    .range(0.1..=4.0)
+                    .speed(0.05)
+                    .suffix("×")
+                    .fixed_decimals(1),
+            );
+
+            ui.separator();
+
+            ui.label("Draw");
+            ui.add(
+                egui::DragValue::new(&mut state.mesh_preview.draw_time)
+                    .range(0.05..=5.0)
+                    .speed(0.02)
+                    .suffix("s")
+                    .fixed_decimals(2),
+            );
+
+            ui.separator();
+
+            ui.label("Gap");
+            ui.add(
+                egui::DragValue::new(&mut state.mesh_preview.gap)
+                    .range(-3.0..=5.0)
+                    .speed(0.02)
+                    .suffix("s")
+                    .fixed_decimals(2),
+            );
+
+            ui.separator();
+
+            ui.label("Chunk");
+            ui.add(
+                egui::DragValue::new(&mut state.mesh_preview.chunk_size)
+                    .range(1..=200)
+                    .speed(0.2),
+            );
+
+            ui.separator();
+
+            let order_label = match state.mesh_preview.draw_order {
+                DrawOrder::Sequential => "Sequential",
+                DrawOrder::Random => "Random",
+            };
+            egui::ComboBox::from_id_salt("draw_order")
+                .selected_text(order_label)
+                .width(90.0)
+                .show_ui(ui, |ui: &mut egui::Ui| {
+                    ui.selectable_value(&mut state.mesh_preview.draw_order, DrawOrder::Sequential, "Sequential");
+                    ui.selectable_value(&mut state.mesh_preview.draw_order, DrawOrder::Random, "Random");
+                });
+        });
+    });
+}
+
+/// Compute the maximum playback time in seconds.
+fn playback_max_time(state: &AppState) -> f32 {
+    let draw = state.mesh_preview.draw_time;
+    let gap = state.mesh_preview.gap;
+    let chunk = state.mesh_preview.chunk_size.max(1) as f32;
+    let num_groups = (state.mesh_preview.stroke_count as f32 / chunk).ceil().max(1.0);
+    // Last group starts at (num_groups-1) * (draw+gap), finishes at + draw
+    ((num_groups - 1.0) * (draw + gap) + draw + 0.05).max(0.1)
 }
 
 // ── UV View tab ─────────────────────────────────────────────────────
@@ -696,13 +816,42 @@ fn show_3d_view(
     let view_rect = ui.available_rect_before_wrap();
 
     // Advance time map playback
-    if state.mesh_preview.result_mode == super::state::ResultMode::Drawing
+    if state.mesh_preview.result_mode == ResultMode::Drawing
         && state.mesh_preview.playing
     {
+        use super::state::PlaybackMode;
         let dt = ui.input(|i| i.unstable_dt).min(0.1);
-        state.mesh_preview.time += dt * state.mesh_preview.speed * 0.2;
-        if state.mesh_preview.time > 1.05 {
-            state.mesh_preview.time = 0.0; // loop
+        let max_t = playback_max_time(state);
+        match state.mesh_preview.playback_mode {
+            PlaybackMode::Loop => {
+                state.mesh_preview.time += dt * state.mesh_preview.speed;
+                if state.mesh_preview.time > max_t {
+                    state.mesh_preview.time = 0.0;
+                }
+            }
+            PlaybackMode::PingPong => {
+                let delta = dt * state.mesh_preview.speed;
+                if state.mesh_preview.pingpong_forward {
+                    state.mesh_preview.time += delta;
+                    if state.mesh_preview.time >= max_t {
+                        state.mesh_preview.time = max_t;
+                        state.mesh_preview.pingpong_forward = false;
+                    }
+                } else {
+                    state.mesh_preview.time -= delta;
+                    if state.mesh_preview.time <= 0.0 {
+                        state.mesh_preview.time = 0.0;
+                        state.mesh_preview.pingpong_forward = true;
+                    }
+                }
+            }
+            PlaybackMode::Once => {
+                state.mesh_preview.time += dt * state.mesh_preview.speed;
+                if state.mesh_preview.time >= max_t {
+                    state.mesh_preview.time = max_t;
+                    state.mesh_preview.playing = false;
+                }
+            }
         }
         ui.ctx().request_repaint();
     }
@@ -722,9 +871,10 @@ fn show_3d_view(
     }
 
     // Floating strip overlay at bottom center
+    let strip_bottom = view_rect.bottom() - 8.0;
     egui::Area::new(egui::Id::new("strip_3d"))
         .order(egui::Order::Foreground)
-        .fixed_pos(Pos2::new(view_rect.center().x, view_rect.bottom() - 8.0))
+        .fixed_pos(Pos2::new(view_rect.center().x, strip_bottom))
         .pivot(egui::Align2::CENTER_BOTTOM)
         .show(ui.ctx(), |ui: &mut egui::Ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui: &mut egui::Ui| {
@@ -733,6 +883,19 @@ fn show_3d_view(
                 });
             });
         });
+
+    // Floating playback bar — visible only in Drawing mode, above the strip
+    if state.mesh_preview.result_mode == ResultMode::Drawing {
+        egui::Area::new(egui::Id::new("playback_bar"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(Pos2::new(view_rect.center().x, strip_bottom - 44.0))
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .show(ui.ctx(), |ui: &mut egui::Ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui: &mut egui::Ui| {
+                    draw_playback_bar(ui, state);
+                });
+            });
+    }
 }
 
 // ── Drawing helpers ─────────────────────────────────────────────────

@@ -32,7 +32,13 @@ struct Uniforms {
     time: f32,
     /// Display mode: 0 = Paint, 1 = Drawing.
     mode: u32,
-    _pad: [f32; 2],
+    /// Per-stroke drawing duration (fraction of timeline).
+    draw_time: f32,
+    /// Number of chunk groups.
+    num_groups: f32,
+    /// Gap between stroke groups (negative = overlap).
+    gap: f32,
+    _pad: [f32; 3],
 }
 
 // ── Camera state (stored in AppState) ──────────────────────────────
@@ -67,8 +73,22 @@ pub struct MeshPreviewState {
     pub time: f32,
     /// Whether the time map animation is playing.
     pub playing: bool,
-    /// Playback speed multiplier.
+    /// Playback speed multiplier (0.1–4.0).
     pub speed: f32,
+    /// Per-stroke drawing duration (0.01–1.0).
+    pub draw_time: f32,
+    /// Gap between stroke groups; negative = overlap.
+    pub gap: f32,
+    /// Number of strokes that start simultaneously (modulo grouping).
+    pub chunk_size: u32,
+    /// Stroke draw order mode.
+    pub draw_order: super::state::DrawOrder,
+    /// Playback loop mode (Loop / PingPong / Once).
+    pub playback_mode: super::state::PlaybackMode,
+    /// PingPong direction: true = forward, false = backward.
+    pub pingpong_forward: bool,
+    /// Number of unique strokes (set by upload_time_texture).
+    pub stroke_count: u32,
 }
 
 impl Default for MeshPreviewState {
@@ -91,6 +111,13 @@ impl Default for MeshPreviewState {
             time: 0.0,
             playing: true,
             speed: 1.0,
+            draw_time: 0.3,
+            gap: 0.0,
+            chunk_size: 1,
+            draw_order: super::state::DrawOrder::Sequential,
+            playback_mode: super::state::PlaybackMode::Loop,
+            pingpong_forward: true,
+            stroke_count: 1,
         }
     }
 }
@@ -519,7 +546,10 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         ambient: 0.15,
         time: 0.0,
         mode: 0,
-        _pad: [0.0; 2],
+        draw_time: 0.1,
+        num_groups: 1.0,
+        gap: 0.0,
+        _pad: [0.0; 3],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("mesh_uniform_buf"),
@@ -981,21 +1011,86 @@ pub fn clear_overlay_texture(render_state: &egui_wgpu::RenderState) {
     }
 }
 
-/// Upload a stroke time map texture to the 3D preview.
-/// Encodes order in R and arc in G (both 0–1 → 0–255).
+/// Upload stroke time map to GPU. Returns the number of unique strokes.
+///
+/// `chunk_size` groups strokes by modulo so spatially distant strokes start
+/// simultaneously. `draw_order` Random shuffles the group order.
 pub fn upload_time_texture(
     render_state: &egui_wgpu::RenderState,
     order: &[f32],
     arc: &[f32],
     resolution: u32,
-) {
+    draw_order: super::state::DrawOrder,
+    chunk_size: u32,
+) -> u32 {
     let device = &render_state.device;
     let queue = &render_state.queue;
     let n = (resolution * resolution) as usize;
 
+    // Collect unique non-zero order values (= individual strokes).
+    let mut unique: Vec<u32> = order
+        .iter()
+        .filter(|&&v| v > 0.0)
+        .map(|&v| (v * 65535.0) as u32)
+        .collect();
+    unique.sort_unstable();
+    unique.dedup();
+    let stroke_count = unique.len() as u32;
+
+    // Build order remap: original order key → new normalized order (0–1).
+    // Step 1: Chunk grouping — strokes are assigned to groups via modulo.
+    //   With chunk_size=C and N strokes, num_groups = ceil(N/C).
+    //   Stroke index i → group = i % num_groups.
+    //   Strokes in the same group start simultaneously (same order value).
+    // Step 2: Random mode shuffles group order deterministically.
+    let remap = {
+        let count = unique.len();
+        if count <= 1 {
+            None
+        } else {
+            let chunk = (chunk_size as usize).max(1).min(count);
+            let num_groups = count.div_ceil(chunk);
+
+            // Assign group index per stroke (modulo for max spatial distance)
+            let mut group_of_stroke: Vec<usize> = (0..count).map(|i| i % num_groups).collect();
+
+            // Random mode: shuffle group assignment
+            if draw_order == super::state::DrawOrder::Random && num_groups > 1 {
+                // Create a deterministic permutation of group indices
+                let mut group_perm: Vec<(u32, usize)> = (0..num_groups)
+                    .map(|g| ((g as u32).wrapping_mul(2654435761), g))
+                    .collect();
+                group_perm.sort_unstable_by_key(|&(h, _)| h);
+                // Build reverse mapping: old_group → new_position
+                let mut reverse = vec![0usize; num_groups];
+                for (new_pos, &(_, old_group)) in group_perm.iter().enumerate() {
+                    reverse[old_group] = new_pos;
+                }
+                for g in group_of_stroke.iter_mut() {
+                    *g = reverse[*g];
+                }
+            }
+
+            // Build remap table: original quantized order → normalized group order
+            let mut map = std::collections::HashMap::new();
+            let denom = (num_groups.max(1) - 1).max(1) as f32;
+            for (i, &orig_key) in unique.iter().enumerate() {
+                map.insert(orig_key, group_of_stroke[i] as f32 / denom);
+            }
+            Some(map)
+        }
+    };
+
     let mut pixels = vec![0u8; n * 4];
     for i in 0..n {
-        pixels[i * 4] = (order[i].clamp(0.0, 1.0) * 255.0) as u8;
+        let o = order[i].clamp(0.0, 1.0);
+        let remapped = if let Some(ref map) = remap {
+            let key = (o * 65535.0) as u32;
+            map.get(&key).copied().unwrap_or(o)
+        } else {
+            o
+        };
+        pixels[i * 4] = (remapped * 255.0) as u8;
         pixels[i * 4 + 1] = (arc[i].clamp(0.0, 1.0) * 255.0) as u8;
         // B=0, A=255
         pixels[i * 4 + 3] = 255;
@@ -1044,6 +1139,7 @@ pub fn upload_time_texture(
         res.time_texture = texture;
         res.time_texture_view = view;
     }
+    stroke_count
 }
 
 fn rebuild_texture_bind_group(
@@ -1181,7 +1277,13 @@ pub fn show(
         ambient: state.mesh_preview.ambient,
         time: state.mesh_preview.time,
         mode: if drawing { 1 } else { 0 },
-        _pad: [0.0; 2],
+        draw_time: state.mesh_preview.draw_time,
+        num_groups: {
+            let chunk = state.mesh_preview.chunk_size.max(1) as f32;
+            (state.mesh_preview.stroke_count as f32 / chunk).ceil().max(1.0)
+        },
+        gap: state.mesh_preview.gap,
+        _pad: [0.0; 3],
     };
 
     // Offscreen render

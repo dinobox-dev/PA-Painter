@@ -231,6 +231,8 @@ pub struct OutputCache<'a> {
     pub color: &'a [Color],
     pub height: &'a [f32],
     pub normal_map: &'a [[f32; 3]],
+    pub stroke_time_order: &'a [f32],
+    pub stroke_time_arc: &'a [f32],
     pub resolution: u32,
     /// Hash of project state at generation time — used to detect staleness after load.
     pub snapshot_hash: Option<u64>,
@@ -241,6 +243,8 @@ pub struct LoadedOutput {
     pub color: Vec<Color>,
     pub height: Vec<f32>,
     pub normal_map: Vec<[f32; 3]>,
+    pub stroke_time_order: Vec<f32>,
+    pub stroke_time_arc: Vec<f32>,
     pub resolution: u32,
     /// Hash of project state at generation time (if saved).
     pub snapshot_hash: Option<u64>,
@@ -413,6 +417,22 @@ pub fn save_project(
         if let Some(png) = encode_height_png16(out.height, out.resolution) {
             zip.start_file("output/height.png", options)?;
             zip.write_all(&png)?;
+        }
+
+        // output/stroke_time_order.png — 16-bit grayscale
+        if !out.stroke_time_order.is_empty() {
+            if let Some(png) = encode_height_png16(out.stroke_time_order, out.resolution) {
+                zip.start_file("output/stroke_time_order.png", options)?;
+                zip.write_all(&png)?;
+            }
+        }
+
+        // output/stroke_time_arc.png — 16-bit grayscale
+        if !out.stroke_time_arc.is_empty() {
+            if let Some(png) = encode_height_png16(out.stroke_time_arc, out.resolution) {
+                zip.start_file("output/stroke_time_arc.png", options)?;
+                zip.write_all(&png)?;
+            }
         }
 
         // output/snapshot.json — generation-time state hash for staleness detection
@@ -612,6 +632,24 @@ fn load_output_maps(archive: &mut ZipArchive<std::fs::File>) -> Option<LoadedOut
             vec![[0.5, 0.5, 1.0]; color.len()]
         };
 
+    let stroke_time_order =
+        if let Some(bytes) = read_bytes_optional(archive, "output/stroke_time_order.png") {
+            decode_height_png16(&bytes)
+                .map(|(h, _)| h)
+                .unwrap_or_else(|| vec![0.0; color.len()])
+        } else {
+            vec![0.0; color.len()]
+        };
+
+    let stroke_time_arc =
+        if let Some(bytes) = read_bytes_optional(archive, "output/stroke_time_arc.png") {
+            decode_height_png16(&bytes)
+                .map(|(h, _)| h)
+                .unwrap_or_else(|| vec![0.0; color.len()])
+        } else {
+            vec![0.0; color.len()]
+        };
+
     // output/snapshot.json — generation-time state hash
     let snapshot_hash = read_bytes_optional(archive, "output/snapshot.json").and_then(|bytes| {
         #[derive(Deserialize)]
@@ -627,6 +665,8 @@ fn load_output_maps(archive: &mut ZipArchive<std::fs::File>) -> Option<LoadedOut
         color,
         height,
         normal_map,
+        stroke_time_order,
+        stroke_time_arc,
         resolution,
         snapshot_hash,
     })
@@ -835,10 +875,14 @@ mod tests {
             .collect();
 
         let project = make_project_with_layers();
+        let time_order: Vec<f32> = (0..pixel_count).map(|i| i as f32 / pixel_count as f32).collect();
+        let time_arc: Vec<f32> = (0..pixel_count).map(|i| (i as f32 / pixel_count as f32) * 0.5).collect();
         let output = OutputCache {
             color: &color,
             height: &height,
             normal_map: &normal_map,
+            stroke_time_order: &time_order,
+            stroke_time_arc: &time_arc,
             resolution: res,
             snapshot_hash: None,
         };
@@ -967,6 +1011,8 @@ mod tests {
             color: &color,
             height: &height,
             normal_map: &normal_map,
+            stroke_time_order: &[],
+            stroke_time_arc: &[],
             resolution: res,
             snapshot_hash: None,
         };

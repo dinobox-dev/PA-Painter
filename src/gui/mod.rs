@@ -24,6 +24,18 @@ use practical_arcana_painter::types::{
 };
 use practical_arcana_painter::uv_mask::UvMask;
 
+/// Count unique non-zero order values in a stroke time map (= number of strokes).
+fn count_unique_strokes(order: &[f32]) -> u32 {
+    let mut unique: Vec<u32> = order
+        .iter()
+        .filter(|&&v| v > 0.0)
+        .map(|&v| (v * 65535.0) as u32)
+        .collect();
+    unique.sort_unstable();
+    unique.dedup();
+    unique.len() as u32
+}
+
 /// Main GUI application.
 pub struct PainterApp {
     state: AppState,
@@ -31,6 +43,9 @@ pub struct PainterApp {
     render_state: Option<egui_wgpu::RenderState>,
     /// Previous frame's result_mode for toggle change detection.
     prev_result_mode: state::ResultMode,
+    /// Previous frame's draw_order for change detection (re-upload time texture).
+    prev_draw_order: state::DrawOrder,
+    prev_chunk_size: u32,
     /// Hash of base texture state for 3D preview invalidation when show_result is off.
     prev_base_tex_hash: u64,
     /// Background remerge worker.
@@ -53,6 +68,8 @@ impl PainterApp {
             checkerboard: None,
             render_state: cc.wgpu_render_state.clone(),
             prev_result_mode: state::ResultMode::Paint,
+            prev_draw_order: state::DrawOrder::Sequential,
+            prev_chunk_size: 1,
             prev_base_tex_hash: 0,
             remerge_worker: generation::RemergeWorker::default(),
             prev_show_direction_field: false,
@@ -248,6 +265,10 @@ impl PainterApp {
             "gen_stroke_id",
         ));
 
+        // Always update stroke_count from the time data
+        self.state.mesh_preview.stroke_count =
+            count_unique_strokes(&result.stroke_time_order);
+
         // Upload color, normal, and time textures to 3D preview
         if let Some(ref rs) = self.render_state {
             if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result() {
@@ -258,6 +279,8 @@ impl PainterApp {
                     &result.stroke_time_order,
                     &result.stroke_time_arc,
                     result.resolution,
+                    self.state.mesh_preview.draw_order,
+                    self.state.mesh_preview.chunk_size,
                 );
             }
         }
@@ -479,11 +502,23 @@ impl PainterApp {
             ctx, &result.stroke_id, r, "remerge_stroke_id",
         ));
 
+        // Always update stroke_count from the time data
+        self.state.mesh_preview.stroke_count =
+            count_unique_strokes(&result.stroke_time_order);
+
         // Upload to 3D preview
         if let Some(ref rs) = self.render_state {
             if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result() {
                 mesh_preview::upload_color_texture(rs, &result.color, r as usize);
                 mesh_preview::upload_normal_texture(rs, &result.normal_map, r as usize);
+                mesh_preview::upload_time_texture(
+                    rs,
+                    &result.stroke_time_order,
+                    &result.stroke_time_arc,
+                    r,
+                    self.state.mesh_preview.draw_order,
+                    self.state.mesh_preview.chunk_size,
+                );
             }
         }
 
@@ -538,6 +573,15 @@ impl PainterApp {
             if let Some(ref gen) = self.state.generated {
                 mesh_preview::upload_color_texture(rs, &gen.color, gen.resolution as usize);
                 mesh_preview::upload_normal_texture(rs, &gen.normal_map, gen.resolution as usize);
+                let sc = mesh_preview::upload_time_texture(
+                    rs,
+                    &gen.stroke_time_order,
+                    &gen.stroke_time_arc,
+                    gen.resolution,
+                    self.state.mesh_preview.draw_order,
+                    self.state.mesh_preview.chunk_size,
+                );
+                self.state.mesh_preview.stroke_count = sc;
             } else {
                 self.upload_base_only_to_3d();
             }
@@ -777,12 +821,15 @@ impl eframe::App for PainterApp {
                                 mesh_preview::upload_normal_texture(
                                     rs, &gen.normal_map, gen.resolution as usize,
                                 );
-                                mesh_preview::upload_time_texture(
+                                let sc = mesh_preview::upload_time_texture(
                                     rs,
                                     &gen.stroke_time_order,
                                     &gen.stroke_time_arc,
                                     gen.resolution,
+                                    self.state.mesh_preview.draw_order,
+                                    self.state.mesh_preview.chunk_size,
                                 );
+                                self.state.mesh_preview.stroke_count = sc;
                             }
                         }
                     }
@@ -798,6 +845,31 @@ impl eframe::App for PainterApp {
                 if h != self.prev_base_tex_hash {
                     self.prev_base_tex_hash = h;
                     self.upload_base_only_to_3d();
+                }
+            }
+
+            // Re-upload time texture when draw_order or chunk_size changes
+            let cur_order = self.state.mesh_preview.draw_order;
+            let cur_chunk = self.state.mesh_preview.chunk_size;
+            if cur_order != self.prev_draw_order || cur_chunk != self.prev_chunk_size {
+                self.prev_draw_order = cur_order;
+                self.prev_chunk_size = cur_chunk;
+                if mode == state::ResultMode::Drawing {
+                    if let Some(ref rs) = self.render_state {
+                        if self.state.mesh_preview.gpu_ready {
+                            if let Some(ref gen) = self.state.generated {
+                                let sc = mesh_preview::upload_time_texture(
+                                    rs,
+                                    &gen.stroke_time_order,
+                                    &gen.stroke_time_arc,
+                                    gen.resolution,
+                                    cur_order,
+                                    self.state.mesh_preview.chunk_size,
+                                );
+                                self.state.mesh_preview.stroke_count = sc;
+                            }
+                        }
+                    }
                 }
             }
         }

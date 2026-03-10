@@ -5,6 +5,12 @@ struct Uniforms {
     ambient: f32,
     time: f32,
     mode: u32,
+    draw_time: f32,
+    num_groups: f32,
+    gap: f32,
+    _pad1: f32,
+    _pad2: f32,
+    _pad3: f32,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -57,18 +63,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let lighting = u.ambient + (1.0 - u.ambient) * ndotl;
     var base = tex_color.rgb * lighting;
 
-    // Drawing mode: reveal strokes over time
+    // Drawing mode: reveal strokes over time (seconds-based)
     if u.mode == 1u {
         let time_sample = textureSample(t_time, s_color, in.uv);
-        let order = time_sample.r;
+        let order = time_sample.r;  // normalized 0-1
         let arc = time_sample.g;
-        // Combine order + arc for sub-stroke resolution
-        let pixel_time = order + arc * 0.002;
-        let edge = 0.02;
+        // De-normalize order to group index
+        let group_idx = order * max(u.num_groups - 1.0, 1.0);
+        // Ease-out: stroke starts fast, decelerates toward the end
+        let arc_eased = 1.0 - (1.0 - arc) * (1.0 - arc);
+        // pixel_time in seconds: group start + arc progress within stroke
+        let pixel_time = group_idx * (u.draw_time + u.gap) + arc_eased * u.draw_time;
+        // Edge scales with draw_time for visible directional reveal
+        let edge = min(0.03, u.draw_time * 0.3);
         let reveal = smoothstep(pixel_time - edge, pixel_time, u.time);
         // Unpainted pixels (order==0 && arc==0) stay hidden until time > 0
         let painted = step(0.004, order + arc);
-        base = mix(vec3(0.15), base, reveal * painted);
+        base = mix(vec3(0.18, 0.18, 0.2), base, reveal * painted);
     }
 
     // Alpha-blend overlay (direction field arrows, etc.) over lit surface

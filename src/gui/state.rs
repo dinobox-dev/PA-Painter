@@ -80,6 +80,28 @@ pub enum ResultMode {
     Drawing,
 }
 
+/// Stroke draw order for time map playback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DrawOrder {
+    /// Strokes appear in their original compositing order.
+    #[default]
+    Sequential,
+    /// Strokes appear in a pseudo-random order.
+    Random,
+}
+
+/// Playback loop mode for Drawing animation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlaybackMode {
+    /// Loop continuously from start.
+    #[default]
+    Loop,
+    /// Play forward then backward, repeat.
+    PingPong,
+    /// Play once and stop at the end.
+    Once,
+}
+
 /// Guide editing tool (active only in the Guide tab).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GuideTool {
