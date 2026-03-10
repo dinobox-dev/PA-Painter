@@ -960,19 +960,57 @@ impl PainterApp {
 
 impl eframe::App for PainterApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Thin scrollbar always visible even when not hovering
-        ctx.style_mut(|s| s.spacing.scroll.dormant_handle_opacity = 0.4);
+        self.init_lazy(ctx);
+        self.handle_keyboard(ctx);
 
-        // Lazy-init checkerboard
+        // Capture pre-frame snapshot AFTER undo/redo so the restore itself
+        // is invisible to the change tracker.
+        let pre_frame = self.state.take_snapshot();
+        // Project-replacing actions explicitly set dirty=false; skip auto-dirty for those frames.
+        let project_replacing = self.state.pending_open || self.state.pending_new;
+
+        self.dispatch_deferred(ctx);
+        self.sync_gpu_textures();
+        self.poll_workers(ctx);
+
+        // ── UI panels (order matters for egui layout) ──
+        self.show_menu_bar(ctx);
+        self.show_status_bar(ctx);
+        self.show_sidebars(ctx);
+        self.show_central_panel(ctx);
+        self.show_mesh_load_popup(ctx);
+        self.show_auxiliary_windows(ctx);
+
+        self.auto_preview_tick(ctx, project_replacing);
+
+        // ── Undo: track post-frame changes ──
+        let post_frame = self.state.take_snapshot();
+        if pre_frame != post_frame && !project_replacing {
+            self.state.dirty = true;
+        }
+        let pointer_down = ctx.input(|i| i.pointer.any_down());
+        self.state
+            .undo
+            .track_frame(&pre_frame, &post_frame, pointer_down);
+    }
+}
+
+// ── update() sub-methods ──
+
+impl PainterApp {
+    /// One-time lazy initialization (checkerboard texture, etc.).
+    fn init_lazy(&mut self, ctx: &egui::Context) {
+        ctx.style_mut(|s| s.spacing.scroll.dormant_handle_opacity = 0.4);
         if self.checkerboard.is_none() {
             self.checkerboard = Some(viewport::make_checkerboard(ctx));
         }
         if self.state.textures.base_texture.is_none() {
             self.state.textures.base_texture = self.checkerboard.clone();
         }
+    }
 
-        // ── Undo/Redo keyboard shortcuts ──
-        // Check redo first (more specific modifier combo) to prevent Cmd+Z from consuming it.
+    /// Global keyboard shortcuts (undo/redo, save, generate, tab cycling).
+    fn handle_keyboard(&mut self, ctx: &egui::Context) {
         let redo_mods = egui::Modifiers {
             command: true,
             shift: true,
@@ -982,6 +1020,7 @@ impl eframe::App for PainterApp {
             command: true,
             ..Default::default()
         };
+        // Check redo first (more specific modifier combo) to prevent Cmd+Z from consuming it.
         if ctx.input_mut(|i| i.consume_key(redo_mods, egui::Key::Z)) {
             let current = self.state.take_snapshot();
             if let Some(snap) = self.state.undo.redo(current) {
@@ -994,34 +1033,21 @@ impl eframe::App for PainterApp {
             }
         }
 
-        // ── Cmd+S: Save ──
         if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::S)) {
             self.state.pending_save = true;
         }
-
-        // ── Cmd+G: Force full-res generation ──
         if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::G))
             && !self.state.generation.is_running()
         {
             self.start_generation();
         }
-
-        // ── Backtick key: cycle viewport tabs ──
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Backtick)) {
             self.state.viewport_tab = self.state.viewport_tab.next();
         }
+    }
 
-        // Number keys 1-4 are handled inside each strip function (viewport.rs)
-        // so that item definitions and shortcuts stay in a single place.
-
-        // ── Undo: capture pre-frame snapshot AFTER undo/redo ──
-        // This way the restore itself is invisible to the change tracker.
-        let pre_frame = self.state.take_snapshot();
-
-        // Project-replacing actions explicitly set dirty=false; skip auto-dirty for those frames.
-        let project_replacing = self.state.pending_open || self.state.pending_new;
-
-        // Handle deferred actions (flags set by child widgets on AppState)
+    /// Process pending_* flags set by UI widgets in the previous frame.
+    fn dispatch_deferred(&mut self, ctx: &egui::Context) {
         if self.state.pending_open {
             self.state.pending_open = false;
             dialogs::open_project(&mut self.state, ctx);
@@ -1053,7 +1079,6 @@ impl eframe::App for PainterApp {
         if self.state.pending_new {
             self.state.pending_new = false;
             dialogs::new_project(&mut self.state, ctx);
-            // State untouched — mesh held in popup until user confirms.
         }
         if self.state.pending_reload_mesh {
             self.state.pending_reload_mesh = false;
@@ -1066,78 +1091,76 @@ impl eframe::App for PainterApp {
         if self.state.pending_replace_mesh {
             self.state.pending_replace_mesh = false;
             dialogs::replace_mesh(&mut self.state);
-            // State untouched — mesh held in popup until user confirms.
         }
-        // Start async remerge if requested and no remerge is in flight
         if self.state.pending_remerge && !self.remerge_worker.is_running() {
             self.state.pending_remerge = false;
             self.start_remerge();
         }
+    }
 
-        // ── 3D Result mode: sync GPU textures when result_mode changes ──
-        {
-            let mode = self.state.mesh_preview.result_mode;
-            let show = self.state.mesh_preview.show_result();
-            if mode != self.prev_result_mode {
-                self.prev_result_mode = mode;
-                if show {
-                    // Re-upload generated results
-                    if let Some(ref rs) = self.render_state {
-                        if self.state.mesh_preview.gpu_ready {
-                            if let Some(ref gen) = self.state.generated {
-                                mesh_preview::upload_color_texture(
-                                    rs, &gen.color, gen.resolution as usize,
-                                );
-                                mesh_preview::upload_normal_texture(
-                                    rs, &gen.normal_map, gen.resolution as usize,
-                                );
-                                let sc = mesh_preview::upload_time_texture(
-                                    rs,
-                                    &gen.stroke_time_order,
-                                    &gen.stroke_time_arc,
-                                    gen.resolution,
-                                    self.state.mesh_preview.draw_order,
-                                    self.state.mesh_preview.chunk_size,
-                                );
-                                self.state.mesh_preview.stroke_count = sc;
-                            }
+    /// Synchronise GPU textures for the 3D preview (result mode, direction field overlay).
+    fn sync_gpu_textures(&mut self) {
+        // ── Result mode: re-upload when mode/draw_order/chunk_size changes ──
+        let mode = self.state.mesh_preview.result_mode;
+        let show = self.state.mesh_preview.show_result();
+        if mode != self.prev_result_mode {
+            self.prev_result_mode = mode;
+            if show {
+                if let Some(ref rs) = self.render_state {
+                    if self.state.mesh_preview.gpu_ready {
+                        if let Some(ref gen) = self.state.generated {
+                            mesh_preview::upload_color_texture(
+                                rs, &gen.color, gen.resolution as usize,
+                            );
+                            mesh_preview::upload_normal_texture(
+                                rs, &gen.normal_map, gen.resolution as usize,
+                            );
+                            let sc = mesh_preview::upload_time_texture(
+                                rs,
+                                &gen.stroke_time_order,
+                                &gen.stroke_time_arc,
+                                gen.resolution,
+                                self.state.mesh_preview.draw_order,
+                                self.state.mesh_preview.chunk_size,
+                            );
+                            self.state.mesh_preview.stroke_count = sc;
                         }
                     }
-                } else {
-                    self.upload_base_only_to_3d();
-                    self.prev_base_tex_hash = self.base_texture_hash();
                 }
+            } else {
+                self.upload_base_only_to_3d();
+                self.prev_base_tex_hash = self.base_texture_hash();
             }
+        }
 
-            // When show_result is off, detect base texture changes
-            if !show {
-                let h = self.base_texture_hash();
-                if h != self.prev_base_tex_hash {
-                    self.prev_base_tex_hash = h;
-                    self.upload_base_only_to_3d();
-                }
+        // When show_result is off, detect base texture changes
+        if !show {
+            let h = self.base_texture_hash();
+            if h != self.prev_base_tex_hash {
+                self.prev_base_tex_hash = h;
+                self.upload_base_only_to_3d();
             }
+        }
 
-            // Re-upload time texture when draw_order or chunk_size changes
-            let cur_order = self.state.mesh_preview.draw_order;
-            let cur_chunk = self.state.mesh_preview.chunk_size;
-            if cur_order != self.prev_draw_order || cur_chunk != self.prev_chunk_size {
-                self.prev_draw_order = cur_order;
-                self.prev_chunk_size = cur_chunk;
-                if mode == state::ResultMode::Drawing {
-                    if let Some(ref rs) = self.render_state {
-                        if self.state.mesh_preview.gpu_ready {
-                            if let Some(ref gen) = self.state.generated {
-                                let sc = mesh_preview::upload_time_texture(
-                                    rs,
-                                    &gen.stroke_time_order,
-                                    &gen.stroke_time_arc,
-                                    gen.resolution,
-                                    cur_order,
-                                    self.state.mesh_preview.chunk_size,
-                                );
-                                self.state.mesh_preview.stroke_count = sc;
-                            }
+        // Re-upload time texture when draw_order or chunk_size changes
+        let cur_order = self.state.mesh_preview.draw_order;
+        let cur_chunk = self.state.mesh_preview.chunk_size;
+        if cur_order != self.prev_draw_order || cur_chunk != self.prev_chunk_size {
+            self.prev_draw_order = cur_order;
+            self.prev_chunk_size = cur_chunk;
+            if mode == state::ResultMode::Drawing {
+                if let Some(ref rs) = self.render_state {
+                    if self.state.mesh_preview.gpu_ready {
+                        if let Some(ref gen) = self.state.generated {
+                            let sc = mesh_preview::upload_time_texture(
+                                rs,
+                                &gen.stroke_time_order,
+                                &gen.stroke_time_arc,
+                                gen.resolution,
+                                cur_order,
+                                self.state.mesh_preview.chunk_size,
+                            );
+                            self.state.mesh_preview.stroke_count = sc;
                         }
                     }
                 }
@@ -1145,7 +1168,9 @@ impl eframe::App for PainterApp {
         }
 
         // ── Direction field overlay: sync with toggle + guide changes ──
-        if let Some(ref rs) = self.render_state {
+        // Clone render_state (cheap Arc clone) to avoid borrowing self during
+        // upload_direction_field_overlay.
+        if let Some(rs) = self.render_state.clone() {
             if self.state.mesh_preview.gpu_ready {
                 let show_df = self.state.mesh_preview.show_direction_field;
                 let df_hash = self.direction_field_hash();
@@ -1153,24 +1178,25 @@ impl eframe::App for PainterApp {
                 if show_df != self.prev_show_direction_field {
                     self.prev_show_direction_field = show_df;
                     if show_df {
-                        self.upload_direction_field_overlay(rs);
+                        self.upload_direction_field_overlay(&rs);
                         self.prev_direction_field_hash = df_hash;
                     } else {
-                        mesh_preview::clear_overlay_texture(rs);
+                        mesh_preview::clear_overlay_texture(&rs);
                     }
                 } else if show_df && df_hash != self.prev_direction_field_hash {
                     self.prev_direction_field_hash = df_hash;
-                    self.upload_direction_field_overlay(rs);
+                    self.upload_direction_field_overlay(&rs);
                 }
             }
         }
+    }
 
-        // ── Path overlay: async worker pattern ──
-        // Poll for completed results first
+    /// Poll background workers (path overlay, generation, remerge) and apply results.
+    fn poll_workers(&mut self, ctx: &egui::Context) {
+        // Path overlay worker
         if let Some(poll_result) = self.state.path_worker.poll() {
             match poll_result {
                 Ok(result) => {
-                    // Cache freshly computed mesh normals for future reuse
                     if let Some(normals) = &result.computed_normals {
                         self.state.cached_mesh_normals =
                             Some((normals.0, std::sync::Arc::clone(&normals.1)));
@@ -1182,7 +1208,7 @@ impl eframe::App for PainterApp {
                 }
             }
         }
-        // Submit new computation if overlay is active and cache is stale
+        // Submit new path overlay computation if cache is stale
         if self.state.viewport.path_overlay_idx.is_some() {
             if let Some(selected) = self.state.selected_layer {
                 if selected < self.state.project.layers.len() {
@@ -1230,28 +1256,39 @@ impl eframe::App for PainterApp {
                 }
             }
         }
-        // Keep repainting while path overlay worker is active
         if self.state.path_worker.is_running() {
             ctx.request_repaint();
         }
 
-        // Poll generation results
+        // Generation worker
         if let Some(poll_result) = self.state.generation.poll() {
             match poll_result {
                 Ok(result) => self.apply_generation_result(ctx, result),
                 Err(msg) => {
                     self.state.status_message = msg;
-                    // Suppress auto-gen to prevent retry loop on failure
                     self.state.auto_gen_suppressed = true;
                 }
             }
         }
-        // Keep repainting while generation is in progress
         if self.state.generation.is_running() {
             ctx.request_repaint();
         }
 
-        // ── Top menu bar ──
+        // Remerge worker
+        if let Some(result) = self.remerge_worker.poll() {
+            self.apply_remerge_result(ctx, result);
+            if self.state.pending_remerge {
+                self.state.pending_remerge = false;
+                self.start_remerge();
+            }
+        }
+        if self.remerge_worker.is_running() {
+            ctx.request_repaint();
+        }
+    }
+
+    /// Top menu bar (File / Edit / View).
+    fn show_menu_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui: &mut egui::Ui| {
             egui::MenuBar::new().ui(ui, |ui: &mut egui::Ui| {
                 ui.menu_button("File", |ui: &mut egui::Ui| {
@@ -1320,8 +1357,10 @@ impl eframe::App for PainterApp {
                 });
             });
         });
+    }
 
-        // ── Bottom status bar ──
+    /// Bottom status bar (status message, resolution, layer count).
+    fn show_status_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("status_bar")
             .exact_height(24.0)
             .show(ctx, |ui: &mut egui::Ui| {
@@ -1334,27 +1373,25 @@ impl eframe::App for PainterApp {
                     ui.label(format!("{} layers", self.state.project.layers.len()));
                 });
             });
+    }
 
-        // ── Left sidebar ──
+    /// Left sidebar (layers, settings) and right sidebar (layer inspector).
+    fn show_sidebars(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("left_panel")
             .default_width(260.0)
             .min_width(220.0)
             .max_width(400.0)
             .show(ctx, |ui: &mut egui::Ui| {
-                // Bottom-pinned: Seed + Generate
                 egui::TopBottomPanel::bottom("left_bottom").show_inside(ui, |ui: &mut egui::Ui| {
                     sidebar::show_bottom(ui, &mut self.state);
                 });
-                // Fixed top: Base + Project Settings + Layers header
                 sidebar::show_top(ui, &mut self.state);
                 sidebar::show_layers_header(ui, &mut self.state);
-                // Scrollable layer rows
                 egui::ScrollArea::vertical().show(ui, |ui: &mut egui::Ui| {
                     sidebar::show_layer_rows(ui, &mut self.state);
                 });
             });
 
-        // ── Right sidebar (layer editor, only when a layer is selected) ──
         if self.state.selected_layer.is_some() {
             egui::SidePanel::right("right_panel")
                 .default_width(280.0)
@@ -1366,8 +1403,10 @@ impl eframe::App for PainterApp {
                     });
                 });
         }
+    }
 
-        // ── Window title ──
+    /// Central panel: viewport (UV/3D) or welcome screen.
+    fn show_central_panel(&mut self, ctx: &egui::Context) {
         let title = if let Some(ref path) = self.state.project_path {
             let name = path
                 .file_name()
@@ -1380,7 +1419,6 @@ impl eframe::App for PainterApp {
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        // ── Central viewport (or welcome screen) ──
         let render_state = self.render_state.clone();
         egui::CentralPanel::default().show(ctx, |ui: &mut egui::Ui| {
             let has_project = self.state.loaded_mesh.is_some() || self.state.project_path.is_some();
@@ -1388,7 +1426,6 @@ impl eframe::App for PainterApp {
             if has_project {
                 viewport::show(ui, &mut self.state, render_state.as_ref());
             } else {
-                // Welcome screen
                 ui.vertical_centered(|ui: &mut egui::Ui| {
                     ui.add_space(ui.available_height() * 0.3);
                     ui.heading("Practical Arcana Painter");
@@ -1416,10 +1453,11 @@ impl eframe::App for PainterApp {
                 });
             }
         });
+    }
 
-        self.show_mesh_load_popup(ctx);
-
-        // ── Reload Summary Window ──
+    /// Reload summary, export settings, and Escape key handling.
+    fn show_auxiliary_windows(&mut self, ctx: &egui::Context) {
+        // Reload Summary Window
         let mut dismiss_summary = false;
         if let Some(ref summary) = self.state.reload_summary {
             egui::Window::new("Mesh Reload Summary")
@@ -1452,26 +1490,25 @@ impl eframe::App for PainterApp {
             self.state.reload_summary = None;
         }
 
-        // ── Export Settings Window ──
         Self::show_export_settings_window(ctx, &mut self.state);
 
-        // ── Escape: deselect guide + return to Select tool ──
+        // Escape: deselect guide + return to Select tool.
         // Runs after panels so popup consume_key takes priority.
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             self.state.selected_guide = None;
             self.state.guide_tool = GuideTool::Select;
             self.state.show_export_settings = false;
         }
+    }
 
-        // ── Auto-preview: detect Type C/D parameter changes ──
+    /// Auto-preview debounce and remerge polling.
+    fn auto_preview_tick(&mut self, ctx: &egui::Context, project_replacing: bool) {
         if !project_replacing && self.state.loaded_mesh.is_some() {
             let current_render_hash = self.combined_render_hash();
             if current_render_hash != self.state.prev_render_hash
                 && self.state.prev_render_hash != 0
             {
-                // Render-affecting parameter changed — reset debounce timer
                 self.state.auto_preview_timer = Some(std::time::Instant::now());
-                // Parameter changed → allow auto-gen again
                 self.state.auto_gen_suppressed = false;
             }
             self.state.prev_render_hash = current_render_hash;
@@ -1496,30 +1533,6 @@ impl eframe::App for PainterApp {
                 }
             }
         }
-
-        // ── Poll async remerge results ──
-        if let Some(result) = self.remerge_worker.poll() {
-            self.apply_remerge_result(ctx, result);
-            // If settings changed while remerge was running, start another
-            if self.state.pending_remerge {
-                self.state.pending_remerge = false;
-                self.start_remerge();
-            }
-        }
-        // Keep repainting while remerge is in progress
-        if self.remerge_worker.is_running() {
-            ctx.request_repaint();
-        }
-
-        // ── Undo: track post-frame changes ──
-        let post_frame = self.state.take_snapshot();
-        if pre_frame != post_frame && !project_replacing {
-            self.state.dirty = true;
-        }
-        let pointer_down = ctx.input(|i| i.pointer.any_down());
-        self.state
-            .undo
-            .track_frame(&pre_frame, &post_frame, pointer_down);
     }
 }
 
