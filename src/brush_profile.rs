@@ -13,7 +13,7 @@ const GAP_DENSITY: usize = 15;
 
 /// Generate brush density profile.
 ///
-/// Returns: Vec<f32> of length `width`, values in [0, 1].
+/// Returns: `Vec<f32>` of length `width`, values in \[0, 1\].
 /// Each call with the same seed produces the same result.
 pub fn generate_brush_profile(width: usize, seed: u32) -> Vec<f32> {
     if width == 0 {

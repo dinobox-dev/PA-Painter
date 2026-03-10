@@ -173,7 +173,7 @@ pub fn direction_at(uv: Vec2, guides: &[Guide]) -> Vec2 {
 
 /// Generate a full direction field texture.
 ///
-/// Returns a Vec<Vec2> of length resolution * resolution, row-major.
+/// Returns a `Vec<Vec2>` of length resolution * resolution, row-major.
 /// Each element is a normalized direction vector.
 pub fn generate_direction_field(guides: &[Guide], resolution: u32) -> Vec<Vec2> {
     let res = resolution as usize;

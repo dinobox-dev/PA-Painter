@@ -58,9 +58,9 @@ pub struct LayerExportOptions<'a> {
 
 /// Normalize a height (density) map for export.
 ///
-/// Density values are already in [0, 1] range (effective_density × remaining).
+/// Density values are already in \[0, 1\] range (effective_density × remaining).
 ///
-/// Returns a new Vec<f32> with values in [0, 1].
+/// Returns a new `Vec<f32>` with values in \[0, 1\].
 pub fn normalize_height_map(height: &[f32]) -> Vec<f32> {
     height.iter().map(|&h| h.clamp(0.0, 1.0)).collect()
 }
@@ -198,7 +198,7 @@ pub fn generate_normal_map_depicted_form(
 ///   result.z = base.z
 ///   normalize(result)
 ///
-/// Both `paint_normals` and the base normal texture are [0,1] encoded
+/// Both `paint_normals` and the base normal texture are \[0,1\] encoded
 /// (0.5 = zero displacement). Output overwrites `paint_normals` in place.
 pub fn blend_normals_udn(
     paint_normals: &mut [[f32; 3]],

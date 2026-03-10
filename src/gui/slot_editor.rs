@@ -615,7 +615,7 @@ impl CurveCanvas {
         }
     }
 
-    /// Curve [x,y] → screen position.  y=0 is bottom, y=Y_MAX is top.
+    /// Curve \[x,y\] → screen position.  y=0 is bottom, y=Y_MAX is top.
     fn to_screen(&self, cx: f32, cy: f32) -> egui::Pos2 {
         egui::Pos2::new(
             self.rect.left() + cx * self.w,
@@ -623,7 +623,7 @@ impl CurveCanvas {
         )
     }
 
-    /// Screen position → curve [x,y].
+    /// Screen position → curve \[x,y\].
     fn to_curve(&self, pos: egui::Pos2) -> [f32; 2] {
         let cx = ((pos.x - self.rect.left()) / self.w).clamp(0.0, 1.0);
         let cy = ((self.rect.bottom() - pos.y) / self.h * Y_MAX).clamp(0.0, Y_MAX);
@@ -977,7 +977,7 @@ fn layer_material<'a>(
     mesh.materials.get(idx)
 }
 
-/// Color source picker: [Mesh][File][Solid] + context UI.
+/// Color source picker: \[Mesh\]\[File\]\[Solid\] + context UI.
 fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
     let group_name = state.project.layers[layer_idx].group_name.clone();
     let has_color_textures =
@@ -1069,7 +1069,7 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
     }
 }
 
-/// Normal source picker: [Mesh][File][∅ None] + context UI.
+/// Normal source picker: \[Mesh\]\[File\]\[∅ None\] + context UI.
 fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
     let group_name = state.project.layers[layer_idx].group_name.clone();
     let has_normal_textures =

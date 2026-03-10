@@ -66,7 +66,7 @@ The rendering engine is a 5-stage pipeline, each implemented as a standalone mod
 | 4 | `compositing` | Blend all visible layers into unified global maps |
 | 5 | `output` | Generate final color, normal, height, and AO textures |
 
-See [`docs/practical_arcana_painter_spec.md`](docs/practical_arcana_painter_spec.md) for the full specification.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for more details on the design.
 
 ## Output Maps
 

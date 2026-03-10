@@ -58,7 +58,7 @@ pub fn loaded_texture_raw_handle(
     )
 }
 
-/// Convert a Vec<Color> (linear float RGBA) to an egui TextureHandle.
+/// Convert a `Vec<Color>` (linear float RGBA) to an egui TextureHandle.
 pub fn color_buffer_to_handle(
     ctx: &egui::Context,
     colors: &[Color],
@@ -85,7 +85,7 @@ pub fn color_buffer_to_handle(
     )
 }
 
-/// Convert a height map (f32 values in [0,1]) to a grayscale texture.
+/// Convert a height map (f32 values in \[0,1\]) to a grayscale texture.
 pub fn height_buffer_to_handle(
     ctx: &egui::Context,
     heights: &[f32],
@@ -107,7 +107,7 @@ pub fn height_buffer_to_handle(
     )
 }
 
-/// Convert a normal map (Vec<[f32; 3]> with components in [0,1]) to a texture.
+/// Convert a normal map (`Vec<[f32; 3]>` with components in \[0,1\]) to a texture.
 /// Values are already encoded: 0.5 = zero perturbation, matching PNG export format.
 pub fn normal_map_to_handle(
     ctx: &egui::Context,
@@ -177,7 +177,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     (r + m, g + m, b + m)
 }
 
-/// Linear float [0,1] to u8 without gamma correction (for non-color data like normal maps).
+/// Linear float \[0,1\] to u8 without gamma correction (for non-color data like normal maps).
 pub(super) fn linear_to_raw_u8(l: f32) -> u8 {
     (l.clamp(0.0, 1.0) * 255.0) as u8
 }

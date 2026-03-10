@@ -522,7 +522,7 @@ impl Default for Guide {
 }
 
 /// A paint layer defining stroke parameters and direction guides.
-/// Pipeline type — covers the full UV space [0,1]², consumed by rendering engine.
+/// Pipeline type — covers the full UV space \[0,1\]², consumed by rendering engine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PaintLayer {
     pub name: String,
@@ -681,7 +681,7 @@ impl Layer {
         }
     }
 
-    /// Hash of the fields that affect [`render_layer()`] output.
+    /// Hash of the fields that affect `render_layer()` output.
     ///
     /// Covers `paint`, `guides`, `group_name`, `base_color`, and `seed`.
     /// Fields that only affect merge/output stages (`dry`, `visible`, `name`,
@@ -704,7 +704,7 @@ impl Layer {
 
     /// Hash of the fields that affect path generation only.
     ///
-    /// Subset of [`render_hash()`]. Type C parameters (`load`, `body_wiggle`,
+    /// Subset of `render_hash()`. Type C parameters (`load`, `body_wiggle`,
     /// `pressure_curve`, `color_variation`, `viscosity`, `normal_break_threshold`)
     /// are excluded — changing them allows cached paths to be reused while
     /// only re-running stroke height and compositing.
