@@ -7,7 +7,8 @@ use practical_arcana_painter::compositing::{
 };
 use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use practical_arcana_painter::output::{
-    export_all, export_layer_maps, export_manifest, ExportFormat, LayerManifestEntry,
+    export_all, export_layer_maps, export_manifest, ExportFormat, LayerExportOptions,
+    LayerManifestEntry,
 };
 use practical_arcana_painter::project::load_project;
 use practical_arcana_painter::stretch_map::{compute_stretch_map, StretchMap};
@@ -233,14 +234,16 @@ fn main() {
             export_layer_maps(
                 &layer_maps,
                 idx,
-                format,
-                project.settings.normal_strength,
-                project.settings.normal_mode,
-                normal_data.as_ref(),
-                true,  // color
-                true,  // height
-                true,  // normal
-                false, // time_map
+                &LayerExportOptions {
+                    format,
+                    normal_strength: project.settings.normal_strength,
+                    normal_mode: project.settings.normal_mode,
+                    normal_data: normal_data.as_ref(),
+                    include_color: true,
+                    include_height: true,
+                    include_normal: true,
+                    include_time_map: false,
+                },
                 &output_dir,
             )
             .unwrap_or_else(|e| {

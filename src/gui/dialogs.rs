@@ -9,7 +9,8 @@ use practical_arcana_painter::glb_export;
 use practical_arcana_painter::output::{
     export_color_exr, export_color_png, export_height_exr, export_height_png, export_layer_maps,
     export_manifest, export_normal_png, export_stroke_id_png, export_stroke_time_exr,
-    export_stroke_time_png, normalize_height_map, ExportFormat, LayerManifestEntry,
+    export_stroke_time_png, normalize_height_map, ExportFormat, LayerExportOptions,
+    LayerManifestEntry,
 };
 use practical_arcana_painter::project::{
     load_project, save_project, utc_now_iso8601, OutputCache, Project,
@@ -622,14 +623,16 @@ pub fn export_maps_to(state: &mut AppState, dir: &Path) {
             match export_layer_maps(
                 maps,
                 idx,
-                es.format,
-                normal_strength,
-                normal_mode,
-                normal_data,
-                es.include_color,
-                es.include_height,
-                es.include_normal,
-                es.include_time_map,
+                &LayerExportOptions {
+                    format: es.format,
+                    normal_strength,
+                    normal_mode,
+                    normal_data,
+                    include_color: es.include_color,
+                    include_height: es.include_height,
+                    include_normal: es.include_normal,
+                    include_time_map: es.include_time_map,
+                },
                 dir,
             ) {
                 Ok(n) => count += n,

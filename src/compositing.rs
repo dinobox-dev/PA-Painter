@@ -623,6 +623,7 @@ pub fn composite_all(
 /// `order`-sorted sequence (as returned by [`generate_all_paths`]).
 /// When `None`, paths are generated in parallel via rayon before
 /// sequential compositing.
+#[allow(clippy::too_many_arguments)]
 pub fn composite_all_with_paths(
     layers: &[PaintLayer],
     resolution: u32,
@@ -916,6 +917,7 @@ pub fn composite_layer(
 /// The returned `LayerMaps` can be cached and reused when the layer's
 /// parameters haven't changed, enabling fast re-compositing via
 /// `merge_layers()`.
+#[allow(clippy::too_many_arguments)]
 pub fn render_layer(
     layer: &PaintLayer,
     layer_index: u32,

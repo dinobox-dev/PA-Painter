@@ -610,14 +610,9 @@ pub struct RemergeResult {
 }
 
 /// Lightweight async worker for re-merge operations.
+#[derive(Default)]
 pub struct RemergeWorker {
     handle: Option<thread::JoinHandle<Option<RemergeResult>>>,
-}
-
-impl Default for RemergeWorker {
-    fn default() -> Self {
-        Self { handle: None }
-    }
 }
 
 impl RemergeWorker {

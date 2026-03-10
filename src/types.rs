@@ -224,9 +224,10 @@ impl PartialEq for EmbeddedTexture {
 }
 
 /// Per-layer texture source for base color or base normal.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum TextureSource {
     /// No texture assigned.  Color default → solid gray; Normal default → unused.
+    #[default]
     None,
     /// Solid color (color layers only).
     Solid([f32; 3]),
@@ -235,12 +236,6 @@ pub enum TextureSource {
     /// External file.  `Some` = loaded; `None` = slot reserved but file not yet chosen
     /// (rendered as a checkerboard warning pattern).
     File(Option<EmbeddedTexture>),
-}
-
-impl Default for TextureSource {
-    fn default() -> Self {
-        TextureSource::None
-    }
 }
 
 /// Generate a 256×256 magenta/black checkerboard warning texture (16px tiles).
@@ -256,7 +251,11 @@ pub fn checkerboard_warning_texture() -> EmbeddedTexture {
         for x in 0..size {
             let tx = x / tile;
             let ty = y / tile;
-            pixels.push(if (tx + ty) % 2 == 0 { magenta } else { black });
+            pixels.push(if (tx + ty).is_multiple_of(2) {
+                magenta
+            } else {
+                black
+            });
         }
     }
     let content_hash = EmbeddedTexture::compute_content_hash(&pixels);

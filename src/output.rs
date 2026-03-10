@@ -42,6 +42,18 @@ pub enum ExportFormat {
     Exr,
 }
 
+/// Options for per-layer map export.
+pub struct LayerExportOptions<'a> {
+    pub format: ExportFormat,
+    pub normal_strength: f32,
+    pub normal_mode: NormalMode,
+    pub normal_data: Option<&'a MeshNormalData>,
+    pub include_color: bool,
+    pub include_height: bool,
+    pub include_normal: bool,
+    pub include_time_map: bool,
+}
+
 // ── Height Map Normalization ──
 
 /// Normalize a height (density) map for export.
@@ -546,23 +558,16 @@ pub fn export_manifest(
 pub fn export_layer_maps(
     layer: &LayerMaps,
     index: usize,
-    format: ExportFormat,
-    normal_strength: f32,
-    normal_mode: NormalMode,
-    normal_data: Option<&MeshNormalData>,
-    include_color: bool,
-    include_height: bool,
-    include_normal: bool,
-    include_time_map: bool,
+    opts: &LayerExportOptions<'_>,
     output_dir: &Path,
 ) -> Result<u32, OutputError> {
     let res = layer.resolution;
     let prefix = format!("layer_{index}");
     let mut count = 0u32;
 
-    if include_color {
+    if opts.include_color {
         // Per-layer color always has alpha (transparent where unpainted).
-        match format {
+        match opts.format {
             ExportFormat::Png => export_color_png(
                 &layer.color,
                 res,
@@ -579,9 +584,9 @@ pub fn export_layer_maps(
         count += 1;
     }
 
-    if include_height {
+    if opts.include_height {
         let normalized = normalize_height_map(&layer.height);
-        match format {
+        match opts.format {
             ExportFormat::Png => export_height_png(
                 &normalized,
                 res,
@@ -596,8 +601,8 @@ pub fn export_layer_maps(
         count += 1;
     }
 
-    if include_normal {
-        let normals = match (normal_mode, normal_data) {
+    if opts.include_normal {
+        let normals = match (opts.normal_mode, opts.normal_data) {
             (NormalMode::DepictedForm, Some(nd)) => generate_normal_map_depicted_form(
                 &layer.gradient_x,
                 &layer.gradient_y,
@@ -605,9 +610,14 @@ pub fn export_layer_maps(
                 &layer.object_normal,
                 &layer.paint_load,
                 res,
-                normal_strength,
+                opts.normal_strength,
             ),
-            _ => generate_normal_map(&layer.gradient_x, &layer.gradient_y, res, normal_strength),
+            _ => generate_normal_map(
+                &layer.gradient_x,
+                &layer.gradient_y,
+                res,
+                opts.normal_strength,
+            ),
         };
         export_normal_png(
             &normals,
@@ -617,8 +627,8 @@ pub fn export_layer_maps(
         count += 1;
     }
 
-    if include_time_map {
-        match format {
+    if opts.include_time_map {
+        match opts.format {
             ExportFormat::Png => export_stroke_time_png(
                 &layer.stroke_time_order,
                 &layer.stroke_time_arc,

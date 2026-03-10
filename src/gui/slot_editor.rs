@@ -949,18 +949,12 @@ fn source_button(
 }
 
 /// Determine current SourceMode from a TextureSource value.
-fn current_mode(src: &TextureSource, is_color: bool) -> SourceMode {
+fn current_mode(src: &TextureSource) -> SourceMode {
     match src {
         TextureSource::MeshMaterial(_) => SourceMode::Mesh,
         TextureSource::File(_) => SourceMode::File,
         TextureSource::Solid(_) => SourceMode::SolidOrNone,
-        TextureSource::None => {
-            if is_color {
-                SourceMode::SolidOrNone
-            } else {
-                SourceMode::SolidOrNone
-            }
-        }
+        TextureSource::None => SourceMode::SolidOrNone,
     }
 }
 
@@ -989,7 +983,7 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
     let has_color_textures =
         layer_material(state, &group_name).is_some_and(|mat| mat.base_color_texture.is_some());
 
-    let mode = current_mode(&state.project.layers[layer_idx].base_color, true);
+    let mode = current_mode(&state.project.layers[layer_idx].base_color);
 
     ui.horizontal(|ui: &mut egui::Ui| {
         ui.label("Color");
@@ -1015,13 +1009,11 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
             "Load from file",
             mode == SourceMode::File,
             true,
+        ) && !matches!(
+            state.project.layers[layer_idx].base_color,
+            TextureSource::File(_)
         ) {
-            if !matches!(
-                state.project.layers[layer_idx].base_color,
-                TextureSource::File(_)
-            ) {
-                state.project.layers[layer_idx].base_color = TextureSource::File(None);
-            }
+            state.project.layers[layer_idx].base_color = TextureSource::File(None);
         }
 
         // Solid button
@@ -1031,13 +1023,11 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
             "Solid color",
             mode == SourceMode::SolidOrNone,
             true,
+        ) && !matches!(
+            state.project.layers[layer_idx].base_color,
+            TextureSource::Solid(_) | TextureSource::None
         ) {
-            if !matches!(
-                state.project.layers[layer_idx].base_color,
-                TextureSource::Solid(_) | TextureSource::None
-            ) {
-                state.project.layers[layer_idx].base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
-            }
+            state.project.layers[layer_idx].base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
         }
 
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -1086,7 +1076,7 @@ fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
         layer_material(state, &group_name).is_some_and(|mat| mat.normal_texture.is_some());
 
     let old_normal = state.project.layers[layer_idx].base_normal.clone();
-    let mode = current_mode(&state.project.layers[layer_idx].base_normal, false);
+    let mode = current_mode(&state.project.layers[layer_idx].base_normal);
 
     ui.horizontal(|ui: &mut egui::Ui| {
         ui.label("Normal");
@@ -1112,13 +1102,11 @@ fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
             "Load from file",
             mode == SourceMode::File,
             true,
+        ) && !matches!(
+            state.project.layers[layer_idx].base_normal,
+            TextureSource::File(_)
         ) {
-            if !matches!(
-                state.project.layers[layer_idx].base_normal,
-                TextureSource::File(_)
-            ) {
-                state.project.layers[layer_idx].base_normal = TextureSource::File(None);
-            }
+            state.project.layers[layer_idx].base_normal = TextureSource::File(None);
         }
 
         // None button
