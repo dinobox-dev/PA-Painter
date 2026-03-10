@@ -2,6 +2,7 @@
 //! into UV space for the *Depicted Form* normal mode.
 
 use glam::{Vec2, Vec3};
+use log::debug;
 
 use crate::asset_io::LoadedMesh;
 
@@ -25,6 +26,12 @@ pub struct MeshNormalData {
 /// 2. Compute per-triangle TBN basis from UV gradients.
 /// 3. Rasterize triangles in UV space using barycentric interpolation.
 pub fn compute_mesh_normal_data(mesh: &LoadedMesh, resolution: u32) -> MeshNormalData {
+    debug!(
+        "Computing mesh normal data: {} triangles, {}×{} resolution",
+        mesh.indices.len() / 3,
+        resolution,
+        resolution
+    );
     let size = (resolution * resolution) as usize;
     let mut object_normals = vec![Vec3::ZERO; size];
     let mut tangents = vec![Vec3::ZERO; size];

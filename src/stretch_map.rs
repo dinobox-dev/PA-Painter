@@ -4,6 +4,7 @@
 //! arc length are uniform in 3D space regardless of UV unwrap quality.
 
 use glam::{Vec2, Vec3};
+use log::debug;
 
 use crate::asset_io::LoadedMesh;
 
@@ -59,6 +60,12 @@ impl StretchMap {
 /// rasterizes it into a UV-space grid. Overlapping triangles are averaged
 /// via accumulate-then-divide.
 pub fn compute_stretch_map(mesh: &LoadedMesh, resolution: u32) -> StretchMap {
+    debug!(
+        "Computing stretch map: {} triangles, {}×{} resolution",
+        mesh.indices.len() / 3,
+        resolution,
+        resolution
+    );
     let size = (resolution * resolution) as usize;
     let mut accum = vec![0.0_f32; size];
     let mut count = vec![0u16; size];
