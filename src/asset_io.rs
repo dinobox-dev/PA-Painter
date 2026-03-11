@@ -668,7 +668,7 @@ pub fn extract_uv_edges(mesh: &LoadedMesh) -> Vec<(Vec2, Vec2)> {
 }
 
 // ---------------------------------------------------------------------------
-// PNG encode/decode helpers (for .pap asset embedding)
+// PNG encode/decode helpers (for .papr asset embedding)
 // ---------------------------------------------------------------------------
 
 /// Encode linear RGBA pixels as an sRGB PNG (for base color textures).

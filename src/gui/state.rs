@@ -207,7 +207,7 @@ pub struct ViewportState {
 
 // ── Persisted Editor State ────────────────────────────────────────
 
-/// Editor UI state that is saved to `editor.json` inside the `.pap` ZIP.
+/// Editor UI state that is saved to `editor.json` inside the `.papr` ZIP.
 /// All fields use `#[serde(default)]` so older files missing any field
 /// gracefully fall back to defaults.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -362,7 +362,7 @@ pub struct MeshLoadPopup {
     pub pending_path: PathBuf,
     /// File format string (e.g. "glb", "obj").
     pub pending_format: String,
-    /// Raw mesh bytes for .pap embedding.
+    /// Raw mesh bytes for .papr embedding.
     pub pending_bytes: Option<Vec<u8>>,
 }
 

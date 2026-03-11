@@ -1,6 +1,6 @@
-//! `.pap` project file I/O and the top-level [`Project`] data model.
+//! `.papr` project file I/O and the top-level [`Project`] data model.
 //!
-//! A `.pap` file is a ZIP archive with the following structure:
+//! A `.papr` file is a ZIP archive with the following structure:
 //!
 //! - `manifest.json` — version, app name, timestamps
 //! - `project.json` — layers, presets, settings, mesh reference (unified)
@@ -130,7 +130,7 @@ pub struct Project {
     pub presets: PresetLibrary,
     pub settings: OutputSettings,
     pub export_settings: ExportSettings,
-    /// Raw mesh file bytes for embedding in .pap ZIP.
+    /// Raw mesh file bytes for embedding in .papr ZIP.
     /// Populated on new project / load, written to `assets/mesh.*` on save.
     pub mesh_bytes: Option<Vec<u8>>,
     /// Runtime path cache — one entry per layer in order-sorted sequence.
@@ -227,7 +227,7 @@ impl Project {
 
 // ── Save/Load Data Structures ──
 
-/// Cached generation output for saving into the .pap file.
+/// Cached generation output for saving into the .papr file.
 pub struct OutputCache<'a> {
     pub color: &'a [Color],
     pub height: &'a [f32],
@@ -239,7 +239,7 @@ pub struct OutputCache<'a> {
     pub snapshot_hash: Option<u64>,
 }
 
-/// Generation output loaded from a .pap file.
+/// Generation output loaded from a .papr file.
 pub struct LoadedOutput {
     pub color: Vec<Color>,
     pub height: Vec<f32>,
@@ -251,7 +251,7 @@ pub struct LoadedOutput {
     pub snapshot_hash: Option<u64>,
 }
 
-/// Result of loading a .pap file.
+/// Result of loading a .papr file.
 pub struct LoadResult {
     pub project: Project,
     /// Mesh parsed from embedded bytes.
@@ -333,7 +333,7 @@ fn generate_thumbnail(output: &OutputCache<'_>) -> Option<Vec<u8>> {
 
 // ── Save ──
 
-/// Save a project to a `.pap` file.
+/// Save a project to a `.papr` file.
 ///
 /// If `output` is provided, the generated maps are stored as PNG in `output/`
 /// and a 256×256 thumbnail is generated.
@@ -349,7 +349,7 @@ pub fn save_project(
 ) -> Result<(), ProjectError> {
     info!("Saving project to {}", path.display());
     // Write to a temp file first, then rename — prevents corruption if save fails midway.
-    let tmp_path = path.with_extension("pap.tmp");
+    let tmp_path = path.with_extension("papr.tmp");
     let file = std::fs::File::create(&tmp_path)?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -470,7 +470,7 @@ pub fn save_project(
 
 // ── Load ──
 
-/// Load a project from a `.pap` file.
+/// Load a project from a `.papr` file.
 ///
 /// Returns a [`LoadResult`] containing the project, the parsed mesh (if any),
 /// and cached output maps (if present).
@@ -834,7 +834,7 @@ mod tests {
     #[test]
     fn round_trip_empty_project() {
         let project = make_empty_project();
-        let path = temp_pap_path("empty.pap");
+        let path = temp_pap_path("empty.papr");
 
         save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
@@ -848,7 +848,7 @@ mod tests {
     #[test]
     fn round_trip_with_layers() {
         let project = make_project_with_layers();
-        let path = temp_pap_path("with_layers.pap");
+        let path = temp_pap_path("with_layers.papr");
 
         save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
@@ -903,7 +903,7 @@ mod tests {
             snapshot_hash: None,
         };
 
-        let path = temp_pap_path("with_output.pap");
+        let path = temp_pap_path("with_output.papr");
         save_project(&project, &path, Some(output), None).unwrap();
         let result = load_project(&path).unwrap();
 
@@ -922,7 +922,7 @@ mod tests {
     #[test]
     fn round_trip_without_output() {
         let project = make_project_with_layers();
-        let path = temp_pap_path("no_output.pap");
+        let path = temp_pap_path("no_output.papr");
 
         save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
@@ -935,7 +935,7 @@ mod tests {
         let mut project = make_empty_project();
         project.layers = vec![make_test_layer("detailed", 0, 10)];
 
-        let path = temp_pap_path("complex_guides.pap");
+        let path = temp_pap_path("complex_guides.papr");
         save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 
@@ -958,7 +958,7 @@ mod tests {
     #[test]
     fn valid_zip_structure() {
         let project = make_project_with_layers();
-        let path = temp_pap_path("zip_structure.pap");
+        let path = temp_pap_path("zip_structure.papr");
         save_project(&project, &path, None, None).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -972,7 +972,7 @@ mod tests {
     #[test]
     fn json_readable() {
         let project = make_project_with_layers();
-        let path = temp_pap_path("json_readable.pap");
+        let path = temp_pap_path("json_readable.papr");
         save_project(&project, &path, None, None).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -997,7 +997,7 @@ mod tests {
             ..OutputSettings::default()
         };
 
-        let path = temp_pap_path("settings_test.pap");
+        let path = temp_pap_path("settings_test.papr");
         save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 
@@ -1030,7 +1030,7 @@ mod tests {
             snapshot_hash: None,
         };
 
-        let path = temp_pap_path("with_thumbnail.pap");
+        let path = temp_pap_path("with_thumbnail.papr");
         save_project(&project, &path, Some(output), None).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -1045,7 +1045,7 @@ mod tests {
     #[test]
     fn no_thumbnail_without_output() {
         let project = make_empty_project();
-        let path = temp_pap_path("no_thumbnail.pap");
+        let path = temp_pap_path("no_thumbnail.papr");
         save_project(&project, &path, None, None).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
@@ -1061,7 +1061,7 @@ mod tests {
 
     #[test]
     fn load_nonexistent_file() {
-        let result = load_project(Path::new("/tmp/definitely_missing_file.pap"));
+        let result = load_project(Path::new("/tmp/definitely_missing_file.papr"));
         assert!(result.is_err());
         match result.unwrap_err() {
             ProjectError::Io(_) => {}
@@ -1071,7 +1071,7 @@ mod tests {
 
     #[test]
     fn load_invalid_zip() {
-        let path = temp_pap_path("invalid.pap");
+        let path = temp_pap_path("invalid.papr");
         std::fs::write(&path, b"this is not a zip file").unwrap();
 
         let result = load_project(&path);
@@ -1084,7 +1084,7 @@ mod tests {
 
     #[test]
     fn load_missing_manifest() {
-        let path = temp_pap_path("no_manifest.pap");
+        let path = temp_pap_path("no_manifest.papr");
         {
             let file = std::fs::File::create(&path).unwrap();
             let mut zip = ZipWriter::new(file);
@@ -1112,7 +1112,7 @@ mod tests {
     #[test]
     fn round_trip_integrity() {
         let project = make_project_with_layers();
-        let path = temp_pap_path("integrity.pap");
+        let path = temp_pap_path("integrity.papr");
 
         save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
@@ -1165,7 +1165,7 @@ mod tests {
         let mut project = make_empty_project();
         project.presets = PresetLibrary::built_in();
 
-        let path = temp_pap_path("presets_rt.pap");
+        let path = temp_pap_path("presets_rt.papr");
         save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 
@@ -1190,7 +1190,7 @@ mod tests {
         let mut project = make_empty_project();
         project.layers = vec![make_test_layer("test", 0, 1)];
 
-        let path = temp_pap_path("visible_default.pap");
+        let path = temp_pap_path("visible_default.papr");
         save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 

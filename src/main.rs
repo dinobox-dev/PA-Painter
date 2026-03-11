@@ -18,7 +18,7 @@ use pa_painter::types::NormalMode;
 use pa_painter::uv_mask::UvMask;
 
 fn usage() -> ! {
-    eprintln!("Usage: pa-painter <project.pap> [options]");
+    eprintln!("Usage: pa-painter <project.papr> [options]");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -o, --output <dir>       Output directory (default: ./output)");

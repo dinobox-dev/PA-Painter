@@ -69,7 +69,7 @@ egui/eframe application in `src/main_gui.rs`, with sub-modules:
 
 ### CLI (`src/main.rs`)
 
-Loads a `.pap` project, runs the pipeline, and exports maps. No GUI dependency.
+Loads a `.papr` project, runs the pipeline, and exports maps. No GUI dependency.
 
 ## Key Design Decisions
 
@@ -85,7 +85,7 @@ Loads a `.pap` project, runs the pipeline, and exports maps. No GUI dependency.
 - **Binary ↔ library import boundary**: GUI modules use
   `pa_painter::` (external crate path), not `crate::`.
 
-## Project File Format (`.pap`)
+## Project File Format (`.papr`)
 
 A ZIP archive (Deflate) containing JSON metadata, embedded assets, and cached
 output maps. Current version: **1**.

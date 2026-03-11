@@ -3,7 +3,7 @@
 .DS_Store
 
 # Project files
-*.pap
+*.papr
 *.obj
 !tests/fixtures/*.obj
 output/

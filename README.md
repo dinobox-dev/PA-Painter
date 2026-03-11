@@ -18,7 +18,7 @@ Originally built for *Practical Arcana* (coming soon), but works with any UV-map
 - **3D preview**: real-time mesh preview with generated textures applied
 - **GUI editor**: full-featured editor built with egui/eframe
 - **CLI renderer**: headless batch rendering for automation
-- **File format**: `.pap` project files with undo/redo support
+- **File format**: `.papr` project files with undo/redo support
 
 ## Building
 
@@ -32,13 +32,13 @@ cargo build --release
 cargo run --release --bin pa-painter-gui
 
 # Run the CLI renderer
-cargo run --release --bin pa-painter -- <input.pap> -o output/
+cargo run --release --bin pa-painter -- <input.papr> -o output/
 ```
 
 ### CLI Options
 
 ```
-Usage: pa-painter <project.pap> [options]
+Usage: pa-painter <project.papr> [options]
 
 Options:
   -o, --output <dir>       Output directory (default: ./output)
@@ -53,7 +53,7 @@ Options:
 - **Mesh import**: OBJ, GLB/GLTF
 - **Texture export**: PNG, OpenEXR
 - **3D export**: GLB (with generated textures baked in)
-- **Project files**: `.pap` (ZIP-based, contains JSON + asset references)
+- **Project files**: `.papr` (ZIP-based, contains JSON + asset references)
 
 ## Architecture
 

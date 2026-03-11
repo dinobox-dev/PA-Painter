@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Output maps: color, normal (tangent-space and depicted-form), height, stroke ID, and stroke time (order + arc-length)
 - Export formats: PNG, OpenEXR, GLB (with baked textures)
 - Mesh import: OBJ and glTF/GLB with UV and vertex group support
-- `.pap` project file format (ZIP-based) with auto-save and undo history
+- `.papr` project file format (ZIP-based) with auto-save and undo history
 - Poisson-disk sampling with overscan and multi-pass refinement
 - Color/normal boundary break detection for natural stroke termination
 - GitHub Actions CI and cross-platform release workflows

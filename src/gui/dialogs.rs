@@ -62,7 +62,7 @@ fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<bool, String> {
     Ok(changed)
 }
 
-/// Apply an already-loaded mesh (e.g. from a .pap file) into app state.
+/// Apply an already-loaded mesh (e.g. from a .papr file) into app state.
 /// Returns `true` if geometry changed (hash mismatch), `false` if identical.
 fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool {
     state.uv_edges = Some(extract_uv_edges(&mesh));
@@ -99,12 +99,12 @@ fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool {
 
 // ── Project Operations ─────────────────────────────────────────────
 
-/// Open a file dialog and load a .pap project.
+/// Open a file dialog and load a .papr project.
 /// Returns true if a project was successfully loaded.
 pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
     state.modal_dialog_active = true;
     let path = rfd::FileDialog::new()
-        .add_filter("PA Painter Project", &["pap"])
+        .add_filter("PA Painter Project", &["papr"])
         .pick_file();
     state.modal_dialog_active = false;
 
@@ -410,14 +410,14 @@ pub fn save_project_action(state: &mut AppState) {
     } else {
         state.modal_dialog_active = true;
         let result = rfd::FileDialog::new()
-            .add_filter("PA Painter Project", &["pap"])
+            .add_filter("PA Painter Project", &["papr"])
             .save_file();
         state.modal_dialog_active = false;
         let Some(mut path) = result else {
             return;
         };
         if path.extension().is_none() {
-            path.set_extension("pap");
+            path.set_extension("papr");
         }
         path
     };
