@@ -100,6 +100,7 @@ impl PainterApp {
     fn start_generation(&mut self) {
         self.state.auto_preview_timer = None;
         self.state.generation.progressive_queue.clear();
+        self.state.generation.progressive_total = 1;
         self.start_generation_at_resolution(
             self.state.project.settings.resolution_preset.resolution(),
             false,
@@ -119,6 +120,7 @@ impl PainterApp {
         }
         // Final full-res is always added (handled as is_preview=false when dequeued).
         queue.push(full);
+        self.state.generation.progressive_total = queue.len() as u32 + 1; // +1 for initial preview
         self.state.generation.progressive_queue = queue;
 
         self.start_generation_at_resolution(Self::PREVIEW_RESOLUTION, true);
@@ -136,7 +138,10 @@ impl PainterApp {
         } else {
             self.state.status_message = format!("Generating at {}px...", resolution);
         }
-        self.state.generation.start_time = Some(std::time::Instant::now());
+        // Preserve start_time across progressive steps; only set if not already running.
+        if self.state.generation.start_time.is_none() {
+            self.state.generation.start_time = Some(std::time::Instant::now());
+        }
         self.state.generation.is_preview = is_preview;
 
         let layers = self.state.project.paint_layers();
@@ -322,8 +327,14 @@ impl PainterApp {
                 self.state.mesh_hash.hash(&mut h);
                 h.finish()
             };
-            self.state.status_message =
-                format!("Generated in {:.1}s", result.elapsed.as_secs_f32());
+            let total_elapsed = self
+                .state
+                .generation
+                .start_time
+                .map(|t| t.elapsed().as_secs_f32())
+                .unwrap_or(result.elapsed.as_secs_f32());
+            self.state.status_message = format!("Generated in {:.1}s", total_elapsed);
+            self.state.generation.start_time = None;
             self.state.generated = Some(result);
             self.state.dirty = true;
         }

@@ -104,6 +104,8 @@ pub struct GenerationManager {
     /// Each completed preview pops the front and starts the next.
     /// Empty means the current run is the final (full-res) step.
     pub progressive_queue: Vec<u32>,
+    /// Total number of progressive steps (initial + queue) for overall progress display.
+    pub progressive_total: u32,
 }
 
 impl Default for GenerationManager {
@@ -119,6 +121,7 @@ impl Default for GenerationManager {
             cache_global_hash: 0,
             is_preview: false,
             progressive_queue: Vec::new(),
+            progressive_total: 1,
         }
     }
 }
@@ -128,10 +131,17 @@ impl GenerationManager {
         self.handle.as_ref().is_some_and(|h| !h.is_finished())
     }
 
-    /// Current generation progress (0.0–1.0).
-    #[allow(dead_code)]
+    /// Current generation progress (0.0–1.0) for the active step only.
     pub fn progress(&self) -> f32 {
         f32::from_bits(self.progress.load(Ordering::Relaxed))
+    }
+
+    /// Overall progress across all progressive steps (0.0–1.0).
+    pub fn overall_progress(&self) -> f32 {
+        let total = self.progressive_total.max(1) as f32;
+        let remaining = self.progressive_queue.len() as f32;
+        let completed_steps = total - remaining - 1.0; // steps already done
+        ((completed_steps + self.progress()) / total).clamp(0.0, 1.0)
     }
 
     /// Current pipeline stage identifier.
@@ -145,7 +155,7 @@ impl GenerationManager {
     /// The elapsed time is overridden to include main-thread pre-computation.
     pub fn poll(&mut self) -> Option<Result<GenResult, String>> {
         if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
-            let total_elapsed = self.start_time.take().map(|t| t.elapsed());
+            let total_elapsed = self.start_time.map(|t| t.elapsed());
             match self
                 .handle
                 .take()

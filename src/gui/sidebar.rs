@@ -634,10 +634,48 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
             se: r,
         };
 
-        // ── Export (left zone) ──
+        // ── Export (left zone) — doubles as progress bar during generation ──
+        let generating = state.generation.is_running();
         let (export_rect, export_resp) =
             ui.allocate_exact_size(btn_size, egui::Sense::click() | egui::Sense::hover());
-        {
+
+        if generating {
+            // Progress bar mode
+            let progress = state.generation.overall_progress();
+            ui.painter()
+                .rect_filled(export_rect, left_rounding, base_fill);
+
+            // Filled portion
+            if progress > 0.0 {
+                let fill_width = export_rect.width() * progress;
+                let fill_rect = egui::Rect::from_min_size(
+                    export_rect.min,
+                    egui::Vec2::new(fill_width, export_rect.height()),
+                );
+                let fill_rounding = if progress > 0.99 {
+                    left_rounding
+                } else {
+                    egui::Rounding {
+                        ne: 0,
+                        se: 0,
+                        ..left_rounding
+                    }
+                };
+                let accent = ui.visuals().selection.bg_fill;
+                ui.painter().rect_filled(fill_rect, fill_rounding, accent);
+            }
+
+            // Label
+            let label = format!("Generating… {:.0}%", progress * 100.0);
+            ui.painter().text(
+                export_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                egui::TextStyle::Button.resolve(ui.style()),
+                ui.visuals().widgets.inactive.fg_stroke.color,
+            );
+        } else {
+            // Normal export button
             let fill = if has_result && export_resp.hovered() {
                 ui.visuals().widgets.hovered.bg_fill
             } else {
@@ -658,16 +696,16 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
                 egui::TextStyle::Button.resolve(ui.style()),
                 text_color,
             );
-        }
-        if has_result && export_resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-        if has_result && export_resp.clicked() {
-            state.pending_export = true;
-        }
-        if stale && export_resp.hovered() {
-            export_resp
-                .on_hover_text("Result is outdated — parameters changed since last generation");
+            if has_result && export_resp.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if has_result && export_resp.clicked() {
+                state.pending_export = true;
+            }
+            if stale && export_resp.hovered() {
+                export_resp
+                    .on_hover_text("Result is outdated — parameters changed since last generation");
+            }
         }
 
         // ── ⚙ gear (right zone, always clickable) ──
