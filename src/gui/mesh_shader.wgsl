@@ -61,7 +61,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let n = normalize(mix(N, world_normal, normal_sample.a));
     let ndotl = max(dot(n, u.light_dir), 0.0);
     let lighting = u.ambient + (1.0 - u.ambient) * ndotl;
-    var base = tex_color.rgb * lighting;
+    let bg = vec3(0.18, 0.18, 0.2);
+    var base = mix(bg, tex_color.rgb * lighting, tex_color.a);
 
     // Drawing mode: reveal strokes over time (seconds-based)
     if u.mode == 1u {
