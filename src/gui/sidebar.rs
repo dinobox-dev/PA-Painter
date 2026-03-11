@@ -621,13 +621,13 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
             )
         };
         let r: u8 = 3; // match egui default button rounding
-        let left_rounding = egui::Rounding {
+        let left_rounding = egui::CornerRadius {
             nw: r,
             ne: 0,
             sw: r,
             se: 0,
         };
-        let right_rounding = egui::Rounding {
+        let right_rounding = egui::CornerRadius {
             nw: 0,
             ne: r,
             sw: 0,
@@ -655,7 +655,7 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
                 let fill_rounding = if progress > 0.99 {
                     left_rounding
                 } else {
-                    egui::Rounding {
+                    egui::CornerRadius {
                         ne: 0,
                         se: 0,
                         ..left_rounding

@@ -1418,7 +1418,7 @@ impl PainterApp {
             .max_width(400.0)
             .show(ctx, |ui: &mut egui::Ui| {
                 egui::TopBottomPanel::bottom("left_bottom")
-                    .frame(egui::Frame::none().inner_margin(0.0))
+                    .frame(egui::Frame::new().inner_margin(0.0))
                     .show_separator_line(false)
                     .show_inside(ui, |ui: &mut egui::Ui| {
                         sidebar::show_bottom(ui, &mut self.state);
