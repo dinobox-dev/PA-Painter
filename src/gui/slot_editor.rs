@@ -28,6 +28,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
     let group_names = build_group_names(state);
     ui.spacing_mut().indent = SECTION_INDENT;
+    let old_dry = state.project.layers[idx].dry;
 
     // ── Layer ──
     section_header(ui, "Layer");
@@ -64,6 +65,41 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
         // Normal source picker
         show_normal_source(ui, state, idx);
+
+        // Paint after Dry
+        {
+            let layer = &mut state.project.layers[idx];
+            slider_row(
+                ui,
+                "dry",
+                &mut layer.dry,
+                0.0..=1.0,
+                "Paint after Dry",
+                Some(0.01),
+                2,
+            );
+        }
+
+        // Seed row: 6-letter code + Shuffle button
+        {
+            let layer = &mut state.project.layers[idx];
+            ui.horizontal(|ui: &mut egui::Ui| {
+                ui.label("Seed");
+                let seed_text = seed_to_alpha(layer.seed);
+                ui.add(
+                    egui::TextEdit::singleline(&mut seed_text.clone())
+                        .desired_width(56.0)
+                        .font(egui::TextStyle::Monospace)
+                        .interactive(false),
+                );
+                if ui.small_button("Shuffle").clicked() {
+                    layer.seed = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| (d.as_millis() & 0xFFFFFFFF) as u32)
+                        .unwrap_or(1234);
+                }
+            });
+        }
     });
 
     ui.separator();
@@ -83,7 +119,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     });
     ui.add_space(1.0);
 
-    let old_dry = state.project.layers[idx].dry;
     ui.indent("paint_content", |ui: &mut egui::Ui| {
         let layer = &mut state.project.layers[idx];
         let layer_seed = layer.seed;
@@ -91,37 +126,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
 
         // Pressure curve + stroke preview (top)
         show_combined_stroke_curve(ui, &mut layer.paint, layer_seed, &mut cache.stroke);
-
-        ui.add_space(4.0);
-
-        ui.label(egui::RichText::new("Layer").weak());
-        slider_row(
-            ui,
-            "dry",
-            &mut layer.dry,
-            0.0..=1.0,
-            "Paint after Dry",
-            Some(0.01),
-            2,
-        );
-
-        // Seed row: 6-letter code + Shuffle button
-        ui.horizontal(|ui: &mut egui::Ui| {
-            ui.label("Seed");
-            let seed_text = seed_to_alpha(layer.seed);
-            ui.add(
-                egui::TextEdit::singleline(&mut seed_text.clone())
-                    .desired_width(56.0)
-                    .font(egui::TextStyle::Monospace)
-                    .interactive(false),
-            );
-            if ui.small_button("Shuffle").clicked() {
-                layer.seed = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| (d.as_millis() & 0xFFFFFFFF) as u32)
-                    .unwrap_or(1234);
-            }
-        });
 
         ui.add_space(4.0);
 
