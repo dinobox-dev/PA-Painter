@@ -705,6 +705,9 @@ fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
     for layer in &sorted_layers {
         let hash = layer.render_hash();
         if let Some((_, maps)) = input.layer_cache.iter().find(|(h, _)| *h == hash) {
+            if maps.resolution != resolution {
+                return None; // resolution mismatch — need full regeneration
+            }
             layer_maps.push(maps.as_ref());
         } else {
             return None; // cache miss
