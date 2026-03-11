@@ -1157,7 +1157,7 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
         new_project.obj_aux = state.project.obj_aux.take();
         state.project = new_project;
         state.project_path = None;
-        state.dirty = false;
+        state.dirty = true;
         state.selected_guide = None;
         state.generated = None;
         state.auto_gen_suppressed = false;

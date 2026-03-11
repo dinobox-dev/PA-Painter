@@ -735,6 +735,7 @@ impl PainterApp {
             Some(true) => {
                 if let Some(draft) = state.export_settings_draft.take() {
                     state.project.export_settings = draft;
+                    state.dirty = true;
                 }
                 state.show_export_settings = false;
             }
@@ -1516,13 +1517,20 @@ impl PainterApp {
 
     /// Central panel: viewport (UV/3D) or welcome screen.
     fn show_central_panel(&mut self, ctx: &egui::Context) {
-        let title = if let Some(ref path) = self.state.project_path {
-            let name = path
-                .file_name()
-                .map(|f| f.to_string_lossy().to_string())
-                .unwrap_or_default();
+        let title = if let Some(name) = self
+            .state
+            .project_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|f| f.to_string_lossy().to_string())
+            .or_else(|| {
+                self.state
+                    .loaded_mesh
+                    .is_some()
+                    .then(|| "Untitled".to_string())
+            }) {
             let dirty = if self.state.dirty { " *" } else { "" };
-            format!("PA Painter — {}{}", name, dirty)
+            format!("PA Painter — {name}{dirty}")
         } else {
             "PA Painter".to_string()
         };
