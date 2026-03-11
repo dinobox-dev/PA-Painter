@@ -643,9 +643,15 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
 
         if busy {
             // Progress bar mode
+            let in_path_stage =
+                generating && state.generation.stage() == super::generation::STAGE_PATHS;
             let (progress, label) = if generating {
                 let p = state.generation.overall_progress();
-                (p, format!("Generating… {:.0}%", p * 100.0))
+                if in_path_stage {
+                    (p, "Placing strokes…".to_string())
+                } else {
+                    (p, format!("Generating… {:.0}%", p * 100.0))
+                }
             } else {
                 let p = state.remerge_progress;
                 (p, format!("Applying… {:.0}%", p * 100.0))

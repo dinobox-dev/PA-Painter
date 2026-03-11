@@ -132,12 +132,8 @@ impl PainterApp {
             self.state.generation.discard();
         }
 
-        // Show feedback immediately — no heavy work before this point.
-        if is_preview {
-            self.state.status_message = format!("Preview at {}px...", resolution);
-        } else {
-            self.state.status_message = format!("Generating at {}px...", resolution);
-        }
+        let full_res = self.state.project.settings.resolution_preset.resolution();
+        self.state.status_message = format!("Generating {}px…", full_res);
         // Preserve start_time across progressive steps; only set if not already running.
         if self.state.generation.start_time.is_none() {
             self.state.generation.start_time = Some(std::time::Instant::now());
@@ -297,11 +293,6 @@ impl PainterApp {
         if is_preview {
             // Preview: display result but don't update layer cache (preserve full-res cache).
             // Advance to the next progressive resolution step.
-            self.state.status_message = format!(
-                "Preview {}px in {:.2}s",
-                result.resolution,
-                result.elapsed.as_secs_f32()
-            );
             self.state.generated = Some(result);
 
             // Pop the next step from the progressive queue.
