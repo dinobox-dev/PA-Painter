@@ -6,7 +6,7 @@ Procedural paint stroke generator for 3D assets. Turn any mesh into a hand-paint
 
 Originally built for *Practical Arcana* (coming soon), but works with any UV-mapped 3D mesh. Provides both a **GUI editor** for interactive work and a **CLI renderer** for headless batch processing. The core rendering engine is available as a Rust library crate.
 
-<!-- ![Screenshot](docs/screenshot.png) -->
+![PA Painter GUI — 3D Preview](https://raw.githubusercontent.com/dinobox-dev/PA-Painter/main/docs/images/gui-preview.png)
 
 ## Features
 
