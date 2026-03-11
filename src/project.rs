@@ -258,6 +258,9 @@ pub struct LoadResult {
     pub mesh: Option<LoadedMesh>,
     /// Cached generation output (if present in the file).
     pub output: Option<LoadedOutput>,
+    /// Raw JSON string from `editor.json` (editor UI state).
+    /// Opaque to the library — interpreted only by the GUI.
+    pub editor_state_json: Option<String>,
 }
 
 impl std::fmt::Debug for LoadResult {
@@ -334,10 +337,15 @@ fn generate_thumbnail(output: &OutputCache<'_>) -> Option<Vec<u8>> {
 ///
 /// If `output` is provided, the generated maps are stored as PNG in `output/`
 /// and a 256×256 thumbnail is generated.
+///
+/// `editor_state_json` is an opaque JSON blob written as `editor.json` inside
+/// the ZIP. The library does not interpret its contents — it is used by the GUI
+/// to persist editor UI state (camera, viewport, playback settings, etc.).
 pub fn save_project(
     project: &Project,
     path: &Path,
     output: Option<OutputCache<'_>>,
+    editor_state_json: Option<&[u8]>,
 ) -> Result<(), ProjectError> {
     info!("Saving project to {}", path.display());
     // Write to a temp file first, then rename — prevents corruption if save fails midway.
@@ -449,6 +457,12 @@ pub fn save_project(
         }
     }
 
+    // editor.json — opaque editor UI state (camera, viewport, playback, etc.)
+    if let Some(editor_json) = editor_state_json {
+        zip.start_file("editor.json", options)?;
+        zip.write_all(editor_json)?;
+    }
+
     zip.finish()?;
     std::fs::rename(&tmp_path, path)?;
     Ok(())
@@ -539,6 +553,10 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
     // Load cached output maps if present
     let output = load_output_maps(&mut archive);
 
+    // editor.json — opaque editor UI state
+    let editor_state_json = read_bytes_optional(&mut archive, "editor.json")
+        .and_then(|bytes| String::from_utf8(bytes).ok());
+
     let project = Project {
         manifest,
         mesh_ref: MeshRef {
@@ -562,6 +580,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
         project,
         mesh: loaded_mesh,
         output,
+        editor_state_json,
     })
 }
 
@@ -817,7 +836,7 @@ mod tests {
         let project = make_empty_project();
         let path = temp_pap_path("empty.pap");
 
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert_eq!(result.project.manifest.version, "1");
@@ -831,7 +850,7 @@ mod tests {
         let project = make_project_with_layers();
         let path = temp_pap_path("with_layers.pap");
 
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert_eq!(result.project.layers.len(), 3);
@@ -885,7 +904,7 @@ mod tests {
         };
 
         let path = temp_pap_path("with_output.pap");
-        save_project(&project, &path, Some(output)).unwrap();
+        save_project(&project, &path, Some(output), None).unwrap();
         let result = load_project(&path).unwrap();
 
         let loaded = result.output.expect("output should be present");
@@ -905,7 +924,7 @@ mod tests {
         let project = make_project_with_layers();
         let path = temp_pap_path("no_output.pap");
 
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert!(result.output.is_none());
@@ -917,7 +936,7 @@ mod tests {
         project.layers = vec![make_test_layer("detailed", 0, 10)];
 
         let path = temp_pap_path("complex_guides.pap");
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert_eq!(result.project.layers[0].guides.len(), 10);
@@ -940,7 +959,7 @@ mod tests {
     fn valid_zip_structure() {
         let project = make_project_with_layers();
         let path = temp_pap_path("zip_structure.pap");
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
         let archive = ZipArchive::new(file).unwrap();
@@ -954,7 +973,7 @@ mod tests {
     fn json_readable() {
         let project = make_project_with_layers();
         let path = temp_pap_path("json_readable.pap");
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
         let mut archive = ZipArchive::new(file).unwrap();
@@ -979,7 +998,7 @@ mod tests {
         };
 
         let path = temp_pap_path("settings_test.pap");
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert_eq!(
@@ -1012,7 +1031,7 @@ mod tests {
         };
 
         let path = temp_pap_path("with_thumbnail.pap");
-        save_project(&project, &path, Some(output)).unwrap();
+        save_project(&project, &path, Some(output), None).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
         let archive = ZipArchive::new(file).unwrap();
@@ -1027,7 +1046,7 @@ mod tests {
     fn no_thumbnail_without_output() {
         let project = make_empty_project();
         let path = temp_pap_path("no_thumbnail.pap");
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
         let archive = ZipArchive::new(file).unwrap();
@@ -1095,7 +1114,7 @@ mod tests {
         let project = make_project_with_layers();
         let path = temp_pap_path("integrity.pap");
 
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
         let loaded = result.project;
 
@@ -1147,7 +1166,7 @@ mod tests {
         project.presets = PresetLibrary::built_in();
 
         let path = temp_pap_path("presets_rt.pap");
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert_eq!(
@@ -1172,7 +1191,7 @@ mod tests {
         project.layers = vec![make_test_layer("test", 0, 1)];
 
         let path = temp_pap_path("visible_default.pap");
-        save_project(&project, &path, None).unwrap();
+        save_project(&project, &path, None, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert!(result.project.layers[0].visible);

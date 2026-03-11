@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Instant;
 
 use eframe::egui;
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 
 use practical_arcana_painter::asset_io::LoadedMesh;
 use practical_arcana_painter::project::Project;
@@ -107,7 +107,7 @@ pub enum DragTarget {
 }
 
 /// Which map to display in the UV View tab.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MapMode {
     Color,
     Height,
@@ -116,7 +116,7 @@ pub enum MapMode {
 }
 
 /// Which base texture to display in the Setup tab.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum SetupMapMode {
     #[default]
     Color,
@@ -124,7 +124,7 @@ pub enum SetupMapMode {
 }
 
 /// Top-level viewport tab.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ViewportTab {
     UvView,
     Setup,
@@ -143,7 +143,7 @@ impl ViewportTab {
 }
 
 /// 3D viewport orbit target: camera vs light.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum OrbitTarget {
     #[default]
     Object,
@@ -151,7 +151,7 @@ pub enum OrbitTarget {
 }
 
 /// What to display on the 3D mesh surface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ResultMode {
     /// No generated texture — show base mesh.
     None,
@@ -163,7 +163,7 @@ pub enum ResultMode {
 }
 
 /// Stroke draw order for time map playback.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum DrawOrder {
     /// Strokes appear in their original compositing order.
     #[default]
@@ -173,7 +173,7 @@ pub enum DrawOrder {
 }
 
 /// Playback loop mode for Drawing animation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum PlaybackMode {
     /// Loop continuously from start.
     #[default]
@@ -185,7 +185,7 @@ pub enum PlaybackMode {
 }
 
 /// Guide editing tool (active only in the Guide tab).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum GuideTool {
     #[default]
     Select, // 1 — click=select, drag center=move, drag handle=direction
@@ -203,6 +203,84 @@ pub struct ViewportState {
     pub show_wireframe: bool,
     /// Path overlay palette index, or None to hide paths.
     pub path_overlay_idx: Option<usize>,
+}
+
+// ── Persisted Editor State ────────────────────────────────────────
+
+/// Editor UI state that is saved to `editor.json` inside the `.pap` ZIP.
+/// All fields use `#[serde(default)]` so older files missing any field
+/// gracefully fall back to defaults.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct EditorState {
+    // ── Camera ──
+    pub camera_yaw: f32,
+    pub camera_pitch: f32,
+    pub camera_distance: f32,
+    pub camera_center: [f32; 3],
+
+    // ── Lighting ──
+    pub ambient: f32,
+    pub light_yaw: f32,
+    pub light_pitch: f32,
+    pub orbit_target: OrbitTarget,
+
+    // ── UV Viewport ──
+    pub viewport_offset: [f32; 2],
+    pub viewport_zoom: f32,
+    pub show_wireframe: bool,
+    pub path_overlay_idx: Option<usize>,
+
+    // ── Tabs & Display ──
+    pub viewport_tab: ViewportTab,
+    pub map_mode: MapMode,
+    pub setup_map_mode: SetupMapMode,
+    pub guide_tool: GuideTool,
+    pub selected_layer: Option<usize>,
+
+    // ── 3D Display ──
+    pub result_mode: ResultMode,
+    pub show_direction_field: bool,
+
+    // ── Playback ──
+    pub playback_speed: f32,
+    pub draw_time: f32,
+    pub gap: f32,
+    pub chunk_size: u32,
+    pub draw_order: DrawOrder,
+    pub playback_mode: PlaybackMode,
+}
+
+impl Default for EditorState {
+    fn default() -> Self {
+        Self {
+            camera_yaw: 0.5,
+            camera_pitch: 0.3,
+            camera_distance: 3.0,
+            camera_center: [0.0; 3],
+            ambient: 0.15,
+            light_yaw: 0.8,
+            light_pitch: 0.5,
+            orbit_target: OrbitTarget::default(),
+            viewport_offset: [0.0; 2],
+            viewport_zoom: 512.0,
+            show_wireframe: true,
+            path_overlay_idx: Some(0),
+            viewport_tab: ViewportTab::Setup,
+            map_mode: MapMode::Color,
+            setup_map_mode: SetupMapMode::default(),
+            guide_tool: GuideTool::default(),
+            selected_layer: None,
+            result_mode: ResultMode::default(),
+            show_direction_field: false,
+            playback_speed: 1.0,
+            draw_time: 0.3,
+            gap: 0.0,
+            chunk_size: 1,
+            draw_order: DrawOrder::default(),
+            playback_mode: PlaybackMode::default(),
+        }
+    }
 }
 
 /// Predefined path overlay colors (RGB).
@@ -537,6 +615,80 @@ impl AppState {
             return Some("Outdated");
         }
         None
+    }
+
+    /// Extract current editor state for persistence.
+    pub fn extract_editor_state(&self) -> EditorState {
+        let mp = &self.mesh_preview;
+        EditorState {
+            camera_yaw: mp.yaw,
+            camera_pitch: mp.pitch,
+            camera_distance: mp.distance,
+            camera_center: mp.center.to_array(),
+            ambient: mp.ambient,
+            light_yaw: mp.light_yaw,
+            light_pitch: mp.light_pitch,
+            orbit_target: mp.orbit_target,
+            viewport_offset: self.viewport.offset.to_array(),
+            viewport_zoom: self.viewport.zoom,
+            show_wireframe: self.viewport.show_wireframe,
+            path_overlay_idx: self.viewport.path_overlay_idx,
+            viewport_tab: self.viewport_tab,
+            map_mode: self.map_mode,
+            setup_map_mode: self.setup_map_mode,
+            guide_tool: self.guide_tool,
+            selected_layer: self.selected_layer,
+            result_mode: mp.result_mode,
+            show_direction_field: mp.show_direction_field,
+            playback_speed: mp.speed,
+            draw_time: mp.draw_time,
+            gap: mp.gap,
+            chunk_size: mp.chunk_size,
+            draw_order: mp.draw_order,
+            playback_mode: mp.playback_mode,
+        }
+    }
+
+    /// Apply a loaded editor state, clamping selection indices to valid ranges.
+    pub fn apply_editor_state(&mut self, es: EditorState) {
+        let mp = &mut self.mesh_preview;
+        mp.yaw = es.camera_yaw;
+        mp.pitch = es.camera_pitch;
+        mp.distance = es.camera_distance;
+        mp.center = Vec3::from_array(es.camera_center);
+        mp.ambient = es.ambient;
+        mp.light_yaw = es.light_yaw;
+        mp.light_pitch = es.light_pitch;
+        mp.orbit_target = es.orbit_target;
+        mp.result_mode = es.result_mode;
+        mp.show_direction_field = es.show_direction_field;
+        mp.speed = es.playback_speed;
+        mp.draw_time = es.draw_time;
+        mp.gap = es.gap;
+        mp.chunk_size = es.chunk_size;
+        mp.draw_order = es.draw_order;
+        mp.playback_mode = es.playback_mode;
+
+        self.viewport.offset = Vec2::from_array(es.viewport_offset);
+        self.viewport.zoom = es.viewport_zoom;
+        self.viewport.show_wireframe = es.show_wireframe;
+        self.viewport.path_overlay_idx = es.path_overlay_idx;
+
+        self.viewport_tab = es.viewport_tab;
+        self.map_mode = es.map_mode;
+        self.setup_map_mode = es.setup_map_mode;
+        self.guide_tool = es.guide_tool;
+
+        // Clamp selected_layer to valid range
+        self.selected_layer = es.selected_layer.and_then(|idx| {
+            if idx < self.project.layers.len() {
+                Some(idx)
+            } else if !self.project.layers.is_empty() {
+                Some(self.project.layers.len() - 1)
+            } else {
+                None
+            }
+        });
     }
 }
 

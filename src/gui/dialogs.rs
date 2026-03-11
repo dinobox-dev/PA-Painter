@@ -125,7 +125,9 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                 apply_loaded_mesh(state, mesh);
             }
 
-            // Select first layer if any
+            let editor_state_json = result.editor_state_json.clone();
+
+            // Select first layer if any (overridden below if editor state exists)
             if !result.project.layers.is_empty() {
                 state.selected_layer = Some(0);
             }
@@ -141,6 +143,13 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
             state.textures.stroke_id = None;
             state.path_overlay.clear();
             state.undo.clear();
+
+            // Restore editor UI state (camera, viewport, playback, etc.)
+            if let Some(json) = editor_state_json {
+                if let Ok(es) = serde_json::from_str::<super::state::EditorState>(&json) {
+                    state.apply_editor_state(es);
+                }
+            }
 
             // Restore cached generation output if present
             if let Some(output) = result.output {
@@ -429,7 +438,8 @@ pub fn save_project_action(state: &mut AppState) {
         snapshot_hash: state.generation_snapshot,
     });
 
-    match save_project(&state.project, &path, output) {
+    let editor_json = serde_json::to_vec_pretty(&state.extract_editor_state()).ok();
+    match save_project(&state.project, &path, output, editor_json.as_deref()) {
         Ok(()) => {
             state.project_path = Some(path);
             state.dirty = false;
