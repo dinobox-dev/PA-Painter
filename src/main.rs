@@ -3,22 +3,22 @@ use std::process;
 
 use log::{error, info};
 
-use practical_arcana_painter::asset_io::load_mesh;
-use practical_arcana_painter::compositing::{
+use pa_painter::asset_io::load_mesh;
+use pa_painter::compositing::{
     composite_all_with_paths, generate_all_paths, render_layer, resolve_base_color,
 };
-use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
-use practical_arcana_painter::output::{
+use pa_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
+use pa_painter::output::{
     export_all, export_layer_maps, export_manifest, ExportFormat, LayerExportOptions,
     LayerManifestEntry,
 };
-use practical_arcana_painter::project::load_project;
-use practical_arcana_painter::stretch_map::{compute_stretch_map, StretchMap};
-use practical_arcana_painter::types::NormalMode;
-use practical_arcana_painter::uv_mask::UvMask;
+use pa_painter::project::load_project;
+use pa_painter::stretch_map::{compute_stretch_map, StretchMap};
+use pa_painter::types::NormalMode;
+use pa_painter::uv_mask::UvMask;
 
 fn usage() -> ! {
-    eprintln!("Usage: practical-arcana-painter <project.pap> [options]");
+    eprintln!("Usage: pa-painter <project.pap> [options]");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -o, --output <dir>       Output directory (default: ./output)");

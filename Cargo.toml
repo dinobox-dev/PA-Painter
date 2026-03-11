@@ -1,27 +1,27 @@
 [package]
-name = "practical-arcana-painter"
+name = "pa-painter"
 version = "0.1.0"
 edition = "2021"
-description = "Procedural paint stroke generator for 3D assets — turn any mesh into a hand-painted look"
+description = "Procedural paint stroke generator for 3D assets — turn any mesh into a hand-painted look. Built for Practical Arcana, works with any UV-mapped 3D mesh."
 license = "MIT"
 authors = ["DiNo Box Inc."]
 keywords = ["procedural", "texture", "paint", "stroke", "3d"]
 categories = ["graphics", "game-development", "rendering"]
 readme = "README.md"
 rust-version = "1.87"
-repository = "https://github.com/dinobox-dev/Practical-Arcana-Painter"
-homepage = "https://github.com/dinobox-dev/Practical-Arcana-Painter"
+repository = "https://github.com/dinobox-dev/PA-Painter"
+homepage = "https://github.com/dinobox-dev/PA-Painter"
 
 [[bin]]
-name = "practical-arcana-painter"
+name = "pa-painter"
 path = "src/main.rs"
 
 [[bin]]
-name = "practical-arcana-painter-gui"
+name = "pa-painter-gui"
 path = "src/main_gui.rs"
 
 [lib]
-name = "practical_arcana_painter"
+name = "pa_painter"
 path = "src/lib.rs"
 
 [dependencies]

@@ -1,10 +1,10 @@
-# Practical Arcana Painter
+# PA Painter
 
-![CI](https://github.com/dinobox-dev/Practical-Arcana-Painter/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/dinobox-dev/PA-Painter/actions/workflows/ci.yml/badge.svg)
 
 Procedural paint stroke generator for 3D assets. Turn any mesh into a hand-painted look with full control over stroke direction, density, and layering.
 
-Built for *Practical Arcana* (coming soon), but works with any UV-mapped 3D mesh. Provides both a **GUI editor** for interactive work and a **CLI renderer** for headless batch processing. The core rendering engine is available as a Rust library crate.
+Originally built for *Practical Arcana* (coming soon), but works with any UV-mapped 3D mesh. Provides both a **GUI editor** for interactive work and a **CLI renderer** for headless batch processing. The core rendering engine is available as a Rust library crate.
 
 <!-- ![Screenshot](docs/screenshot.png) -->
 
@@ -14,7 +14,7 @@ Built for *Practical Arcana* (coming soon), but works with any UV-mapped 3D mesh
 - **Layer system**: multiple paint layers with independent brush settings, blend ordering, and visibility
 - **Guide tools**: directional, source, sink, and vortex guides to control stroke flow
 - **Pressure curves**: preset and custom Bézier spline editors for stroke pressure variation
-- **Output maps**: color, normal, height, and ambient occlusion — export as PNG or EXR
+- **Output maps**: color, normal, height, stroke ID, and stroke time — export as PNG or EXR
 - **3D preview**: real-time mesh preview with generated textures applied
 - **GUI editor**: full-featured editor built with egui/eframe
 - **CLI renderer**: headless batch rendering for automation
@@ -29,21 +29,22 @@ Requires Rust 1.87+ and a GPU with Vulkan/Metal/DX12 support (for the GUI).
 cargo build --release
 
 # Run the GUI editor
-cargo run --release --bin practical-arcana-painter-gui
+cargo run --release --bin pa-painter-gui
 
 # Run the CLI renderer
-cargo run --release --bin practical-arcana-painter -- <input.pap> -o output/
+cargo run --release --bin pa-painter -- <input.pap> -o output/
 ```
 
 ### CLI Options
 
 ```
-Usage: practical-arcana-painter <project.pap> [options]
+Usage: pa-painter <project.pap> [options]
 
 Options:
   -o, --output <dir>       Output directory (default: ./output)
   -r, --resolution <px>    Override output resolution (1–16384)
   -f, --format <fmt>       Export format: png (default) or exr
+      --per-layer          Export each layer as separate textures
   -h, --help               Show this help
 ```
 
@@ -64,18 +65,19 @@ The rendering engine is a 5-stage pipeline, each implemented as a standalone mod
 | 2 | `path_placement` | Poisson-disk seeding + streamline tracing along the flow |
 | 3 | `stroke_height` | Pressure curves and brush profiles → height values |
 | 4 | `compositing` | Blend all visible layers into unified global maps |
-| 5 | `output` | Generate final color, normal, height, and AO textures |
+| 5 | `output` | Generate final color, normal, height, stroke ID, and stroke time textures |
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for more details on the design.
 
 ## Output Maps
 
-Each render produces up to four texture maps:
+Each render produces the following texture maps:
 
 - **Color map** — base color with per-stroke HSV variation
 - **Normal map** — tangent-space or depicted-form normals from stroke height gradients
 - **Height map** — grayscale displacement from accumulated stroke heights
-- **AO map** — ambient occlusion derived from height field curvature
+- **Stroke ID map** — per-pixel layer index for masking and post-processing
+- **Stroke time map** — R: normalized stroke order, G: arc-length position within each stroke (for animated reveal effects; see [`docs/Stroke Time Map Shader Reference.md`](docs/Stroke%20Time%20Map%20Shader%20Reference.md))
 
 ## Contributing
 

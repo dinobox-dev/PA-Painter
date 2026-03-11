@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Layer system with independent brush settings, blend ordering, visibility, and mesh-group masks
 - Guide types: directional, source, sink, and vortex with adjustable influence and strength
 - Pressure curves: 8 built-in presets and custom cubic Bézier spline editor
-- Output maps: color, normal (tangent-space and depicted-form), height, and ambient occlusion
+- Output maps: color, normal (tangent-space and depicted-form), height, stroke ID, and stroke time (order + arc-length)
 - Export formats: PNG, OpenEXR, GLB (with baked textures)
 - Mesh import: OBJ and glTF/GLB with UV and vertex group support
 - `.pap` project file format (ZIP-based) with auto-save and undo history

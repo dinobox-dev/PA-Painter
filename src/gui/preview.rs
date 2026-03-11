@@ -4,12 +4,12 @@ use std::thread;
 
 use eframe::egui;
 
-use practical_arcana_painter::asset_io::LoadedMesh;
-use practical_arcana_painter::brush_profile;
-use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
-use practical_arcana_painter::path_placement;
-use practical_arcana_painter::stroke_height;
-use practical_arcana_painter::types::{Guide, Layer, PaintValues, StrokeParams};
+use pa_painter::asset_io::LoadedMesh;
+use pa_painter::brush_profile;
+use pa_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
+use pa_painter::path_placement;
+use pa_painter::stroke_height;
+use pa_painter::types::{Guide, Layer, PaintValues, StrokeParams};
 
 // ── Caches ──────────────────────────────────────────────────────
 

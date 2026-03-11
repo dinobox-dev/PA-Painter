@@ -8,11 +8,11 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
             .with_min_inner_size([800.0, 500.0])
-            .with_title("Practical Arcana Painter"),
+            .with_title("PA Painter"),
         ..Default::default()
     };
     eframe::run_native(
-        "Practical Arcana Painter",
+        "PA Painter",
         options,
         Box::new(|cc| Ok(Box::new(gui::PainterApp::new(cc)))),
     )

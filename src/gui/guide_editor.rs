@@ -1,6 +1,6 @@
 use eframe::egui::{self, CursorIcon, Pos2, Rect};
 
-use practical_arcana_painter::types::{Guide, GuideType};
+use pa_painter::types::{Guide, GuideType};
 
 use super::state::{AppState, DragTarget, GuideTool};
 use super::viewport::{screen_to_uv, uv_to_screen};

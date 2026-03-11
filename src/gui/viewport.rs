@@ -1,7 +1,7 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Vec2};
 use eframe::egui_wgpu;
 
-use practical_arcana_painter::types::{GuideType, TextureSource};
+use pa_painter::types::{GuideType, TextureSource};
 
 use super::mesh_preview;
 use super::state::{
@@ -85,11 +85,7 @@ fn update_group_dim_cache(ctx: &egui::Context, state: &mut AppState) {
 
     let texture = state.loaded_mesh.as_ref().and_then(|mesh| {
         let group = mesh.groups.iter().find(|g| g.name == key.group_name)?;
-        let mask = practical_arcana_painter::uv_mask::UvMask::from_mesh_group(
-            mesh,
-            group,
-            GROUP_DIM_RESOLUTION,
-        );
+        let mask = pa_painter::uv_mask::UvMask::from_mesh_group(mesh, group, GROUP_DIM_RESOLUTION);
 
         let inside_alpha: u8 = 80;
         let outside_alpha: u8 = 160;
@@ -144,7 +140,7 @@ fn resolve_setup_texture(
     ctx: &egui::Context,
     source: &TextureSource,
     is_color: bool,
-    mesh: Option<&practical_arcana_painter::asset_io::LoadedMesh>,
+    mesh: Option<&pa_painter::asset_io::LoadedMesh>,
 ) -> Option<egui::TextureHandle> {
     let name = if is_color {
         "setup_base_color"
@@ -1132,7 +1128,7 @@ fn draw_guides(painter: &egui::Painter, state: &AppState, rect: Rect) {
 fn draw_guide_directional(
     painter: &egui::Painter,
     center: Pos2,
-    guide: &practical_arcana_painter::types::Guide,
+    guide: &pa_painter::types::Guide,
     radius_px: f32,
     color: Color32,
 ) {

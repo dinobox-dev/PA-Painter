@@ -1,7 +1,7 @@
 use eframe::egui;
 
-use practical_arcana_painter::asset_io::LoadedTexture;
-use practical_arcana_painter::types::Color;
+use pa_painter::asset_io::LoadedTexture;
+use pa_painter::types::Color;
 
 /// Convert a LoadedTexture (linear float RGBA) to an egui TextureHandle.
 /// Applies linear → sRGB conversion for correct display.

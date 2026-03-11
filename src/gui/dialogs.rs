@@ -5,22 +5,18 @@ use std::sync::Arc;
 
 use eframe::egui;
 
-use practical_arcana_painter::asset_io::{
-    extract_uv_edges, load_mesh, LoadedMesh, MeshMaterialInfo,
-};
-use practical_arcana_painter::compositing::LayerMaps;
-use practical_arcana_painter::glb_export;
-use practical_arcana_painter::object_normal::MeshNormalData;
-use practical_arcana_painter::output::{
+use pa_painter::asset_io::{extract_uv_edges, load_mesh, LoadedMesh, MeshMaterialInfo};
+use pa_painter::compositing::LayerMaps;
+use pa_painter::glb_export;
+use pa_painter::object_normal::MeshNormalData;
+use pa_painter::output::{
     export_color_exr, export_color_png, export_height_exr, export_height_png, export_layer_maps,
     export_manifest, export_normal_png, export_stroke_id_png, export_stroke_time_exr,
     export_stroke_time_png, normalize_height_map, ExportFormat, LayerExportOptions,
     LayerManifestEntry,
 };
-use practical_arcana_painter::project::{
-    load_project, save_project, utc_now_iso8601, OutputCache, Project,
-};
-use practical_arcana_painter::types::{
+use pa_painter::project::{load_project, save_project, utc_now_iso8601, OutputCache, Project};
+use pa_painter::types::{
     BackgroundMode, Color, EmbeddedTexture, ExportSettings, Layer, NormalMode, PaintValues,
     TextureSource,
 };
@@ -108,7 +104,7 @@ fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool {
 pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
     state.modal_dialog_active = true;
     let path = rfd::FileDialog::new()
-        .add_filter("PAP Project", &["pap"])
+        .add_filter("PA Painter Project", &["pap"])
         .pick_file();
     state.modal_dialog_active = false;
 
@@ -414,7 +410,7 @@ pub fn save_project_action(state: &mut AppState) {
     } else {
         state.modal_dialog_active = true;
         let result = rfd::FileDialog::new()
-            .add_filter("PAP Project", &["pap"])
+            .add_filter("PA Painter Project", &["pap"])
             .save_file();
         state.modal_dialog_active = false;
         let Some(mut path) = result else {

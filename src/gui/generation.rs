@@ -6,24 +6,24 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-use practical_arcana_painter::asset_io::LoadedMesh;
-use practical_arcana_painter::compositing::{
+use pa_painter::asset_io::LoadedMesh;
+use pa_painter::compositing::{
     compute_height_gradients, fill_base_color_region, merge_layers, render_layer, GlobalMaps,
     LayerMaps,
 };
-use practical_arcana_painter::compositing::{resolve_base_color, resolve_base_normal};
-use practical_arcana_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
-use practical_arcana_painter::output::{
+use pa_painter::compositing::{resolve_base_color, resolve_base_normal};
+use pa_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
+use pa_painter::output::{
     blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
 };
-use practical_arcana_painter::path_placement::generate_paths_cancellable;
-use practical_arcana_painter::stretch_map::{compute_stretch_map, StretchMap};
-use practical_arcana_painter::stroke_color::ColorTextureRef;
-use practical_arcana_painter::types::{
+use pa_painter::path_placement::generate_paths_cancellable;
+use pa_painter::stretch_map::{compute_stretch_map, StretchMap};
+use pa_painter::stroke_color::ColorTextureRef;
+use pa_painter::types::{
     BackgroundMode, BaseColorSource, Color, Layer, LayerBaseColor, LayerBaseNormal,
     LayerCompositeSettings, NormalMode, OutputSettings, PaintLayer, StrokePath,
 };
-use practical_arcana_painter::uv_mask::UvMask;
+use pa_painter::uv_mask::UvMask;
 
 /// All data needed for a generation run. Fully owned, Send + 'static.
 pub struct GenInput {

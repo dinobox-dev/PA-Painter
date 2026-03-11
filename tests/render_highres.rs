@@ -1,5 +1,5 @@
-use practical_arcana_painter::compositing;
-use practical_arcana_painter::types::*;
+use pa_painter::compositing;
+use pa_painter::types::*;
 
 fn make_layer() -> PaintLayer {
     PaintLayer {

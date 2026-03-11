@@ -145,7 +145,7 @@ impl Default for Project {
         Self {
             manifest: Manifest {
                 version: "1".to_string(),
-                app_name: "PracticalArcanaPainter".to_string(),
+                app_name: "PA Painter".to_string(),
                 created_at: utc_now_iso8601(),
                 modified_at: utc_now_iso8601(),
             },
@@ -734,7 +734,7 @@ mod tests {
     fn make_manifest() -> Manifest {
         Manifest {
             version: "1".to_string(),
-            app_name: "Practical Arcana Painter".to_string(),
+            app_name: "PA Painter".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             modified_at: "2026-01-01T00:00:00Z".to_string(),
         }
@@ -840,7 +840,7 @@ mod tests {
         let result = load_project(&path).unwrap();
 
         assert_eq!(result.project.manifest.version, "1");
-        assert_eq!(result.project.manifest.app_name, "Practical Arcana Painter");
+        assert_eq!(result.project.manifest.app_name, "PA Painter");
         assert_eq!(result.project.layers.len(), 0);
         assert!(result.output.is_none());
     }
@@ -985,7 +985,7 @@ mod tests {
         assert!(buf.contains('\n'), "JSON should be pretty-printed");
         let parsed: serde_json::Value = serde_json::from_str(&buf).unwrap();
         assert_eq!(parsed["version"], "1");
-        assert_eq!(parsed["app_name"], "Practical Arcana Painter");
+        assert_eq!(parsed["app_name"], "PA Painter");
     }
 
     #[test]

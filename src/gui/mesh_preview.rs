@@ -4,7 +4,7 @@ use eframe::wgpu;
 use eframe::wgpu::util::DeviceExt;
 use glam::{Mat4, Vec3};
 
-use practical_arcana_painter::asset_io::LoadedMesh;
+use pa_painter::asset_io::LoadedMesh;
 
 use super::textures::linear_to_srgb_u8;
 
@@ -791,7 +791,7 @@ pub fn upload_mesh(render_state: &egui_wgpu::RenderState, mesh: &LoadedMesh) {
 // ── CPU pixel conversion (thread-safe, no GPU) ───────────────────
 
 /// Convert color data to raw RGBA bytes for GPU upload. Can run on any thread.
-pub fn convert_color_pixels(color_data: &[practical_arcana_painter::types::Color]) -> Vec<u8> {
+pub fn convert_color_pixels(color_data: &[pa_painter::types::Color]) -> Vec<u8> {
     color_data
         .iter()
         .flat_map(|c| {
@@ -944,7 +944,7 @@ pub fn upload_normal_texture_raw(
 /// with pre-converted data when available.
 pub fn upload_color_texture(
     render_state: &egui_wgpu::RenderState,
-    color_data: &[practical_arcana_painter::types::Color],
+    color_data: &[pa_painter::types::Color],
     resolution: usize,
 ) {
     let pixels = convert_color_pixels(color_data);

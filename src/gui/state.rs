@@ -7,9 +7,9 @@ use std::time::Instant;
 use eframe::egui;
 use glam::{Vec2, Vec3};
 
-use practical_arcana_painter::asset_io::LoadedMesh;
-use practical_arcana_painter::project::Project;
-use practical_arcana_painter::types::{ExportSettings, Layer, OutputSettings, TextureSource};
+use pa_painter::asset_io::LoadedMesh;
+use pa_painter::project::Project;
+use pa_painter::types::{ExportSettings, Layer, OutputSettings, TextureSource};
 
 use super::generation::{GenResult, GenerationManager};
 use super::mesh_preview::MeshPreviewState;
@@ -403,7 +403,7 @@ pub struct AppState {
     pub dirty: bool,
 
     // ── Loaded Assets ──
-    pub loaded_mesh: Option<Arc<practical_arcana_painter::asset_io::LoadedMesh>>,
+    pub loaded_mesh: Option<Arc<pa_painter::asset_io::LoadedMesh>>,
     pub uv_edges: Option<Vec<(Vec2, Vec2)>>,
     /// Hash of loaded mesh geometry for generation staleness detection.
     pub mesh_hash: u64,
@@ -431,10 +431,7 @@ pub struct AppState {
     pub preset_thumbnails: preview::PresetThumbnailCache,
     /// Cached mesh normal data for path overlay normal-break preview.
     /// Tuple of (resolution, data); invalidated on mesh reload or resolution change.
-    pub cached_mesh_normals: Option<(
-        u32,
-        Arc<practical_arcana_painter::object_normal::MeshNormalData>,
-    )>,
+    pub cached_mesh_normals: Option<(u32, Arc<pa_painter::object_normal::MeshNormalData>)>,
 
     // ── Generation ──
     pub generation: GenerationManager,

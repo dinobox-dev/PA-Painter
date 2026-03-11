@@ -1,8 +1,9 @@
-//! # Practical Arcana Painter
+//! # PA Painter
 //!
-//! Procedural paint stroke generator for 3D assets. This crate provides a
-//! 5-stage CPU pipeline that turns any UV-mapped mesh into a hand-painted look
-//! with full control over stroke direction, density, pressure, and layering.
+//! Procedural paint stroke generator for 3D assets. Originally built for
+//! *Practical Arcana*, this crate provides a 5-stage CPU pipeline that turns
+//! any UV-mapped mesh into a hand-painted look with full control over stroke
+//! direction, density, pressure, and layering.
 //!
 //! ## Pipeline stages
 //!
@@ -16,7 +17,7 @@
 //!
 //! ```no_run
 //! use std::path::Path;
-//! use practical_arcana_painter::project::load_project;
+//! use pa_painter::project::load_project;
 //!
 //! let result = load_project(Path::new("scene.pap")).unwrap();
 //! let project = result.project;

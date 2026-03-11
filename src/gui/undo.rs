@@ -1,4 +1,4 @@
-use practical_arcana_painter::types::{Layer, OutputSettings, PresetLibrary};
+use pa_painter::types::{Layer, OutputSettings, PresetLibrary};
 
 /// Snapshot of undoable project state (excludes runtime caches).
 #[derive(Debug, Clone, PartialEq)]

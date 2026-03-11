@@ -1,6 +1,6 @@
 # Stroke Time Map — Shader Reference
 
-How to use the `stroke_time_map` texture exported by PracticalArcanaPainter
+How to use the `stroke_time_map` texture exported by PA Painter
 to create drawing reveal animations in game engines.
 
 ## Channel Layout
@@ -43,7 +43,7 @@ All pixels are fully revealed when `global_time` reaches this value.
 ## Unity (ShaderLab / HLSL)
 
 ```hlsl
-Shader "PracticalArcana/StrokeReveal"
+Shader "PAPainter/StrokeReveal"
 {
     Properties
     {

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use eframe::egui;
 
-use practical_arcana_painter::asset_io;
-use practical_arcana_painter::pressure::{evaluate_pressure, preset_to_custom};
-use practical_arcana_painter::types::{
+use pa_painter::asset_io;
+use pa_painter::pressure::{evaluate_pressure, preset_to_custom};
+use pa_painter::types::{
     CurveKnot, EmbeddedTexture, PaintPreset, PaintValues, PresetLibrary, PressureCurve,
     TextureSource,
 };
@@ -309,10 +309,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         for i in 0..state.project.layers[idx].guides.len() {
             let guide = &state.project.layers[idx].guides[i];
             let display_type = match guide.guide_type {
-                practical_arcana_painter::types::GuideType::Source
-                | practical_arcana_painter::types::GuideType::Sink => "Radial",
-                practical_arcana_painter::types::GuideType::Directional => "Directional",
-                practical_arcana_painter::types::GuideType::Vortex => "Vortex",
+                pa_painter::types::GuideType::Source | pa_painter::types::GuideType::Sink => {
+                    "Radial"
+                }
+                pa_painter::types::GuideType::Directional => "Directional",
+                pa_painter::types::GuideType::Vortex => "Vortex",
             };
             let label = format!("#{i} {display_type}");
             let selected = state.selected_guide == Some(i);
@@ -1033,7 +1034,7 @@ fn layer_material_index(state: &AppState, group_name: &str) -> Option<usize> {
 fn layer_material<'a>(
     state: &'a AppState,
     group_name: &str,
-) -> Option<&'a practical_arcana_painter::asset_io::MeshMaterialInfo> {
+) -> Option<&'a pa_painter::asset_io::MeshMaterialInfo> {
     let mesh = state.loaded_mesh.as_ref()?;
     let idx = mesh.groups.iter().position(|g| g.name == group_name)?;
     mesh.materials.get(idx)
@@ -1177,7 +1178,7 @@ fn show_normal_source_controls(ui: &mut egui::Ui, state: &mut AppState, layer_id
 /// Material texture dropdown (ComboBox).
 fn show_material_combo(
     ui: &mut egui::Ui,
-    loaded_mesh: &Option<Arc<practical_arcana_painter::asset_io::LoadedMesh>>,
+    loaded_mesh: &Option<Arc<pa_painter::asset_io::LoadedMesh>>,
     mat_idx: &mut usize,
     id_salt: &str,
     is_color: bool,

@@ -15,12 +15,12 @@ use eframe::egui;
 use eframe::egui_wgpu;
 use state::{AppState, GuideTool};
 
-use practical_arcana_painter::compositing::{
+use pa_painter::compositing::{
     fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
 };
-use practical_arcana_painter::output::{blend_normals_udn, ExportFormat};
-use practical_arcana_painter::types::{BaseColorSource, Color, TextureSource, BASE_RESOLUTION};
-use practical_arcana_painter::uv_mask::UvMask;
+use pa_painter::output::{blend_normals_udn, ExportFormat};
+use pa_painter::types::{BaseColorSource, Color, TextureSource, BASE_RESOLUTION};
+use pa_painter::uv_mask::UvMask;
 
 /// Count unique non-zero order values in a stroke time map (= number of strokes).
 fn count_unique_strokes(order: &[f32]) -> u32 {
@@ -148,7 +148,7 @@ impl PainterApp {
 
         // Resolve per-layer base color and normal from TextureSource.
         let materials: &[_] = mesh.as_ref().map(|m| m.materials.as_slice()).unwrap_or(&[]);
-        let visible_layers: Vec<&practical_arcana_painter::types::Layer> = self
+        let visible_layers: Vec<&pa_painter::types::Layer> = self
             .state
             .project
             .layers
@@ -157,18 +157,11 @@ impl PainterApp {
             .collect();
         let layer_base_colors: Vec<_> = visible_layers
             .iter()
-            .map(|l| {
-                practical_arcana_painter::compositing::resolve_base_color(&l.base_color, materials)
-            })
+            .map(|l| pa_painter::compositing::resolve_base_color(&l.base_color, materials))
             .collect();
         let layer_base_normals: Vec<_> = visible_layers
             .iter()
-            .map(|l| {
-                practical_arcana_painter::compositing::resolve_base_normal(
-                    &l.base_normal,
-                    materials,
-                )
-            })
+            .map(|l| pa_painter::compositing::resolve_base_normal(&l.base_normal, materials))
             .collect();
 
         // Group names for visible layers — parallel to `layers` vec
@@ -379,7 +372,7 @@ impl PainterApp {
 
     /// Render and upload the direction field overlay from all visible layers' guides.
     fn upload_direction_field_overlay(&self, render_state: &egui_wgpu::RenderState) {
-        let all_guides: Vec<practical_arcana_painter::types::Guide> = self
+        let all_guides: Vec<pa_painter::types::Guide> = self
             .state
             .project
             .layers
@@ -390,7 +383,7 @@ impl PainterApp {
 
         let resolution = 512u32;
         let arrow_spacing = 32u32;
-        let pixels = practical_arcana_painter::direction_field::render_direction_field_overlay(
+        let pixels = pa_painter::direction_field::render_direction_field_overlay(
             &all_guides,
             resolution,
             arrow_spacing,
@@ -418,7 +411,7 @@ impl PainterApp {
             .unwrap_or(&[]);
 
         // Collect visible layers sorted by order
-        let mut sorted_layers: Vec<&practical_arcana_painter::types::Layer> = self
+        let mut sorted_layers: Vec<&pa_painter::types::Layer> = self
             .state
             .project
             .layers
@@ -1530,9 +1523,9 @@ impl PainterApp {
                 .map(|f| f.to_string_lossy().to_string())
                 .unwrap_or_default();
             let dirty = if self.state.dirty { " *" } else { "" };
-            format!("Practical Arcana Painter — {}{}", name, dirty)
+            format!("PA Painter — {}{}", name, dirty)
         } else {
-            "Practical Arcana Painter".to_string()
+            "PA Painter".to_string()
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
@@ -1545,7 +1538,7 @@ impl PainterApp {
             } else {
                 ui.vertical_centered(|ui: &mut egui::Ui| {
                     ui.add_space(ui.available_height() * 0.3);
-                    ui.heading("Practical Arcana Painter");
+                    ui.heading("PA Painter");
                     ui.add_space(16.0);
                     ui.label("Generate painterly texture maps from 3D meshes.");
                     ui.add_space(24.0);

@@ -59,10 +59,10 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          DIR="practical-arcana-painter-${TAG}-${{ matrix.target }}"
+          DIR="pa-painter-${TAG}-${{ matrix.target }}"
           mkdir "$DIR"
-          cp "target/${{ matrix.target }}/release/practical-arcana-painter${{ matrix.ext }}" "$DIR/"
-          cp "target/${{ matrix.target }}/release/practical-arcana-painter-gui${{ matrix.ext }}" "$DIR/"
+          cp "target/${{ matrix.target }}/release/pa-painter${{ matrix.ext }}" "$DIR/"
+          cp "target/${{ matrix.target }}/release/pa-painter-gui${{ matrix.ext }}" "$DIR/"
           cp README.md LICENSE CHANGELOG.md "$DIR/"
           tar czf "${DIR}.tar.gz" "$DIR"
           echo "ASSET=${DIR}.tar.gz" >> $GITHUB_ENV
@@ -72,10 +72,10 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:GITHUB_REF -replace 'refs/tags/',''
-          $dir = "practical-arcana-painter-${tag}-${{ matrix.target }}"
+          $dir = "pa-painter-${tag}-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $dir
-          Copy-Item "target/${{ matrix.target }}/release/practical-arcana-painter${{ matrix.ext }}" "$dir/"
-          Copy-Item "target/${{ matrix.target }}/release/practical-arcana-painter-gui${{ matrix.ext }}" "$dir/"
+          Copy-Item "target/${{ matrix.target }}/release/pa-painter${{ matrix.ext }}" "$dir/"
+          Copy-Item "target/${{ matrix.target }}/release/pa-painter-gui${{ matrix.ext }}" "$dir/"
           Copy-Item README.md,LICENSE,CHANGELOG.md "$dir/"
           Compress-Archive -Path "$dir" -DestinationPath "${dir}.zip"
           echo "ASSET=${dir}.zip" >> $env:GITHUB_ENV
@@ -107,16 +107,16 @@ jobs:
       - name: Create universal binary
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          DIR="practical-arcana-painter-${TAG}-universal-apple-darwin"
+          DIR="pa-painter-${TAG}-universal-apple-darwin"
           mkdir -p "$DIR" tmp-arm64 tmp-x64
 
           tar xzf arm64/*.tar.gz -C tmp-arm64 --strip-components=1
           tar xzf x64/*.tar.gz -C tmp-x64 --strip-components=1
 
-          lipo -create -output "$DIR/practical-arcana-painter" \
-            tmp-arm64/practical-arcana-painter tmp-x64/practical-arcana-painter
-          lipo -create -output "$DIR/practical-arcana-painter-gui" \
-            tmp-arm64/practical-arcana-painter-gui tmp-x64/practical-arcana-painter-gui
+          lipo -create -output "$DIR/pa-painter" \
+            tmp-arm64/pa-painter tmp-x64/pa-painter
+          lipo -create -output "$DIR/pa-painter-gui" \
+            tmp-arm64/pa-painter-gui tmp-x64/pa-painter-gui
 
           cp README.md LICENSE CHANGELOG.md "$DIR/"
           tar czf "${DIR}.tar.gz" "$DIR"

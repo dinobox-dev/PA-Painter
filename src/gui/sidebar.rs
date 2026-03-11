@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use practical_arcana_painter::types::{
+use pa_painter::types::{
     BackgroundMode, Layer, NormalMode, PaintValues, ResolutionPreset, TextureSource,
 };
 

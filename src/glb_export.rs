@@ -392,7 +392,7 @@ fn build_gltf_json(
     }
 
     let json = serde_json::json!({
-        "asset": { "version": "2.0", "generator": "PracticalArcanaPainter" },
+        "asset": { "version": "2.0", "generator": "PA Painter" },
         "scene": 0,
         "scenes": [{ "nodes": [0] }],
         "nodes": [{ "mesh": 0 }],
