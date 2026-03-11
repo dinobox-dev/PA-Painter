@@ -101,6 +101,10 @@ pub struct MeshRef {
     #[serde(skip)]
     pub path: String,
     pub format: String,
+    /// Display-only filename (e.g. "model.obj"). Persisted in project.json
+    /// so the sidebar can show the mesh name after loading a .papr file.
+    #[serde(default)]
+    pub filename: String,
 }
 
 /// Serialization wrapper: the subset of project data stored in `project.json`.
@@ -152,6 +156,7 @@ impl Default for Project {
             mesh_ref: MeshRef {
                 path: String::new(),
                 format: String::new(),
+                filename: String::new(),
             },
             layers: Vec::new(),
             presets: PresetLibrary::default(),
@@ -566,6 +571,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
             } else {
                 mesh_format
             },
+            filename: data.mesh_ref.filename,
         },
         layers,
         presets: data.presets,
@@ -744,6 +750,7 @@ mod tests {
         MeshRef {
             path: "models/character.obj".to_string(),
             format: "obj".to_string(),
+            filename: "character.obj".to_string(),
         }
     }
 

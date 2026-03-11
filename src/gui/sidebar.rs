@@ -157,7 +157,17 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
 
         // ── Mesh row ──
         let mesh_text = if state.loaded_mesh.is_some() {
-            short_filename(&state.project.mesh_ref.path).to_string()
+            let from_path = short_filename(&state.project.mesh_ref.path);
+            if from_path.is_empty() {
+                // .papr load: path is runtime-only, fall back to persisted filename
+                if state.project.mesh_ref.filename.is_empty() {
+                    "(embedded)".to_string()
+                } else {
+                    state.project.mesh_ref.filename.clone()
+                }
+            } else {
+                from_path.to_string()
+            }
         } else {
             "(none)".to_string()
         };

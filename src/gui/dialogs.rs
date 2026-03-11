@@ -1094,6 +1094,7 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
     // Update mesh reference
     state.project.mesh_ref.path = popup.pending_path.to_string_lossy().to_string();
     state.project.mesh_ref.format = popup.pending_format;
+    state.project.mesh_ref.filename = popup.filename.clone();
     state.project.mesh_bytes = popup.pending_bytes;
 
     if popup.is_replace {
