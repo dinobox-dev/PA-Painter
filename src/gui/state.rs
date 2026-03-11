@@ -1,5 +1,7 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::thread;
 use std::time::Instant;
 
 use eframe::egui;
@@ -14,6 +16,86 @@ use super::mesh_preview::MeshPreviewState;
 use super::preview;
 use super::preview::PreviewCache;
 use super::undo::{UndoHistory, UndoSnapshot};
+
+// ── Export Worker ──────────────────────────────────────────────────
+
+/// Pending overwrite confirmation shown as an egui window.
+pub struct ExportOverwriteConfirm {
+    pub dir: PathBuf,
+    pub include_glb: bool,
+    pub conflict_count: usize,
+    pub folder_name: String,
+}
+
+/// Background export worker — runs file I/O off the main thread.
+pub struct ExportWorker {
+    handle: Option<thread::JoinHandle<Result<(u32, PathBuf), String>>>,
+    /// Current step (numerator) for progress display.
+    pub current_step: Arc<AtomicU32>,
+    /// Total steps (denominator) for progress display.
+    pub total_steps: Arc<AtomicU32>,
+}
+
+impl Default for ExportWorker {
+    fn default() -> Self {
+        Self {
+            handle: None,
+            current_step: Arc::new(AtomicU32::new(0)),
+            total_steps: Arc::new(AtomicU32::new(1)),
+        }
+    }
+}
+
+impl ExportWorker {
+    pub fn is_running(&self) -> bool {
+        self.handle.as_ref().is_some_and(|h| !h.is_finished())
+    }
+
+    /// Progress fraction 0.0–1.0.
+    pub fn progress(&self) -> f32 {
+        let cur = self.current_step.load(Ordering::Relaxed) as f32;
+        let tot = self.total_steps.load(Ordering::Relaxed).max(1) as f32;
+        (cur / tot).clamp(0.0, 1.0)
+    }
+
+    /// (current_step, total_steps) for display.
+    pub fn steps(&self) -> (u32, u32) {
+        (
+            self.current_step.load(Ordering::Relaxed),
+            self.total_steps.load(Ordering::Relaxed).max(1),
+        )
+    }
+
+    /// Poll for completion. Returns `Some(Ok((count, dir)))` or `Some(Err(msg))`.
+    pub fn poll(&mut self) -> Option<Result<(u32, PathBuf), String>> {
+        if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
+            match self.handle.take().unwrap().join() {
+                Ok(result) => Some(result),
+                Err(e) => {
+                    let msg = e
+                        .downcast_ref::<&str>()
+                        .copied()
+                        .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                        .unwrap_or("unknown error");
+                    Some(Err(format!("Export thread panicked: {msg}")))
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Start a background export.
+    pub fn start<F>(&mut self, total: u32, work: F)
+    where
+        F: FnOnce(Arc<AtomicU32>) -> Result<(u32, PathBuf), String> + Send + 'static,
+    {
+        self.current_step = Arc::new(AtomicU32::new(0));
+        self.total_steps = Arc::new(AtomicU32::new(total));
+        let step = Arc::clone(&self.current_step);
+        self.handle = Some(thread::spawn(move || work(step)));
+    }
+}
 
 /// What part of a guide is being dragged.
 #[allow(clippy::enum_variant_names)]
@@ -325,6 +407,14 @@ pub struct AppState {
     // ── Export Settings Panel ──
     pub show_export_settings: bool,
 
+    // ── Background Export ──
+    pub export_worker: ExportWorker,
+    /// Pending overwrite confirmation (egui window, replaces rfd::MessageDialog).
+    pub export_overwrite_confirm: Option<ExportOverwriteConfirm>,
+    /// True while a native file dialog is open (rfd).
+    /// Guards against re-entrant UI actions on macOS where rfd pumps the event loop.
+    pub modal_dialog_active: bool,
+
     // ── Remerge status (synced from PainterApp each frame) ──
     pub remerge_running: bool,
     pub remerge_progress: f32,
@@ -378,6 +468,9 @@ impl AppState {
             auto_preview_timer: None,
             auto_gen_suppressed: false,
             show_export_settings: false,
+            export_worker: ExportWorker::default(),
+            export_overwrite_confirm: None,
+            modal_dialog_active: false,
             remerge_running: false,
             remerge_progress: 0.0,
             undo: UndoHistory::default(),

@@ -980,6 +980,20 @@ impl PainterApp {
 
 impl eframe::App for PainterApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // On macOS, rfd dialogs pump the event loop and can re-enter update().
+        // Absorb all input so the UI renders (keeping egui state consistent)
+        // but nothing is interactive.
+        if self.state.modal_dialog_active {
+            egui::Area::new(egui::Id::new("modal_input_blocker"))
+                .fixed_pos(egui::Pos2::ZERO)
+                .order(egui::Order::Foreground)
+                .interactable(true)
+                .show(ctx, |ui: &mut egui::Ui| {
+                    let size = ctx.content_rect().size();
+                    ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+                });
+        }
+
         // Repaint while the pointer is over the window so hover reactions are instant.
         if ctx.input(|i| i.pointer.has_pointer()) {
             ctx.request_repaint();
@@ -1062,6 +1076,7 @@ impl PainterApp {
         }
         if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::G))
             && !self.state.generation.is_running()
+            && !self.state.modal_dialog_active
         {
             self.start_generation();
         }
@@ -1072,6 +1087,11 @@ impl PainterApp {
 
     /// Process pending_* flags set by UI widgets in the previous frame.
     fn dispatch_deferred(&mut self, ctx: &egui::Context) {
+        // On macOS, rfd dialogs pump the event loop, re-entering update().
+        // Skip all deferred actions while a native dialog is open.
+        if self.state.modal_dialog_active {
+            return;
+        }
         if self.state.pending_open {
             self.state.pending_open = false;
             dialogs::open_project(&mut self.state, ctx);
@@ -1221,6 +1241,10 @@ impl PainterApp {
 
     /// Poll background workers (path overlay, generation, remerge) and apply results.
     fn poll_workers(&mut self, ctx: &egui::Context) {
+        // Skip heavy state mutations while a native dialog is blocking the main thread.
+        if self.state.modal_dialog_active {
+            return;
+        }
         // Path overlay worker
         if let Some(poll_result) = self.state.path_worker.poll() {
             match poll_result {
@@ -1314,6 +1338,22 @@ impl PainterApp {
         if self.state.remerge_running {
             ctx.request_repaint();
         }
+
+        // Export worker
+        if let Some(result) = self.state.export_worker.poll() {
+            match result {
+                Ok((count, dir)) => {
+                    self.state.status_message =
+                        format!("Exported {count} file(s) to {}", dir.display());
+                }
+                Err(msg) => {
+                    self.state.status_message = msg;
+                }
+            }
+        }
+        if self.state.export_worker.is_running() {
+            ctx.request_repaint();
+        }
     }
 
     /// Top menu bar (File / Edit / View).
@@ -1334,9 +1374,10 @@ impl PainterApp {
                         self.state.pending_save = true;
                     }
                     ui.separator();
-                    let has_gen = self.state.generated.is_some();
+                    let can_export =
+                        self.state.generated.is_some() && !self.state.export_worker.is_running();
                     if ui
-                        .add_enabled(has_gen, egui::Button::new("Export..."))
+                        .add_enabled(can_export, egui::Button::new("Export..."))
                         .clicked()
                     {
                         ui.close();
@@ -1524,17 +1565,84 @@ impl PainterApp {
 
         Self::show_export_settings_window(ctx, &mut self.state);
 
+        // Export Overwrite Confirmation Window (modal)
+        let mut overwrite_action = None;
+        if let Some(ref confirm) = self.state.export_overwrite_confirm {
+            // Dim overlay to block interaction with background UI
+            let screen = ctx.content_rect();
+            egui::Area::new(egui::Id::new("overwrite_dim"))
+                .fixed_pos(screen.min)
+                .order(egui::Order::Middle)
+                .interactable(true)
+                .show(ctx, |ui: &mut egui::Ui| {
+                    let rect = egui::Rect::from_min_size(screen.min, screen.size());
+                    ui.painter()
+                        .rect_filled(rect, 0.0, egui::Color32::from_black_alpha(80));
+                    ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
+                });
+
+            egui::Window::new("Overwrite existing files?")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .order(egui::Order::Foreground)
+                .fixed_size([300.0, 0.0])
+                .show(ctx, |ui: &mut egui::Ui| {
+                    ui.vertical_centered(|ui: &mut egui::Ui| {
+                        ui.label(format!(
+                            "{} file(s) will be overwritten in \"{}\".",
+                            confirm.conflict_count, confirm.folder_name,
+                        ));
+                    });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        let btn_w = 80.0_f32;
+                        let gap = 12.0_f32;
+                        ui.spacing_mut().item_spacing.x = gap;
+                        let total = btn_w * 2.0 + gap;
+                        let pad = ((ui.available_width() - total) / 2.0).max(0.0);
+                        ui.add_space(pad);
+                        if ui
+                            .add(egui::Button::new("Cancel").min_size(egui::Vec2::new(btn_w, 28.0)))
+                            .clicked()
+                        {
+                            overwrite_action = Some(false);
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new("Overwrite")
+                                    .min_size(egui::Vec2::new(btn_w, 28.0)),
+                            )
+                            .clicked()
+                        {
+                            overwrite_action = Some(true);
+                        }
+                    });
+                });
+        }
+        match overwrite_action {
+            Some(true) => dialogs::confirm_export_overwrite(&mut self.state),
+            Some(false) => {
+                self.state.export_overwrite_confirm = None;
+            }
+            None => {}
+        }
+
         // Escape: deselect guide + return to Select tool.
         // Runs after panels so popup consume_key takes priority.
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             self.state.selected_guide = None;
             self.state.guide_tool = GuideTool::Select;
             self.state.show_export_settings = false;
+            self.state.export_overwrite_confirm = None;
         }
     }
 
     /// Auto-preview debounce and remerge polling.
     fn auto_preview_tick(&mut self, ctx: &egui::Context, project_replacing: bool) {
+        if self.state.modal_dialog_active {
+            return;
+        }
         if !project_replacing && self.state.loaded_mesh.is_some() {
             let current_render_hash = self.combined_render_hash();
             if current_render_hash != self.state.prev_render_hash

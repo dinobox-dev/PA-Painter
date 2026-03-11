@@ -1,5 +1,6 @@
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use eframe::egui;
@@ -7,7 +8,9 @@ use eframe::egui;
 use practical_arcana_painter::asset_io::{
     extract_uv_edges, load_mesh, LoadedMesh, MeshMaterialInfo,
 };
+use practical_arcana_painter::compositing::LayerMaps;
 use practical_arcana_painter::glb_export;
+use practical_arcana_painter::object_normal::MeshNormalData;
 use practical_arcana_painter::output::{
     export_color_exr, export_color_png, export_height_exr, export_height_png, export_layer_maps,
     export_manifest, export_normal_png, export_stroke_id_png, export_stroke_time_exr,
@@ -18,7 +21,8 @@ use practical_arcana_painter::project::{
     load_project, save_project, utc_now_iso8601, OutputCache, Project,
 };
 use practical_arcana_painter::types::{
-    BackgroundMode, EmbeddedTexture, Layer, PaintValues, TextureSource,
+    BackgroundMode, Color, EmbeddedTexture, ExportSettings, Layer, NormalMode, PaintValues,
+    TextureSource,
 };
 
 use super::state::{AppState, LayerMapping, MeshLoadPopup, ReloadSummary};
@@ -102,9 +106,11 @@ fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool {
 /// Open a file dialog and load a .pap project.
 /// Returns true if a project was successfully loaded.
 pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
+    state.modal_dialog_active = true;
     let path = rfd::FileDialog::new()
         .add_filter("PAP Project", &["pap"])
         .pick_file();
+    state.modal_dialog_active = false;
 
     let Some(path) = path else {
         return false;
@@ -214,10 +220,12 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
 /// Opens a file dialog for mesh selection, loads the mesh into a pending popup.
 /// State is NOT modified until the user confirms (OK) — Cancel discards everything.
 pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
+    state.modal_dialog_active = true;
     let path = rfd::FileDialog::new()
         .add_filter("3D Mesh", &["glb", "gltf", "obj"])
         .set_title("Select mesh for new project")
         .pick_file();
+    state.modal_dialog_active = false;
 
     let Some(mesh_path) = path else {
         return;
@@ -355,10 +363,12 @@ pub fn reload_mesh(state: &mut AppState) {
 /// Open a file dialog to pick a new mesh file for replacement.
 /// Loads the mesh into a pending popup — state is NOT modified until user confirms.
 pub fn replace_mesh(state: &mut AppState) {
+    state.modal_dialog_active = true;
     let path = rfd::FileDialog::new()
         .add_filter("3D Mesh", &["glb", "gltf", "obj"])
         .set_title("Replace mesh")
         .pick_file();
+    state.modal_dialog_active = false;
 
     let Some(path) = path else {
         return;
@@ -393,10 +403,12 @@ pub fn save_project_action(state: &mut AppState) {
     let path = if let Some(ref path) = state.project_path {
         path.clone()
     } else {
-        let Some(mut path) = rfd::FileDialog::new()
+        state.modal_dialog_active = true;
+        let result = rfd::FileDialog::new()
             .add_filter("PAP Project", &["pap"])
-            .save_file()
-        else {
+            .save_file();
+        state.modal_dialog_active = false;
+        let Some(mut path) = result else {
             return;
         };
         if path.extension().is_none() {
@@ -494,284 +506,403 @@ fn planned_export_files(state: &AppState, include_glb: bool) -> Vec<String> {
     files
 }
 
-/// Check if any of the planned export files already exist in `dir`.
-/// If so, show a confirmation dialog with the conflict count.
-/// Returns `false` if the user cancels.
-fn confirm_overwrite(dir: &Path, planned_files: &[String]) -> bool {
+/// Count how many of the planned export files already exist in `dir`.
+fn count_conflicts(dir: &Path, planned_files: &[String]) -> usize {
     if !dir.exists() {
-        return true;
+        return 0;
     }
-    let conflicts: usize = planned_files
+    planned_files
         .iter()
         .filter(|name| dir.join(name).exists())
-        .count();
-    if conflicts == 0 {
-        return true;
-    }
-    rfd::MessageDialog::new()
-        .set_title("Overwrite existing files?")
-        .set_description(format!(
-            "{conflicts} file(s) will be overwritten in \"{}\".",
-            dir.file_name().and_then(|n| n.to_str()).unwrap_or("folder"),
-        ))
-        .set_buttons(rfd::MessageButtons::OkCancel)
-        .show()
-        == rfd::MessageDialogResult::Ok
+        .count()
 }
 
-/// Export generated maps to a user-selected folder as PNG files.
-pub fn export_maps(state: &mut AppState) {
-    let Some(parent) = rfd::FileDialog::new().pick_folder() else {
-        return;
-    };
-    let dir = parent.join(export_folder_name(state));
-    let planned = planned_export_files(state, false);
-    if !confirm_overwrite(&dir, &planned) {
-        return;
-    }
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        state.status_message = format!("Failed to create folder: {e}");
-        return;
-    }
-    export_maps_to(state, &dir);
+// ── Background Export ──────────────────────────────────────────────
+
+/// Per-layer data for background export.
+struct ExportLayerEntry {
+    idx: usize,
+    name: String,
+    group_name: String,
+    order: i32,
+    visible: bool,
+    dry: f32,
+    maps: Arc<LayerMaps>,
 }
 
-/// Export generated maps to the given folder (no dialog).
-pub fn export_maps_to(state: &mut AppState, dir: &Path) {
-    let Some(ref gen) = state.generated else {
-        state.status_message = "Nothing to export — generate first".to_string();
-        return;
-    };
+/// All owned data the export worker thread needs.
+struct ExportInput {
+    dir: PathBuf,
+    es: ExportSettings,
+    resolution: u32,
+    with_alpha: bool,
+    // Composite map data (cloned from GenResult)
+    color: Vec<Color>,
+    height: Vec<f32>,
+    normal_map: Vec<[f32; 3]>,
+    stroke_id: Vec<u32>,
+    stroke_time_order: Vec<f32>,
+    stroke_time_arc: Vec<f32>,
+    // Per-layer data
+    per_layer_maps: Vec<ExportLayerEntry>,
+    normal_strength: f32,
+    normal_mode: NormalMode,
+    normal_data: Option<Arc<MeshNormalData>>,
+    // GLB
+    do_glb: bool,
+    mesh: Option<Arc<LoadedMesh>>,
+}
 
-    let es = &state.project.export_settings;
-    let res = gen.resolution;
+/// Count the total export steps for progress tracking.
+fn count_export_steps(es: &ExportSettings, layer_count: usize, do_glb: bool) -> u32 {
+    let mut n = 0u32;
+    if es.export_maps {
+        if es.include_color {
+            n += 1;
+        }
+        if es.include_height {
+            n += 1;
+        }
+        if es.include_normal {
+            n += 1;
+        }
+        if es.include_stroke_id {
+            n += 1;
+        }
+        if es.include_time_map {
+            n += 1;
+        }
+        if es.per_layer {
+            // Each layer exports up to 4 maps, count as 1 step per layer + manifest
+            n += layer_count as u32 + 1;
+        }
+    }
+    if do_glb {
+        n += 1;
+    }
+    n.max(1)
+}
+
+/// Build an ExportInput from the current app state.
+/// Returns None if there is nothing to export.
+fn gather_export_input(state: &AppState, dir: PathBuf, do_glb: bool) -> Option<ExportInput> {
+    let gen = state.generated.as_ref()?;
+    let es = state.project.export_settings.clone();
     let with_alpha = state.project.settings.background_mode == BackgroundMode::Transparent;
-    let is_exr = es.format == ExportFormat::Exr;
-    let mut count = 0u32;
+    let need_stroke_id = es.export_maps && es.include_stroke_id;
+    let need_time = es.export_maps && es.include_time_map;
 
-    if es.include_color {
-        let result = if is_exr {
-            export_color_exr(&gen.color, res, &dir.join("color_map.exr"), with_alpha)
-        } else {
-            export_color_png(&gen.color, res, &dir.join("color_map.png"), with_alpha)
-        };
-        if let Err(e) = result {
-            state.status_message = format!("Export failed: {e:?}");
-            return;
-        }
-        count += 1;
-    }
-    if es.include_height {
-        let normalized = normalize_height_map(&gen.height);
-        let result = if is_exr {
-            export_height_exr(&normalized, res, &dir.join("height_map.exr"))
-        } else {
-            export_height_png(&normalized, res, &dir.join("height_map.png"))
-        };
-        if let Err(e) = result {
-            state.status_message = format!("Export failed: {e:?}");
-            return;
-        }
-        count += 1;
-    }
-    if es.include_normal {
-        if let Err(e) = export_normal_png(&gen.normal_map, res, &dir.join("normal_map.png")) {
-            state.status_message = format!("Export failed: {e:?}");
-            return;
-        }
-        count += 1;
-    }
-    if es.include_stroke_id {
-        if let Err(e) = export_stroke_id_png(&gen.stroke_id, res, &dir.join("stroke_id_map.png")) {
-            state.status_message = format!("Export failed: {e:?}");
-            return;
-        }
-        count += 1;
-    }
-    if es.include_time_map {
-        let result = if is_exr {
-            export_stroke_time_exr(
-                &gen.stroke_time_order,
-                &gen.stroke_time_arc,
-                res,
-                &dir.join("stroke_time_map.exr"),
-            )
-        } else {
-            export_stroke_time_png(
-                &gen.stroke_time_order,
-                &gen.stroke_time_arc,
-                res,
-                &dir.join("stroke_time_map.png"),
-            )
-        };
-        if let Err(e) = result {
-            state.status_message = format!("Export failed: {e:?}");
-            return;
-        }
-        count += 1;
-    }
-
-    // ── Per-Layer Export ──
+    // Gather per-layer data if needed
+    let mut per_layer_maps = Vec::new();
     if es.per_layer {
-        let mut sorted_layers: Vec<&Layer> =
-            state.project.layers.iter().filter(|l| l.visible).collect();
-        sorted_layers.sort_by_key(|l| l.order);
-
-        let normal_strength = state.project.settings.normal_strength;
-        let normal_mode = state.project.settings.normal_mode;
-        let normal_data = state
-            .cached_mesh_normals
-            .as_ref()
-            .map(|(_, nd)| nd.as_ref());
-
-        let mut manifest_entries = Vec::new();
-        for (idx, layer) in sorted_layers.iter().enumerate() {
+        let mut sorted: Vec<&Layer> = state.project.layers.iter().filter(|l| l.visible).collect();
+        sorted.sort_by_key(|l| l.order);
+        for (idx, layer) in sorted.iter().enumerate() {
             let hash = layer.render_hash();
-            let Some((_, maps)) = state
+            if let Some((_, maps)) = state
                 .generation
                 .layer_cache
                 .iter()
                 .find(|(h, _)| *h == hash)
-            else {
-                continue; // cache miss — skip this layer
-            };
+            {
+                per_layer_maps.push(ExportLayerEntry {
+                    idx,
+                    name: layer.name.clone(),
+                    group_name: layer.group_name.clone(),
+                    order: layer.order,
+                    visible: layer.visible,
+                    dry: layer.dry,
+                    maps: Arc::clone(maps),
+                });
+            }
+        }
+    }
 
-            match export_layer_maps(
-                maps,
-                idx,
-                &LayerExportOptions {
-                    format: es.format,
-                    normal_strength,
-                    normal_mode,
-                    normal_data,
-                    include_color: es.include_color,
-                    include_height: es.include_height,
-                    include_normal: es.include_normal,
-                    include_time_map: es.include_time_map,
-                },
-                dir,
-            ) {
-                Ok(n) => count += n,
-                Err(e) => {
-                    state.status_message = format!("Export failed (layer {}): {e:?}", layer.name);
-                    return;
+    Some(ExportInput {
+        dir,
+        es,
+        resolution: gen.resolution,
+        with_alpha,
+        color: gen.color.clone(),
+        height: gen.height.clone(),
+        normal_map: gen.normal_map.clone(),
+        stroke_id: if need_stroke_id {
+            gen.stroke_id.clone()
+        } else {
+            Vec::new()
+        },
+        stroke_time_order: if need_time {
+            gen.stroke_time_order.clone()
+        } else {
+            Vec::new()
+        },
+        stroke_time_arc: if need_time {
+            gen.stroke_time_arc.clone()
+        } else {
+            Vec::new()
+        },
+        per_layer_maps,
+        normal_strength: state.project.settings.normal_strength,
+        normal_mode: state.project.settings.normal_mode,
+        normal_data: state
+            .cached_mesh_normals
+            .as_ref()
+            .map(|(_, nd)| Arc::clone(nd)),
+        do_glb,
+        mesh: if do_glb {
+            state.loaded_mesh.clone()
+        } else {
+            None
+        },
+    })
+}
+
+/// Run the export on a background thread. Called from ExportWorker.
+fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf), String> {
+    let ExportInput {
+        dir,
+        es,
+        resolution: res,
+        with_alpha,
+        color,
+        height,
+        normal_map,
+        stroke_id,
+        stroke_time_order,
+        stroke_time_arc,
+        per_layer_maps,
+        normal_strength,
+        normal_mode,
+        normal_data,
+        do_glb,
+        mesh,
+    } = input;
+
+    let is_exr = es.format == ExportFormat::Exr;
+    let mut count = 0u32;
+
+    // ── Texture Maps ──
+    if es.export_maps {
+        if es.include_color {
+            let result = if is_exr {
+                export_color_exr(&color, res, &dir.join("color_map.exr"), with_alpha)
+            } else {
+                export_color_png(&color, res, &dir.join("color_map.png"), with_alpha)
+            };
+            result.map_err(|e| format!("Export failed: {e:?}"))?;
+            count += 1;
+            step.store(count, Ordering::Relaxed);
+        }
+        if es.include_height {
+            let normalized = normalize_height_map(&height);
+            let result = if is_exr {
+                export_height_exr(&normalized, res, &dir.join("height_map.exr"))
+            } else {
+                export_height_png(&normalized, res, &dir.join("height_map.png"))
+            };
+            result.map_err(|e| format!("Export failed: {e:?}"))?;
+            count += 1;
+            step.store(count, Ordering::Relaxed);
+        }
+        if es.include_normal {
+            export_normal_png(&normal_map, res, &dir.join("normal_map.png"))
+                .map_err(|e| format!("Export failed: {e:?}"))?;
+            count += 1;
+            step.store(count, Ordering::Relaxed);
+        }
+        if es.include_stroke_id {
+            export_stroke_id_png(&stroke_id, res, &dir.join("stroke_id_map.png"))
+                .map_err(|e| format!("Export failed: {e:?}"))?;
+            count += 1;
+            step.store(count, Ordering::Relaxed);
+        }
+        if es.include_time_map {
+            let result = if is_exr {
+                export_stroke_time_exr(
+                    &stroke_time_order,
+                    &stroke_time_arc,
+                    res,
+                    &dir.join("stroke_time_map.exr"),
+                )
+            } else {
+                export_stroke_time_png(
+                    &stroke_time_order,
+                    &stroke_time_arc,
+                    res,
+                    &dir.join("stroke_time_map.png"),
+                )
+            };
+            result.map_err(|e| format!("Export failed: {e:?}"))?;
+            count += 1;
+            step.store(count, Ordering::Relaxed);
+        }
+
+        // ── Per-Layer Export ──
+        if es.per_layer {
+            let nd_ref = normal_data.as_deref();
+            let mut manifest_entries = Vec::new();
+            for entry in &per_layer_maps {
+                match export_layer_maps(
+                    &entry.maps,
+                    entry.idx,
+                    &LayerExportOptions {
+                        format: es.format,
+                        normal_strength,
+                        normal_mode,
+                        normal_data: nd_ref,
+                        include_color: es.include_color,
+                        include_height: es.include_height,
+                        include_normal: es.include_normal,
+                        include_time_map: es.include_time_map,
+                    },
+                    &dir,
+                ) {
+                    Ok(n) => count += n,
+                    Err(e) => {
+                        return Err(format!("Export failed (layer {}): {e:?}", entry.name));
+                    }
                 }
+                step.store(count, Ordering::Relaxed);
+
+                manifest_entries.push(LayerManifestEntry {
+                    index: entry.idx,
+                    name: entry.name.clone(),
+                    group: entry.group_name.clone(),
+                    order: entry.order,
+                    visible: entry.visible,
+                    dry: entry.dry,
+                });
             }
 
-            manifest_entries.push(LayerManifestEntry {
-                index: idx,
-                name: layer.name.clone(),
-                group: layer.group_name.clone(),
-                order: layer.order,
-                visible: layer.visible,
-                dry: layer.dry,
-            });
+            export_manifest(&manifest_entries, es.format, &dir)
+                .map_err(|e| format!("Export failed (manifest): {e:?}"))?;
+            count += 1;
+            step.store(count, Ordering::Relaxed);
         }
+    }
 
-        if let Err(e) = export_manifest(&manifest_entries, es.format, dir) {
-            state.status_message = format!("Export failed (manifest): {e:?}");
-            return;
+    // ── GLB ──
+    if do_glb {
+        if let Some(ref mesh) = mesh {
+            let normalized_height = normalize_height_map(&height);
+            let result = if with_alpha {
+                glb_export::export_preview_glb_transparent(
+                    mesh,
+                    &color,
+                    &normalized_height,
+                    &normal_map,
+                    res,
+                    0.0,
+                    &dir.join("preview.glb"),
+                )
+            } else {
+                glb_export::export_preview_glb(
+                    mesh,
+                    &color,
+                    &normalized_height,
+                    &normal_map,
+                    res,
+                    0.0,
+                    &dir.join("preview.glb"),
+                )
+            };
+            result.map_err(|e| format!("GLB export failed: {e:?}"))?;
+            count += 1;
+            step.store(count, Ordering::Relaxed);
+        } else {
+            return Err("No mesh loaded for GLB export".to_string());
         }
-        count += 1; // manifest.json
     }
 
     if count == 0 {
-        state.status_message = "No maps selected for export".to_string();
-    } else {
-        state.status_message = format!("Exported {count} map(s) to {}", dir.display());
+        return Err("No maps selected for export".to_string());
     }
+
+    Ok((count, dir))
 }
 
-/// Export both texture maps and GLB to a user-selected folder.
-pub fn export_both(state: &mut AppState) {
-    let Some(parent) = rfd::FileDialog::new().pick_folder() else {
-        return;
-    };
-    let dir = parent.join(export_folder_name(state));
-    let planned = planned_export_files(state, true);
-    if !confirm_overwrite(&dir, &planned) {
+/// Start the background export worker. Call after folder selection + overwrite confirmation.
+fn start_export_worker(state: &mut AppState, dir: PathBuf, do_glb: bool) {
+    if state.export_worker.is_running() {
+        state.status_message = "Export already in progress".to_string();
         return;
     }
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        state.status_message = format!("Failed to create folder: {e}");
-        return;
-    }
-    export_maps_to(state, &dir);
-    // If maps export failed, status_message already set — skip GLB.
-    if state.status_message.starts_with("Export failed")
-        || state.status_message.starts_with("No maps")
-    {
-        return;
-    }
-    let glb_path = dir.join("preview.glb");
-    export_glb_to(state, &glb_path);
-    if !state.status_message.starts_with("GLB export failed") {
-        let maps_msg = state.status_message.clone();
-        state.status_message = format!("{maps_msg} + GLB");
-    }
-}
 
-/// Export a 3D preview GLB — pick folder, output as `preview.glb`.
-pub fn export_glb(state: &mut AppState) {
-    let Some(parent) = rfd::FileDialog::new().pick_folder() else {
-        return;
-    };
-    let dir = parent.join(export_folder_name(state));
-    let planned = vec!["preview.glb".to_string()];
-    if !confirm_overwrite(&dir, &planned) {
-        return;
-    }
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        state.status_message = format!("Failed to create folder: {e}");
-        return;
-    }
-    export_glb_to(state, &dir.join("preview.glb"));
-}
-
-/// Export a 3D preview GLB to the given path (no dialog).
-pub fn export_glb_to(state: &mut AppState, path: &Path) {
-    let Some(ref gen) = state.generated else {
+    let Some(input) = gather_export_input(state, dir, do_glb) else {
         state.status_message = "Nothing to export — generate first".to_string();
         return;
     };
-    let Some(ref mesh) = state.loaded_mesh else {
-        state.status_message = "No mesh loaded".to_string();
+
+    let total = count_export_steps(&input.es, input.per_layer_maps.len(), do_glb);
+
+    state.status_message = "Exporting…".to_string();
+    state
+        .export_worker
+        .start(total, move |step| run_export(input, step));
+}
+
+/// Pick a folder, confirm overwrites, and start the export worker.
+/// `include_glb` controls whether to write GLB and which planned files to check.
+fn pick_folder_and_export(state: &mut AppState, include_glb: bool) {
+    state.modal_dialog_active = true;
+    let parent = rfd::FileDialog::new().pick_folder();
+    state.modal_dialog_active = false;
+
+    let Some(parent) = parent else {
         return;
     };
+    let dir = parent.join(export_folder_name(state));
+    let planned = planned_export_files(state, include_glb);
+    let conflicts = count_conflicts(&dir, &planned);
 
-    let normalized_height = normalize_height_map(&gen.height);
-    let transparent = state.project.settings.background_mode == BackgroundMode::Transparent;
-
-    let result = if transparent {
-        glb_export::export_preview_glb_transparent(
-            mesh,
-            &gen.color,
-            &normalized_height,
-            &gen.normal_map,
-            gen.resolution,
-            0.0,
-            path,
-        )
-    } else {
-        glb_export::export_preview_glb(
-            mesh,
-            &gen.color,
-            &normalized_height,
-            &gen.normal_map,
-            gen.resolution,
-            0.0,
-            path,
-        )
-    };
-
-    match result {
-        Ok(()) => {
-            state.status_message = format!("Exported GLB to {}", path.display());
-        }
-        Err(e) => {
-            state.status_message = format!("GLB export failed: {e:?}");
-        }
+    if conflicts > 0 {
+        // Defer to egui confirmation window instead of blocking rfd::MessageDialog.
+        let folder_name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("folder")
+            .to_string();
+        state.export_overwrite_confirm = Some(super::state::ExportOverwriteConfirm {
+            dir,
+            include_glb,
+            conflict_count: conflicts,
+            folder_name,
+        });
+        return;
     }
+
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        state.status_message = format!("Failed to create folder: {e}");
+        return;
+    }
+    start_export_worker(state, dir, include_glb);
+}
+
+/// Called when the user confirms overwrite in the egui window.
+pub fn confirm_export_overwrite(state: &mut AppState) {
+    let Some(confirm) = state.export_overwrite_confirm.take() else {
+        return;
+    };
+    if let Err(e) = std::fs::create_dir_all(&confirm.dir) {
+        state.status_message = format!("Failed to create folder: {e}");
+        return;
+    }
+    start_export_worker(state, confirm.dir, confirm.include_glb);
+}
+
+/// Export generated maps to a user-selected folder (background worker).
+pub fn export_maps(state: &mut AppState) {
+    pick_folder_and_export(state, false);
+}
+
+/// Export both texture maps and GLB to a user-selected folder (background worker).
+pub fn export_both(state: &mut AppState) {
+    pick_folder_and_export(state, true);
+}
+
+/// Export a 3D preview GLB — pick folder (background worker).
+pub fn export_glb(state: &mut AppState) {
+    pick_folder_and_export(state, true);
 }
 
 // ── Auto-Mapping ──────────────────────────────────────────────────

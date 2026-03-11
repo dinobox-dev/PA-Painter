@@ -634,10 +634,11 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
             se: r,
         };
 
-        // ── Export (left zone) — doubles as progress bar during generation/remerge ──
+        // ── Export (left zone) — doubles as progress bar during generation/remerge/export ──
         let generating = state.generation.is_running();
         let remerging = state.remerge_running;
-        let busy = generating || remerging;
+        let exporting = state.export_worker.is_running();
+        let busy = generating || remerging || exporting;
         let (export_rect, export_resp) =
             ui.allocate_exact_size(btn_size, egui::Sense::click() | egui::Sense::hover());
 
@@ -652,6 +653,10 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
                 } else {
                     (p, format!("Generating… {:.0}%", p * 100.0))
                 }
+            } else if exporting {
+                let p = state.export_worker.progress();
+                let (cur, tot) = state.export_worker.steps();
+                (p, format!("Exporting… {cur}/{tot}"))
             } else {
                 let p = state.remerge_progress;
                 (p, format!("Applying… {:.0}%", p * 100.0))
@@ -712,7 +717,7 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
             if has_result && export_resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
-            if has_result && export_resp.clicked() {
+            if has_result && !state.export_worker.is_running() && export_resp.clicked() {
                 state.pending_export = true;
             }
             if stale && export_resp.hovered() {
