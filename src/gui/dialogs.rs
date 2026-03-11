@@ -2,6 +2,8 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use eframe::egui;
+
 use practical_arcana_painter::asset_io::{
     extract_uv_edges, load_mesh, LoadedMesh, MeshMaterialInfo,
 };
@@ -139,11 +141,21 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                 let pixel_count = output.color.len();
                 let r = output.resolution;
                 state.generation_snapshot = output.snapshot_hash;
+                let stroke_id = vec![0; pixel_count];
+                let display_color = textures::color_buffer_to_image(&output.color, r, r);
+                let display_height = textures::height_buffer_to_image(&output.height, r);
+                let display_normal = textures::normal_map_to_image(&output.normal_map, r);
+                let display_stroke_id = textures::stroke_id_to_image(&stroke_id, r);
+
+                let gpu_color_pixels = super::mesh_preview::convert_color_pixels(&output.color);
+                let gpu_normal_pixels =
+                    super::mesh_preview::convert_normal_pixels(&output.normal_map);
+
                 state.generated = Some(super::generation::GenResult {
                     color: output.color,
                     height: output.height,
                     normal_map: output.normal_map,
-                    stroke_id: vec![0; pixel_count],
+                    stroke_id,
                     stroke_time_order: output.stroke_time_order,
                     stroke_time_arc: output.stroke_time_arc,
                     resolution: r,
@@ -154,36 +166,33 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                     gen_normal_strength: state.project.settings.normal_strength,
                     gen_normal_mode: state.project.settings.normal_mode,
                     gen_background_mode: state.project.settings.background_mode,
+                    display_color: display_color.clone(),
+                    display_height: display_height.clone(),
+                    display_normal: display_normal.clone(),
+                    display_stroke_id: display_stroke_id.clone(),
+                    gpu_color_pixels,
+                    gpu_normal_pixels,
                 });
                 // Create texture handles so UV View displays the maps
-                let gen = state
-                    .generated
-                    .as_ref()
-                    .expect("generated data was just set above");
-                state.textures.color = Some(textures::color_buffer_to_handle(
-                    ctx,
-                    &gen.color,
-                    r,
-                    r,
+                state.textures.color = Some(ctx.load_texture(
                     "loaded_color",
+                    display_color,
+                    egui::TextureOptions::LINEAR,
                 ));
-                state.textures.height = Some(textures::height_buffer_to_handle(
-                    ctx,
-                    &gen.height,
-                    r,
+                state.textures.height = Some(ctx.load_texture(
                     "loaded_height",
+                    display_height,
+                    egui::TextureOptions::LINEAR,
                 ));
-                state.textures.normal = Some(textures::normal_map_to_handle(
-                    ctx,
-                    &gen.normal_map,
-                    r,
+                state.textures.normal = Some(ctx.load_texture(
                     "loaded_normal",
+                    display_normal,
+                    egui::TextureOptions::LINEAR,
                 ));
-                state.textures.stroke_id = Some(textures::stroke_id_to_handle(
-                    ctx,
-                    &gen.stroke_id,
-                    r,
+                state.textures.stroke_id = Some(ctx.load_texture(
                     "loaded_stroke_id",
+                    display_stroke_id,
+                    egui::TextureOptions::LINEAR,
                 ));
             } else {
                 state.generated = None;

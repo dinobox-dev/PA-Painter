@@ -788,19 +788,11 @@ pub fn upload_mesh(render_state: &egui_wgpu::RenderState, mesh: &LoadedMesh) {
     }
 }
 
-// ── Color texture upload ───────────────────────────────────────────
+// ── CPU pixel conversion (thread-safe, no GPU) ───────────────────
 
-/// Upload generated color data to the 3D preview texture.
-/// Accepts the Color type from the generation result.
-pub fn upload_color_texture(
-    render_state: &egui_wgpu::RenderState,
-    color_data: &[practical_arcana_painter::types::Color],
-    resolution: usize,
-) {
-    let device = &render_state.device;
-    let queue = &render_state.queue;
-
-    let pixels: Vec<u8> = color_data
+/// Convert color data to raw RGBA bytes for GPU upload. Can run on any thread.
+pub fn convert_color_pixels(color_data: &[practical_arcana_painter::types::Color]) -> Vec<u8> {
+    color_data
         .iter()
         .flat_map(|c| {
             [
@@ -810,7 +802,35 @@ pub fn upload_color_texture(
                 (c.a.clamp(0.0, 1.0) * 255.0) as u8,
             ]
         })
-        .collect();
+        .collect()
+}
+
+/// Convert normal map data to raw RGBA bytes for GPU upload. Can run on any thread.
+pub fn convert_normal_pixels(normal_data: &[[f32; 3]]) -> Vec<u8> {
+    normal_data
+        .iter()
+        .flat_map(|n| {
+            [
+                (n[0].clamp(0.0, 1.0) * 255.0) as u8,
+                (n[1].clamp(0.0, 1.0) * 255.0) as u8,
+                (n[2].clamp(0.0, 1.0) * 255.0) as u8,
+                255u8,
+            ]
+        })
+        .collect()
+}
+
+// ── Color texture upload ───────────────────────────────────────────
+
+/// Upload pre-converted color pixel bytes to the 3D preview texture.
+/// Use this when pixels are already converted on the worker thread.
+pub fn upload_color_texture_raw(
+    render_state: &egui_wgpu::RenderState,
+    pixels: &[u8],
+    resolution: usize,
+) {
+    let device = &render_state.device;
+    let queue = &render_state.queue;
 
     let size = wgpu::Extent3d {
         width: resolution as u32,
@@ -834,7 +854,7 @@ pub fn upload_color_texture(
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        &pixels,
+        pixels,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(resolution as u32 * 4),
@@ -861,30 +881,14 @@ pub fn upload_color_texture(
     }
 }
 
-// ── Normal texture upload ──────────────────────────────────────────
-
-/// Upload generated normal map data to the 3D preview texture.
-pub fn upload_normal_texture(
+/// Upload pre-converted normal pixel bytes to the 3D preview texture.
+pub fn upload_normal_texture_raw(
     render_state: &egui_wgpu::RenderState,
-    normal_data: &[[f32; 3]],
+    pixels: &[u8],
     resolution: usize,
 ) {
     let device = &render_state.device;
     let queue = &render_state.queue;
-
-    // Normal data is already [0, 1] encoded (0.5 = zero perturbation).
-    // Write directly to texture — no additional encoding needed.
-    let pixels: Vec<u8> = normal_data
-        .iter()
-        .flat_map(|n| {
-            [
-                (n[0].clamp(0.0, 1.0) * 255.0) as u8,
-                (n[1].clamp(0.0, 1.0) * 255.0) as u8,
-                (n[2].clamp(0.0, 1.0) * 255.0) as u8,
-                255u8, // alpha=1 → use this normal map
-            ]
-        })
-        .collect();
 
     let size = wgpu::Extent3d {
         width: resolution as u32,
@@ -908,7 +912,7 @@ pub fn upload_normal_texture(
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        &pixels,
+        pixels,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(resolution as u32 * 4),
@@ -933,6 +937,32 @@ pub fn upload_normal_texture(
         res.normal_texture = texture;
         res.normal_texture_view = view;
     }
+}
+
+/// Upload generated color data to the 3D preview texture.
+/// NOTE: This does CPU conversion on the calling thread. Prefer `upload_color_texture_raw`
+/// with pre-converted data when available.
+pub fn upload_color_texture(
+    render_state: &egui_wgpu::RenderState,
+    color_data: &[practical_arcana_painter::types::Color],
+    resolution: usize,
+) {
+    let pixels = convert_color_pixels(color_data);
+    upload_color_texture_raw(render_state, &pixels, resolution);
+}
+
+// ── Normal texture upload ──────────────────────────────────────────
+
+/// Upload generated normal map data to the 3D preview texture.
+/// NOTE: This does CPU conversion on the calling thread. Prefer `upload_normal_texture_raw`
+/// with pre-converted data when available.
+pub fn upload_normal_texture(
+    render_state: &egui_wgpu::RenderState,
+    normal_data: &[[f32; 3]],
+    resolution: usize,
+) {
+    let pixels = convert_normal_pixels(normal_data);
+    upload_normal_texture_raw(render_state, &pixels, resolution);
 }
 
 // ── Overlay texture upload ─────────────────────────────────────────

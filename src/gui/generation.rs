@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use eframe::egui;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use practical_arcana_painter::asset_io::LoadedMesh;
@@ -71,6 +72,14 @@ pub struct GenResult {
     pub gen_normal_strength: f32,
     pub gen_normal_mode: NormalMode,
     pub gen_background_mode: BackgroundMode,
+    /// Pre-converted display images (built on worker thread to avoid main-thread stalls).
+    pub display_color: egui::ColorImage,
+    pub display_height: egui::ColorImage,
+    pub display_normal: egui::ColorImage,
+    pub display_stroke_id: egui::ColorImage,
+    /// Pre-converted GPU pixel bytes for 3D preview (built on worker thread).
+    pub gpu_color_pixels: Vec<u8>,
+    pub gpu_normal_pixels: Vec<u8>,
 }
 
 /// Manages a single background generation thread.
@@ -578,6 +587,18 @@ fn run_pipeline(
 
     set_progress(progress, 1.0);
 
+    // Pre-convert display images on the worker thread to avoid main-thread stalls.
+    let display_color =
+        super::textures::color_buffer_to_image(&global.color, input.resolution, input.resolution);
+    let display_height = super::textures::height_buffer_to_image(&global.height, input.resolution);
+    let display_normal = super::textures::normal_map_to_image(&normal_map, input.resolution);
+    let display_stroke_id =
+        super::textures::stroke_id_to_image(&global.stroke_id, input.resolution);
+
+    // Pre-convert GPU pixel bytes for 3D preview textures.
+    let gpu_color_pixels = super::mesh_preview::convert_color_pixels(&global.color);
+    let gpu_normal_pixels = super::mesh_preview::convert_normal_pixels(&normal_map);
+
     Some(GenResult {
         color: global.color,
         height: global.height,
@@ -593,6 +614,12 @@ fn run_pipeline(
         gen_normal_strength: input.settings.normal_strength,
         gen_normal_mode: input.settings.normal_mode,
         gen_background_mode: input.settings.background_mode,
+        display_color,
+        display_height,
+        display_normal,
+        display_stroke_id,
+        gpu_color_pixels,
+        gpu_normal_pixels,
     })
 }
 
@@ -622,6 +649,14 @@ pub struct RemergeResult {
     pub gen_background_mode: BackgroundMode,
     pub rendered_layers: Vec<(u64, Arc<LayerMaps>)>,
     pub rendered_paths: Vec<(u64, Arc<Vec<StrokePath>>)>,
+    /// Pre-converted display images (built on worker thread).
+    pub display_color: egui::ColorImage,
+    pub display_height: egui::ColorImage,
+    pub display_normal: egui::ColorImage,
+    pub display_stroke_id: egui::ColorImage,
+    /// Pre-converted GPU pixel bytes for 3D preview (built on worker thread).
+    pub gpu_color_pixels: Vec<u8>,
+    pub gpu_normal_pixels: Vec<u8>,
 }
 
 /// Lightweight async worker for re-merge operations.
@@ -790,6 +825,15 @@ fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
         }
     }
 
+    let display_color =
+        super::textures::color_buffer_to_image(&global.color, resolution, resolution);
+    let display_height = super::textures::height_buffer_to_image(&global.height, resolution);
+    let display_normal = super::textures::normal_map_to_image(&normal_map, resolution);
+    let display_stroke_id = super::textures::stroke_id_to_image(&global.stroke_id, resolution);
+
+    let gpu_color_pixels = super::mesh_preview::convert_color_pixels(&global.color);
+    let gpu_normal_pixels = super::mesh_preview::convert_normal_pixels(&normal_map);
+
     Some(RemergeResult {
         color: global.color,
         height: global.height,
@@ -803,5 +847,11 @@ fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
         gen_background_mode: settings.background_mode,
         rendered_layers: input.layer_cache,
         rendered_paths: input.rendered_paths,
+        display_color,
+        display_height,
+        display_normal,
+        display_stroke_id,
+        gpu_color_pixels,
+        gpu_normal_pixels,
     })
 }

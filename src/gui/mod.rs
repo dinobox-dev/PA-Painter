@@ -239,33 +239,30 @@ impl PainterApp {
         }
     }
 
-    fn apply_generation_result(&mut self, ctx: &egui::Context, result: generation::GenResult) {
+    fn apply_generation_result(&mut self, ctx: &egui::Context, mut result: generation::GenResult) {
         let is_preview = self.state.generation.is_preview;
         let r = result.resolution;
-        self.state.textures.color = Some(textures::color_buffer_to_handle(
-            ctx,
-            &result.color,
-            r,
-            r,
+        // Upload pre-converted images — take ownership to avoid 64MB clone.
+        let empty_img = egui::ColorImage::new([0, 0], vec![]);
+        self.state.textures.color = Some(ctx.load_texture(
             "gen_color",
+            std::mem::replace(&mut result.display_color, empty_img.clone()),
+            egui::TextureOptions::LINEAR,
         ));
-        self.state.textures.height = Some(textures::height_buffer_to_handle(
-            ctx,
-            &result.height,
-            r,
+        self.state.textures.height = Some(ctx.load_texture(
             "gen_height",
+            std::mem::replace(&mut result.display_height, empty_img.clone()),
+            egui::TextureOptions::LINEAR,
         ));
-        self.state.textures.normal = Some(textures::normal_map_to_handle(
-            ctx,
-            &result.normal_map,
-            r,
+        self.state.textures.normal = Some(ctx.load_texture(
             "gen_normal",
+            std::mem::replace(&mut result.display_normal, empty_img.clone()),
+            egui::TextureOptions::LINEAR,
         ));
-        self.state.textures.stroke_id = Some(textures::stroke_id_to_handle(
-            ctx,
-            &result.stroke_id,
-            r,
+        self.state.textures.stroke_id = Some(ctx.load_texture(
             "gen_stroke_id",
+            std::mem::replace(&mut result.display_stroke_id, empty_img),
+            egui::TextureOptions::LINEAR,
         ));
 
         // Always update stroke_count from the time data
@@ -274,8 +271,8 @@ impl PainterApp {
         // Upload color, normal, and time textures to 3D preview
         if let Some(ref rs) = self.render_state {
             if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result() {
-                mesh_preview::upload_color_texture(rs, &result.color, r as usize);
-                mesh_preview::upload_normal_texture(rs, &result.normal_map, r as usize);
+                mesh_preview::upload_color_texture_raw(rs, &result.gpu_color_pixels, r as usize);
+                mesh_preview::upload_normal_texture_raw(rs, &result.gpu_normal_pixels, r as usize);
                 mesh_preview::upload_time_texture(
                     rs,
                     &result.stroke_time_order,
@@ -292,9 +289,9 @@ impl PainterApp {
             self.state.cached_mesh_normals = Some((normals.0, std::sync::Arc::clone(&normals.1)));
         }
 
-        // Path cache is resolution-independent — always update
+        // Path cache is resolution-independent — always update (move, not clone)
         if !result.rendered_paths.is_empty() {
-            self.state.generation.path_cache = result.rendered_paths.clone();
+            self.state.generation.path_cache = std::mem::take(&mut result.rendered_paths);
         }
 
         if is_preview {
@@ -318,8 +315,8 @@ impl PainterApp {
                 self.start_generation();
             }
         } else {
-            // Full-res: update layer cache for future reuse.
-            self.state.generation.layer_cache = result.rendered_layers.clone();
+            // Full-res: update layer cache for future reuse (move, not clone).
+            self.state.generation.layer_cache = std::mem::take(&mut result.rendered_layers);
             self.state.generation.cache_global_hash = {
                 use std::hash::{Hash, Hasher};
                 let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -516,34 +513,30 @@ impl PainterApp {
         });
     }
 
-    fn apply_remerge_result(&mut self, ctx: &egui::Context, result: generation::RemergeResult) {
+    fn apply_remerge_result(&mut self, ctx: &egui::Context, mut result: generation::RemergeResult) {
         let r = result.resolution;
 
-        // Update textures
-        self.state.textures.color = Some(textures::color_buffer_to_handle(
-            ctx,
-            &result.color,
-            r,
-            r,
+        // Update textures — take ownership to avoid large clones.
+        let empty_img = egui::ColorImage::new([0, 0], vec![]);
+        self.state.textures.color = Some(ctx.load_texture(
             "remerge_color",
+            std::mem::replace(&mut result.display_color, empty_img.clone()),
+            egui::TextureOptions::LINEAR,
         ));
-        self.state.textures.height = Some(textures::height_buffer_to_handle(
-            ctx,
-            &result.height,
-            r,
+        self.state.textures.height = Some(ctx.load_texture(
             "remerge_height",
+            std::mem::replace(&mut result.display_height, empty_img.clone()),
+            egui::TextureOptions::LINEAR,
         ));
-        self.state.textures.normal = Some(textures::normal_map_to_handle(
-            ctx,
-            &result.normal_map,
-            r,
+        self.state.textures.normal = Some(ctx.load_texture(
             "remerge_normal",
+            std::mem::replace(&mut result.display_normal, empty_img.clone()),
+            egui::TextureOptions::LINEAR,
         ));
-        self.state.textures.stroke_id = Some(textures::stroke_id_to_handle(
-            ctx,
-            &result.stroke_id,
-            r,
+        self.state.textures.stroke_id = Some(ctx.load_texture(
             "remerge_stroke_id",
+            std::mem::replace(&mut result.display_stroke_id, empty_img),
+            egui::TextureOptions::LINEAR,
         ));
 
         // Always update stroke_count from the time data
@@ -552,8 +545,8 @@ impl PainterApp {
         // Upload to 3D preview
         if let Some(ref rs) = self.render_state {
             if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result() {
-                mesh_preview::upload_color_texture(rs, &result.color, r as usize);
-                mesh_preview::upload_normal_texture(rs, &result.normal_map, r as usize);
+                mesh_preview::upload_color_texture_raw(rs, &result.gpu_color_pixels, r as usize);
+                mesh_preview::upload_normal_texture_raw(rs, &result.gpu_normal_pixels, r as usize);
                 mesh_preview::upload_time_texture(
                     rs,
                     &result.stroke_time_order,
@@ -581,6 +574,12 @@ impl PainterApp {
             gen_normal_strength: result.gen_normal_strength,
             gen_normal_mode: result.gen_normal_mode,
             gen_background_mode: result.gen_background_mode,
+            display_color: result.display_color,
+            display_height: result.display_height,
+            display_normal: result.display_normal,
+            display_stroke_id: result.display_stroke_id,
+            gpu_color_pixels: result.gpu_color_pixels,
+            gpu_normal_pixels: result.gpu_normal_pixels,
         });
 
         // Output now matches current project state
