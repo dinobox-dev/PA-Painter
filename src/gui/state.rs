@@ -153,6 +153,14 @@ pub struct DisplayTextures {
     pub base_texture: Option<egui::TextureHandle>,
 }
 
+/// Cached pre-tessellated wireframe mesh. Rebuilt only when viewport transform changes.
+#[derive(Default)]
+pub struct WireframeCache {
+    pub mesh: Option<egui::Mesh>,
+    /// Cache key: (offset_x, offset_y, zoom, rect_width, rect_height)
+    pub key: (i32, i32, i32, i32, i32),
+}
+
 /// A single layer's proposed mapping in the mesh load popup.
 #[derive(Clone)]
 pub struct LayerMapping {
@@ -241,6 +249,7 @@ pub struct AppState {
     pub mesh_hash: u64,
 
     // ── Viewport ──
+    pub wireframe_cache: WireframeCache,
     pub viewport: ViewportState,
     pub viewport_tab: ViewportTab,
     pub map_mode: MapMode,
@@ -329,6 +338,7 @@ impl AppState {
             loaded_mesh: None,
             uv_edges: None,
             mesh_hash: 0,
+            wireframe_cache: WireframeCache::default(),
             viewport: ViewportState::default(),
             viewport_tab: ViewportTab::Setup,
             map_mode: MapMode::Color,

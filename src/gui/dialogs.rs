@@ -29,6 +29,7 @@ use super::textures;
 fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<bool, String> {
     let mesh = load_mesh(mesh_path).map_err(|e| format!("Mesh load failed: {e}"))?;
     state.uv_edges = Some(extract_uv_edges(&mesh));
+    state.wireframe_cache = super::state::WireframeCache::default(); // invalidate cached wireframe
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for p in &mesh.positions {
@@ -63,6 +64,7 @@ fn apply_mesh(state: &mut AppState, mesh_path: &Path) -> Result<bool, String> {
 /// Returns `true` if geometry changed (hash mismatch), `false` if identical.
 fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool {
     state.uv_edges = Some(extract_uv_edges(&mesh));
+    state.wireframe_cache = super::state::WireframeCache::default(); // invalidate cached wireframe
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for p in &mesh.positions {

@@ -991,24 +991,84 @@ fn draw_texture(
     );
 }
 
-fn draw_wireframe(painter: &egui::Painter, state: &AppState, rect: Rect) {
+/// Build or reuse a cached wireframe mesh. Rebuilds only when viewport transform changes.
+fn draw_wireframe(painter: &egui::Painter, state: &mut AppState, rect: Rect) {
     if !state.viewport.show_wireframe {
         return;
     }
-    if let Some(ref edges) = state.uv_edges {
-        let halo_stroke = egui::Stroke::new(2.0, Color32::from_rgba_unmultiplied(0, 0, 0, 100));
-        let wire_stroke =
-            egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 150));
+    let Some(ref edges) = state.uv_edges else {
+        return;
+    };
+
+    // Cache key from viewport transform (quantised to avoid float comparison issues)
+    let key = (
+        (state.viewport.offset.x * 1000.0) as i32,
+        (state.viewport.offset.y * 1000.0) as i32,
+        (state.viewport.zoom * 100.0) as i32,
+        rect.width() as i32,
+        rect.height() as i32,
+    );
+
+    if state.wireframe_cache.key != key || state.wireframe_cache.mesh.is_none() {
+        let halo_color = Color32::from_rgba_unmultiplied(0, 0, 0, 100);
+        let wire_color = Color32::from_rgba_unmultiplied(255, 255, 255, 150);
+
+        let mut mesh = egui::Mesh::default();
+
+        // Helper: add a line segment as a thin quad to the mesh
+        let add_line = |mesh: &mut egui::Mesh, a: Pos2, b: Pos2, width: f32, color: Color32| {
+            let dir = Pos2::new(b.x - a.x, b.y - a.y);
+            let len = (dir.x * dir.x + dir.y * dir.y).sqrt();
+            if len < 0.01 {
+                return;
+            }
+            let nx = -dir.y / len * width * 0.5;
+            let ny = dir.x / len * width * 0.5;
+
+            let base = mesh.vertices.len() as u32;
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: Pos2::new(a.x + nx, a.y + ny),
+                uv: Pos2::ZERO,
+                color,
+            });
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: Pos2::new(a.x - nx, a.y - ny),
+                uv: Pos2::ZERO,
+                color,
+            });
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: Pos2::new(b.x - nx, b.y - ny),
+                uv: Pos2::ZERO,
+                color,
+            });
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: Pos2::new(b.x + nx, b.y + ny),
+                uv: Pos2::ZERO,
+                color,
+            });
+            mesh.indices
+                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        };
+
+        // Pass 1: halo (wider, dark)
         for &(a, b) in edges {
             let sa = uv_to_screen(a, state, rect);
             let sb = uv_to_screen(b, state, rect);
-            painter.line_segment([sa, sb], halo_stroke);
+            add_line(&mut mesh, sa, sb, 3.0, halo_color);
         }
+        // Pass 2: wire (thinner, bright)
         for &(a, b) in edges {
             let sa = uv_to_screen(a, state, rect);
             let sb = uv_to_screen(b, state, rect);
-            painter.line_segment([sa, sb], wire_stroke);
+            add_line(&mut mesh, sa, sb, 1.0, wire_color);
         }
+
+        state.wireframe_cache.mesh = Some(mesh);
+        state.wireframe_cache.key = key;
+    }
+
+    if let Some(ref mesh) = state.wireframe_cache.mesh {
+        painter.add(egui::Shape::mesh(mesh.clone()));
     }
 }
 
