@@ -628,7 +628,12 @@ impl PainterApp {
             return;
         }
 
-        let mut open = state.show_export_settings;
+        // Ensure draft exists (defensive — normally created when opening)
+        if state.export_settings_draft.is_none() {
+            state.export_settings_draft = Some(state.project.export_settings.clone());
+        }
+
+        let mut action: Option<bool> = None; // Some(true) = save, Some(false) = cancel
         let weak = ctx.style().visuals.weak_text_color();
 
         let frame = egui::Frame {
@@ -654,7 +659,7 @@ impl PainterApp {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(frame)
             .show(ctx, |ui: &mut egui::Ui| {
-                let es = &mut state.project.export_settings;
+                let es = state.export_settings_draft.as_mut().unwrap();
                 ui.spacing_mut().item_spacing.y = 4.0;
 
                 // ── Header ──
@@ -701,20 +706,52 @@ impl PainterApp {
                     });
                 }
 
-                // ── Close ──
+                // ── Cancel / Save ──
                 ui.add_space(8.0);
                 ui.separator();
                 ui.add_space(4.0);
-                ui.vertical_centered(|ui: &mut egui::Ui| {
+                ui.horizontal(|ui: &mut egui::Ui| {
+                    let btn_w = 80.0_f32;
+                    let gap = 12.0_f32;
+                    ui.spacing_mut().item_spacing.x = gap;
+                    let total = btn_w * 2.0 + gap;
+                    let pad = ((ui.available_width() - total) / 2.0).max(0.0);
+                    ui.add_space(pad);
                     if ui
-                        .add(egui::Button::new("Close").min_size(egui::Vec2::new(80.0, 28.0)))
+                        .add(egui::Button::new("Cancel").min_size(egui::Vec2::new(btn_w, 28.0)))
                         .clicked()
                     {
-                        open = false;
+                        action = Some(false);
+                    }
+                    let accent = egui::Color32::from_rgb(45, 120, 220);
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Save").color(egui::Color32::WHITE),
+                            )
+                            .fill(accent)
+                            .min_size(egui::Vec2::new(btn_w, 28.0)),
+                        )
+                        .clicked()
+                    {
+                        action = Some(true);
                     }
                 });
             });
-        state.show_export_settings = open;
+
+        match action {
+            Some(true) => {
+                if let Some(draft) = state.export_settings_draft.take() {
+                    state.project.export_settings = draft;
+                }
+                state.show_export_settings = false;
+            }
+            Some(false) => {
+                state.export_settings_draft = None;
+                state.show_export_settings = false;
+            }
+            None => {}
+        }
     }
 
     /// Show the mesh-load confirmation popup and handle OK / Cancel.
@@ -949,16 +986,23 @@ impl PainterApp {
                         let pad = ((ui.available_width() - total) / 2.0).max(0.0);
                         ui.add_space(pad);
                         if ui
-                            .add(egui::Button::new("  OK  ").min_size(egui::Vec2::new(btn_w, 28.0)))
-                            .clicked()
-                        {
-                            apply_popup = true;
-                        }
-                        if ui
                             .add(egui::Button::new("Cancel").min_size(egui::Vec2::new(btn_w, 28.0)))
                             .clicked()
                         {
                             dismiss_popup = true;
+                        }
+                        let accent = egui::Color32::from_rgb(45, 120, 220);
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("  OK  ").color(egui::Color32::WHITE),
+                                )
+                                .fill(accent)
+                                .min_size(egui::Vec2::new(btn_w, 28.0)),
+                            )
+                            .clicked()
+                        {
+                            apply_popup = true;
                         }
                     });
                 });
@@ -1554,7 +1598,16 @@ impl PainterApp {
                         ));
                     }
                     ui.add_space(8.0);
-                    if ui.button("OK").clicked() {
+                    let accent = egui::Color32::from_rgb(45, 120, 220);
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("OK").color(egui::Color32::WHITE),
+                            )
+                            .fill(accent),
+                        )
+                        .clicked()
+                    {
                         dismiss_summary = true;
                     }
                 });
@@ -1608,10 +1661,14 @@ impl PainterApp {
                         {
                             overwrite_action = Some(false);
                         }
+                        let accent = egui::Color32::from_rgb(45, 120, 220);
                         if ui
                             .add(
-                                egui::Button::new("Overwrite")
-                                    .min_size(egui::Vec2::new(btn_w, 28.0)),
+                                egui::Button::new(
+                                    egui::RichText::new("Overwrite").color(egui::Color32::WHITE),
+                                )
+                                .fill(accent)
+                                .min_size(egui::Vec2::new(btn_w, 28.0)),
                             )
                             .clicked()
                         {
@@ -1634,6 +1691,7 @@ impl PainterApp {
             self.state.selected_guide = None;
             self.state.guide_tool = GuideTool::Select;
             self.state.show_export_settings = false;
+            self.state.export_settings_draft = None;
             self.state.export_overwrite_confirm = None;
         }
     }

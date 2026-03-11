@@ -607,19 +607,10 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
         ui.visuals_mut().widgets.hovered.expansion = 0.0;
         ui.visuals_mut().widgets.active.expansion = 0.0;
 
-        // Shared base fill: same color for both halves based on enabled state
-        let base_fill = if has_result {
-            ui.visuals().widgets.inactive.bg_fill
-        } else {
-            // Blend toward panel background for a clearly muted look
-            let bg = ui.visuals().widgets.inactive.bg_fill;
-            let panel = ui.visuals().panel_fill;
-            egui::Color32::from_rgb(
-                ((bg.r() as u16 + panel.r() as u16) / 2) as u8,
-                ((bg.g() as u16 + panel.g() as u16) / 2) as u8,
-                ((bg.b() as u16 + panel.b() as u16) / 2) as u8,
-            )
-        };
+        // Progress bar background (gray — must contrast with the filled portion)
+        let bar_bg = ui.visuals().widgets.inactive.bg_fill;
+        // Button fill when not busy (same hue as the progress bar filled portion)
+        let btn_fill = ui.visuals().widgets.inactive.weak_bg_fill;
         let r: u8 = 3; // match egui default button rounding
         let left_rounding = egui::CornerRadius {
             nw: r,
@@ -642,6 +633,9 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
         let (export_rect, export_resp) =
             ui.allocate_exact_size(btn_size, egui::Sense::click() | egui::Sense::hover());
 
+        let accent = egui::Color32::from_rgb(45, 120, 220);
+        let accent_hover = egui::Color32::from_rgb(60, 140, 240);
+
         if busy {
             // Progress bar mode
             let in_path_stage =
@@ -661,8 +655,7 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
                 let p = state.remerge_progress;
                 (p, format!("Applying… {:.0}%", p * 100.0))
             };
-            ui.painter()
-                .rect_filled(export_rect, left_rounding, base_fill);
+            ui.painter().rect_filled(export_rect, left_rounding, bar_bg);
 
             // Filled portion
             if progress > 0.0 {
@@ -694,18 +687,18 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
             );
         } else {
             // Normal export button
-            let fill = if has_result && export_resp.hovered() {
-                ui.visuals().widgets.hovered.bg_fill
+            let fill = if !has_result {
+                btn_fill
+            } else if export_resp.hovered() {
+                accent_hover
             } else {
-                base_fill
+                accent
             };
             ui.painter().rect_filled(export_rect, left_rounding, fill);
             let text_color = if !has_result {
                 ui.visuals().widgets.noninteractive.fg_stroke.color
-            } else if export_resp.hovered() {
-                ui.visuals().widgets.hovered.fg_stroke.color
             } else {
-                ui.visuals().widgets.inactive.fg_stroke.color
+                egui::Color32::WHITE
             };
             ui.painter().text(
                 export_rect.center(),
@@ -735,13 +728,21 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         {
-            let fill = if gear_resp.hovered() {
+            let fill = if has_result && !busy {
+                if gear_resp.hovered() {
+                    accent_hover
+                } else {
+                    accent
+                }
+            } else if gear_resp.hovered() {
                 ui.visuals().widgets.hovered.bg_fill
             } else {
-                base_fill
+                btn_fill
             };
             ui.painter().rect_filled(gear_rect, right_rounding, fill);
-            let text_color = if gear_resp.hovered() {
+            let text_color = if has_result && !busy {
+                egui::Color32::WHITE
+            } else if gear_resp.hovered() {
                 ui.visuals().widgets.hovered.fg_stroke.color
             } else {
                 ui.visuals().widgets.inactive.fg_stroke.color
@@ -755,7 +756,13 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
             );
         }
         if gear_resp.clicked() {
-            state.show_export_settings = !state.show_export_settings;
+            if state.show_export_settings {
+                state.show_export_settings = false;
+                state.export_settings_draft = None;
+            } else {
+                state.export_settings_draft = Some(state.project.export_settings.clone());
+                state.show_export_settings = true;
+            }
         }
     });
     ui.add_space(2.0);

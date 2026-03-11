@@ -9,7 +9,7 @@ use glam::Vec2;
 
 use practical_arcana_painter::asset_io::LoadedMesh;
 use practical_arcana_painter::project::Project;
-use practical_arcana_painter::types::{Layer, OutputSettings, TextureSource};
+use practical_arcana_painter::types::{ExportSettings, Layer, OutputSettings, TextureSource};
 
 use super::generation::{GenResult, GenerationManager};
 use super::mesh_preview::MeshPreviewState;
@@ -406,6 +406,8 @@ pub struct AppState {
 
     // ── Export Settings Panel ──
     pub show_export_settings: bool,
+    /// Temporary copy of export settings being edited in the dialog.
+    pub export_settings_draft: Option<ExportSettings>,
 
     // ── Background Export ──
     pub export_worker: ExportWorker,
@@ -468,6 +470,7 @@ impl AppState {
             auto_preview_timer: None,
             auto_gen_suppressed: false,
             show_export_settings: false,
+            export_settings_draft: None,
             export_worker: ExportWorker::default(),
             export_overwrite_confirm: None,
             modal_dialog_active: false,
