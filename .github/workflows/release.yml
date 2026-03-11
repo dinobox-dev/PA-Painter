@@ -46,6 +46,12 @@ jobs:
             archive: tar.gz
             ext: ""
 
+          - name: Linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+            ext: ""
+
           - name: macOS-arm64
             os: macos-latest
             target: aarch64-apple-darwin
