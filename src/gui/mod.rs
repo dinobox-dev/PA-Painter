@@ -317,7 +317,6 @@ impl PainterApp {
             self.state.status_message = format!("Generated in {:.1}s", total_elapsed);
             self.state.generation.start_time = None;
             self.state.generated = Some(result);
-            self.state.dirty = true;
         }
 
         // If Type A settings changed while generation was running, remerge with current values

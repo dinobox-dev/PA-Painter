@@ -3,8 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use eframe::egui;
-
 use pa_painter::asset_io::{
     collect_obj_aux_files, extract_uv_edges, load_mesh, LoadedMesh, MeshMaterialInfo,
 };
@@ -17,14 +15,13 @@ use pa_painter::output::{
     export_stroke_time_png, normalize_height_map, ExportFormat, LayerExportOptions,
     LayerManifestEntry,
 };
-use pa_painter::project::{load_project, save_project, utc_now_iso8601, OutputCache, Project};
+use pa_painter::project::{load_project, save_project, utc_now_iso8601, Project};
 use pa_painter::types::{
     BackgroundMode, Color, EmbeddedTexture, ExportSettings, Layer, NormalMode, PaintValues,
     TextureSource,
 };
 
 use super::state::{AppState, LayerMapping, MeshLoadPopup, ReloadSummary};
-use super::textures;
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -103,7 +100,7 @@ fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool {
 
 /// Open a file dialog and load a .papr project.
 /// Returns true if a project was successfully loaded.
-pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
+pub fn open_project(state: &mut AppState, _ctx: &eframe::egui::Context) -> bool {
     state.modal_dialog_active = true;
     let path = rfd::FileDialog::new()
         .add_filter("PA Painter Project", &["papr"])
@@ -149,70 +146,9 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                 }
             }
 
-            // Restore cached generation output if present
-            if let Some(output) = result.output {
-                let pixel_count = output.color.len();
-                let r = output.resolution;
-                state.generation_snapshot = output.snapshot_hash;
-                let stroke_id = vec![0; pixel_count];
-                let display_color = textures::color_buffer_to_image(&output.color, r, r);
-                let display_height = textures::height_buffer_to_image(&output.height, r);
-                let display_normal = textures::normal_map_to_image(&output.normal_map, r);
-                let display_stroke_id = textures::stroke_id_to_image(&stroke_id, r);
-
-                let gpu_color_pixels = super::mesh_preview::convert_color_pixels(&output.color);
-                let gpu_normal_pixels =
-                    super::mesh_preview::convert_normal_pixels(&output.normal_map);
-
-                // Move images into GenResult, then extract via std::mem::replace (zero clones)
-                state.generated = Some(super::generation::GenResult {
-                    color: output.color,
-                    height: output.height,
-                    normal_map: output.normal_map,
-                    stroke_id,
-                    stroke_time_order: output.stroke_time_order,
-                    stroke_time_arc: output.stroke_time_arc,
-                    resolution: r,
-                    elapsed: std::time::Duration::ZERO,
-                    computed_normals: None,
-                    rendered_layers: Vec::new(),
-                    rendered_paths: Vec::new(),
-                    gen_normal_strength: state.project.settings.normal_strength,
-                    gen_normal_mode: state.project.settings.normal_mode,
-                    gen_background_mode: state.project.settings.background_mode,
-                    display_color,
-                    display_height,
-                    display_normal,
-                    display_stroke_id,
-                    gpu_color_pixels,
-                    gpu_normal_pixels,
-                });
-                let empty_img = egui::ColorImage::new([0, 0], vec![]);
-                let gen = state.generated.as_mut().expect("just assigned above");
-                state.textures.color = Some(ctx.load_texture(
-                    "loaded_color",
-                    std::mem::replace(&mut gen.display_color, empty_img.clone()),
-                    egui::TextureOptions::LINEAR,
-                ));
-                state.textures.height = Some(ctx.load_texture(
-                    "loaded_height",
-                    std::mem::replace(&mut gen.display_height, empty_img.clone()),
-                    egui::TextureOptions::LINEAR,
-                ));
-                state.textures.normal = Some(ctx.load_texture(
-                    "loaded_normal",
-                    std::mem::replace(&mut gen.display_normal, empty_img.clone()),
-                    egui::TextureOptions::LINEAR,
-                ));
-                state.textures.stroke_id = Some(ctx.load_texture(
-                    "loaded_stroke_id",
-                    std::mem::replace(&mut gen.display_stroke_id, empty_img),
-                    egui::TextureOptions::LINEAR,
-                ));
-            } else {
-                state.generated = None;
-                state.auto_gen_suppressed = false;
-            }
+            // Auto-preview will regenerate output after load
+            state.generated = None;
+            state.auto_gen_suppressed = false;
 
             true
         }
@@ -426,18 +362,8 @@ pub fn save_project_action(state: &mut AppState) {
 
     state.project.manifest.modified_at = utc_now_iso8601();
 
-    let output = state.generated.as_ref().map(|gen| OutputCache {
-        color: &gen.color,
-        height: &gen.height,
-        normal_map: &gen.normal_map,
-        stroke_time_order: &gen.stroke_time_order,
-        stroke_time_arc: &gen.stroke_time_arc,
-        resolution: gen.resolution,
-        snapshot_hash: state.generation_snapshot,
-    });
-
     let editor_json = serde_json::to_vec_pretty(&state.extract_editor_state()).ok();
-    match save_project(&state.project, &path, output, editor_json.as_deref()) {
+    match save_project(&state.project, &path, editor_json.as_deref()) {
         Ok(()) => {
             state.project_path = Some(path);
             state.dirty = false;

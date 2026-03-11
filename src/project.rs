@@ -7,10 +7,7 @@
 //! - `assets/mesh.*` — embedded mesh binary (GLB, OBJ, etc.)
 //! - `assets/layer_{n}_color.png` — per-layer File-mode color texture
 //! - `assets/layer_{n}_normal.png` — per-layer File-mode normal texture
-//! - `output/color.png` — cached generated color map (sRGB RGBA)
-//! - `output/normal.png` — cached generated normal map (linear RGB)
-//! - `output/height.png` — cached generated height map (16-bit grayscale)
-//! - `thumbnails/preview.png` — 256×256 preview thumbnail
+//! - `thumbnails/preview.png` — 256×256 preview thumbnail (reserved, currently unused)
 
 use log::{info, warn};
 use std::io::{Read, Write};
@@ -24,12 +21,11 @@ use zip::{ZipArchive, ZipWriter};
 
 use crate::asset_io::{
     decode_linear_png_bytes, decode_srgb_png_bytes, encode_pixels_as_linear_png,
-    encode_pixels_as_srgb_png, linear_to_srgb, load_mesh_from_bytes_with_aux, LoadedMesh,
-    ObjAuxFiles,
+    encode_pixels_as_srgb_png, load_mesh_from_bytes_with_aux, LoadedMesh, ObjAuxFiles,
 };
 use crate::types::{
-    Color, EmbeddedTexture, ExportSettings, Layer, OutputSettings, PaintLayer, PresetLibrary,
-    StrokePath, TextureSource,
+    EmbeddedTexture, ExportSettings, Layer, OutputSettings, PaintLayer, PresetLibrary, StrokePath,
+    TextureSource,
 };
 use crate::uv_mask::UvMask;
 
@@ -237,37 +233,11 @@ impl Project {
 
 // ── Save/Load Data Structures ──
 
-/// Cached generation output for saving into the .papr file.
-pub struct OutputCache<'a> {
-    pub color: &'a [Color],
-    pub height: &'a [f32],
-    pub normal_map: &'a [[f32; 3]],
-    pub stroke_time_order: &'a [f32],
-    pub stroke_time_arc: &'a [f32],
-    pub resolution: u32,
-    /// Hash of project state at generation time — used to detect staleness after load.
-    pub snapshot_hash: Option<u64>,
-}
-
-/// Generation output loaded from a .papr file.
-pub struct LoadedOutput {
-    pub color: Vec<Color>,
-    pub height: Vec<f32>,
-    pub normal_map: Vec<[f32; 3]>,
-    pub stroke_time_order: Vec<f32>,
-    pub stroke_time_arc: Vec<f32>,
-    pub resolution: u32,
-    /// Hash of project state at generation time (if saved).
-    pub snapshot_hash: Option<u64>,
-}
-
 /// Result of loading a .papr file.
 pub struct LoadResult {
     pub project: Project,
     /// Mesh parsed from embedded bytes.
     pub mesh: Option<LoadedMesh>,
-    /// Cached generation output (if present in the file).
-    pub output: Option<LoadedOutput>,
     /// Raw JSON string from `editor.json` (editor UI state).
     /// Opaque to the library — interpreted only by the GUI.
     pub editor_state_json: Option<String>,
@@ -278,7 +248,6 @@ impl std::fmt::Debug for LoadResult {
         f.debug_struct("LoadResult")
             .field("project", &self.project)
             .field("mesh", &self.mesh.as_ref().map(|_| "..."))
-            .field("output", &self.output.as_ref().map(|_| "..."))
             .finish()
     }
 }
@@ -297,56 +266,9 @@ pub enum ProjectError {
     InvalidFormat(String),
 }
 
-// ── Thumbnail Generation ──
-
-/// Generate a 256×256 thumbnail PNG from output color data.
-fn generate_thumbnail(output: &OutputCache<'_>) -> Option<Vec<u8>> {
-    if output.color.is_empty() {
-        return None;
-    }
-    let resolution = output.resolution;
-    if resolution == 0 {
-        return None;
-    }
-
-    let thumb_size: u32 = 256;
-    let mut pixels = Vec::with_capacity((thumb_size * thumb_size * 3) as usize);
-
-    for ty in 0..thumb_size {
-        for tx in 0..thumb_size {
-            let sx = (tx as f32 / thumb_size as f32 * resolution as f32) as u32;
-            let sy = (ty as f32 / thumb_size as f32 * resolution as f32) as u32;
-            let sx = sx.min(resolution - 1);
-            let sy = sy.min(resolution - 1);
-            let c = &output.color[(sy * resolution + sx) as usize];
-            pixels.push((linear_to_srgb(c.r.clamp(0.0, 1.0)) * 255.0).round() as u8);
-            pixels.push((linear_to_srgb(c.g.clamp(0.0, 1.0)) * 255.0).round() as u8);
-            pixels.push((linear_to_srgb(c.b.clamp(0.0, 1.0)) * 255.0).round() as u8);
-        }
-    }
-
-    let mut png_bytes = Vec::new();
-    {
-        let encoder = image::codecs::png::PngEncoder::new(std::io::Cursor::new(&mut png_bytes));
-        use image::ImageEncoder;
-        encoder
-            .write_image(
-                &pixels,
-                thumb_size,
-                thumb_size,
-                image::ColorType::Rgb8.into(),
-            )
-            .ok()?;
-    }
-    Some(png_bytes)
-}
-
 // ── Save ──
 
 /// Save a project to a `.papr` file.
-///
-/// If `output` is provided, the generated maps are stored as PNG in `output/`
-/// and a 256×256 thumbnail is generated.
 ///
 /// `editor_state_json` is an opaque JSON blob written as `editor.json` inside
 /// the ZIP. The library does not interpret its contents — it is used by the GUI
@@ -354,7 +276,6 @@ fn generate_thumbnail(output: &OutputCache<'_>) -> Option<Vec<u8>> {
 pub fn save_project(
     project: &Project,
     path: &Path,
-    output: Option<OutputCache<'_>>,
     editor_state_json: Option<&[u8]>,
 ) -> Result<(), ProjectError> {
     info!("Saving project to {}", path.display());
@@ -420,63 +341,6 @@ pub fn save_project(
         }
     }
 
-    // output/ — cached generation results as PNG
-    if let Some(ref out) = output {
-        // output/color.png — sRGB RGBA
-        let color_rgba: Vec<[f32; 4]> = out.color.iter().map(|c| [c.r, c.g, c.b, c.a]).collect();
-        if let Some(png) = encode_pixels_as_srgb_png(&color_rgba, out.resolution, out.resolution) {
-            zip.start_file("output/color.png", options)?;
-            zip.write_all(&png)?;
-        }
-
-        // output/normal.png — linear RGB (stored as RGBA, alpha = 1)
-        let normal_rgba: Vec<[f32; 4]> = out
-            .normal_map
-            .iter()
-            .map(|n| [n[0], n[1], n[2], 1.0])
-            .collect();
-        if let Some(png) = encode_pixels_as_linear_png(&normal_rgba, out.resolution, out.resolution)
-        {
-            zip.start_file("output/normal.png", options)?;
-            zip.write_all(&png)?;
-        }
-
-        // output/height.png — 16-bit grayscale
-        if let Some(png) = encode_height_png16(out.height, out.resolution) {
-            zip.start_file("output/height.png", options)?;
-            zip.write_all(&png)?;
-        }
-
-        // output/stroke_time_order.png — 16-bit grayscale
-        if !out.stroke_time_order.is_empty() {
-            if let Some(png) = encode_height_png16(out.stroke_time_order, out.resolution) {
-                zip.start_file("output/stroke_time_order.png", options)?;
-                zip.write_all(&png)?;
-            }
-        }
-
-        // output/stroke_time_arc.png — 16-bit grayscale
-        if !out.stroke_time_arc.is_empty() {
-            if let Some(png) = encode_height_png16(out.stroke_time_arc, out.resolution) {
-                zip.start_file("output/stroke_time_arc.png", options)?;
-                zip.write_all(&png)?;
-            }
-        }
-
-        // output/snapshot.json — generation-time state hash for staleness detection
-        if let Some(hash) = out.snapshot_hash {
-            let json = format!("{{\"hash\":{hash}}}");
-            zip.start_file("output/snapshot.json", options)?;
-            zip.write_all(json.as_bytes())?;
-        }
-
-        // thumbnails/preview.png
-        if let Some(png_bytes) = generate_thumbnail(out) {
-            zip.start_file("thumbnails/preview.png", options)?;
-            zip.write_all(&png_bytes)?;
-        }
-    }
-
     // editor.json — opaque editor UI state (camera, viewport, playback, etc.)
     if let Some(editor_json) = editor_state_json {
         zip.start_file("editor.json", options)?;
@@ -492,8 +356,7 @@ pub fn save_project(
 
 /// Load a project from a `.papr` file.
 ///
-/// Returns a [`LoadResult`] containing the project, the parsed mesh (if any),
-/// and cached output maps (if present).
+/// Returns a [`LoadResult`] containing the project and the parsed mesh (if any).
 pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
     info!("Loading project: {}", path.display());
     let file = std::fs::File::open(path)?;
@@ -573,9 +436,6 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
         }
     }
 
-    // Load cached output maps if present
-    let output = load_output_maps(&mut archive);
-
     // editor.json — opaque editor UI state
     let editor_state_json = read_bytes_optional(&mut archive, "editor.json")
         .and_then(|bytes| String::from_utf8(bytes).ok());
@@ -604,7 +464,6 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
     Ok(LoadResult {
         project,
         mesh: loaded_mesh,
-        output,
         editor_state_json,
     })
 }
@@ -681,102 +540,6 @@ fn read_obj_aux_files(archive: &mut ZipArchive<std::fs::File>) -> Option<ObjAuxF
         mtl_bytes,
         texture_files,
     })
-}
-
-/// Load cached output maps (color, height, normal) from the `output/` directory.
-fn load_output_maps(archive: &mut ZipArchive<std::fs::File>) -> Option<LoadedOutput> {
-    let color_bytes = read_bytes_optional(archive, "output/color.png")?;
-    let (color_pixels, cw, _ch) = decode_srgb_png_bytes(&color_bytes).ok()?;
-    let resolution = cw;
-
-    let color: Vec<Color> = color_pixels
-        .into_iter()
-        .map(|p| Color::new(p[0], p[1], p[2], p[3]))
-        .collect();
-
-    let height = if let Some(bytes) = read_bytes_optional(archive, "output/height.png") {
-        decode_height_png16(&bytes)
-            .map(|(h, _)| h)
-            .unwrap_or_else(|| vec![0.0; color.len()])
-    } else {
-        vec![0.0; color.len()]
-    };
-
-    let normal_map = if let Some(bytes) = read_bytes_optional(archive, "output/normal.png") {
-        decode_linear_png_bytes(&bytes)
-            .map(|(pixels, _, _)| pixels.into_iter().map(|p| [p[0], p[1], p[2]]).collect())
-            .unwrap_or_else(|_| vec![[0.5, 0.5, 1.0]; color.len()])
-    } else {
-        vec![[0.5, 0.5, 1.0]; color.len()]
-    };
-
-    let stroke_time_order =
-        if let Some(bytes) = read_bytes_optional(archive, "output/stroke_time_order.png") {
-            decode_height_png16(&bytes)
-                .map(|(h, _)| h)
-                .unwrap_or_else(|| vec![0.0; color.len()])
-        } else {
-            vec![0.0; color.len()]
-        };
-
-    let stroke_time_arc =
-        if let Some(bytes) = read_bytes_optional(archive, "output/stroke_time_arc.png") {
-            decode_height_png16(&bytes)
-                .map(|(h, _)| h)
-                .unwrap_or_else(|| vec![0.0; color.len()])
-        } else {
-            vec![0.0; color.len()]
-        };
-
-    // output/snapshot.json — generation-time state hash
-    let snapshot_hash = read_bytes_optional(archive, "output/snapshot.json").and_then(|bytes| {
-        #[derive(Deserialize)]
-        struct Snapshot {
-            hash: u64,
-        }
-        serde_json::from_slice::<Snapshot>(&bytes)
-            .ok()
-            .map(|s| s.hash)
-    });
-
-    Some(LoadedOutput {
-        color,
-        height,
-        normal_map,
-        stroke_time_order,
-        stroke_time_arc,
-        resolution,
-        snapshot_hash,
-    })
-}
-
-/// Encode a height map as 16-bit grayscale PNG.
-///
-/// Uses the high-level `DynamicImage` API to ensure correct byte order handling
-/// across platforms (PNG spec mandates big-endian, but the `image` crate's raw
-/// encoder expects native-endian byte buffers).
-fn encode_height_png16(height: &[f32], resolution: u32) -> Option<Vec<u8>> {
-    let pixels: Vec<u16> = height
-        .iter()
-        .map(|&h| (h.clamp(0.0, 1.0) * 65535.0).round() as u16)
-        .collect();
-    let img =
-        image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_vec(resolution, resolution, pixels)?;
-    let dyn_img = image::DynamicImage::ImageLuma16(img);
-    let mut png = Vec::new();
-    dyn_img
-        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .ok()?;
-    Some(png)
-}
-
-/// Decode a grayscale PNG (8 or 16-bit) back into float height values [0, 1].
-fn decode_height_png16(bytes: &[u8]) -> Option<(Vec<f32>, u32)> {
-    let img = image::load_from_memory(bytes).ok()?;
-    let width = img.width();
-    let luma = img.to_luma16();
-    let height: Vec<f32> = luma.pixels().map(|p| p.0[0] as f32 / 65535.0).collect();
-    Some((height, width))
 }
 
 // ── Tests ──
@@ -898,13 +661,12 @@ mod tests {
         let project = make_empty_project();
         let path = temp_pap_path("empty.papr");
 
-        save_project(&project, &path, None, None).unwrap();
+        save_project(&project, &path, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert_eq!(result.project.manifest.version, "1");
         assert_eq!(result.project.manifest.app_name, "PA Painter");
         assert_eq!(result.project.layers.len(), 0);
-        assert!(result.output.is_none());
     }
 
     #[test]
@@ -912,7 +674,7 @@ mod tests {
         let project = make_project_with_layers();
         let path = temp_pap_path("with_layers.papr");
 
-        save_project(&project, &path, None, None).unwrap();
+        save_project(&project, &path, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert_eq!(result.project.layers.len(), 3);
@@ -928,77 +690,12 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_output_maps() {
-        let res = 16u32;
-        let pixel_count = (res * res) as usize;
-
-        let height: Vec<f32> = (0..pixel_count)
-            .map(|i| i as f32 / pixel_count as f32)
-            .collect();
-        let color: Vec<Color> = (0..pixel_count)
-            .map(|i| {
-                let v = i as f32 / pixel_count as f32;
-                Color::new(v, v * 0.5, v * 0.3, 1.0)
-            })
-            .collect();
-        let normal_map: Vec<[f32; 3]> = (0..pixel_count)
-            .map(|i| {
-                let v = i as f32 / pixel_count as f32;
-                [v * 0.5 + 0.25, v * 0.5 + 0.25, 1.0]
-            })
-            .collect();
-
-        let project = make_project_with_layers();
-        let time_order: Vec<f32> = (0..pixel_count)
-            .map(|i| i as f32 / pixel_count as f32)
-            .collect();
-        let time_arc: Vec<f32> = (0..pixel_count)
-            .map(|i| (i as f32 / pixel_count as f32) * 0.5)
-            .collect();
-        let output = OutputCache {
-            color: &color,
-            height: &height,
-            normal_map: &normal_map,
-            stroke_time_order: &time_order,
-            stroke_time_arc: &time_arc,
-            resolution: res,
-            snapshot_hash: None,
-        };
-
-        let path = temp_pap_path("with_output.papr");
-        save_project(&project, &path, Some(output), None).unwrap();
-        let result = load_project(&path).unwrap();
-
-        let loaded = result.output.expect("output should be present");
-        assert_eq!(loaded.resolution, res);
-        assert_eq!(loaded.color.len(), pixel_count);
-        assert_eq!(loaded.height.len(), pixel_count);
-        assert_eq!(loaded.normal_map.len(), pixel_count);
-
-        // Height uses 16-bit PNG — should be very precise
-        for (a, b) in height.iter().zip(loaded.height.iter()) {
-            assert!((a - b).abs() < 0.001, "height mismatch: {a} vs {b}");
-        }
-    }
-
-    #[test]
-    fn round_trip_without_output() {
-        let project = make_project_with_layers();
-        let path = temp_pap_path("no_output.papr");
-
-        save_project(&project, &path, None, None).unwrap();
-        let result = load_project(&path).unwrap();
-
-        assert!(result.output.is_none());
-    }
-
-    #[test]
     fn round_trip_complex_guides() {
         let mut project = make_empty_project();
         project.layers = vec![make_test_layer("detailed", 0, 10)];
 
         let path = temp_pap_path("complex_guides.papr");
-        save_project(&project, &path, None, None).unwrap();
+        save_project(&project, &path, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert_eq!(result.project.layers[0].guides.len(), 10);
@@ -1021,7 +718,7 @@ mod tests {
     fn valid_zip_structure() {
         let project = make_project_with_layers();
         let path = temp_pap_path("zip_structure.papr");
-        save_project(&project, &path, None, None).unwrap();
+        save_project(&project, &path, None).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
         let archive = ZipArchive::new(file).unwrap();
@@ -1035,7 +732,7 @@ mod tests {
     fn json_readable() {
         let project = make_project_with_layers();
         let path = temp_pap_path("json_readable.papr");
-        save_project(&project, &path, None, None).unwrap();
+        save_project(&project, &path, None).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
         let mut archive = ZipArchive::new(file).unwrap();
@@ -1060,7 +757,7 @@ mod tests {
         };
 
         let path = temp_pap_path("settings_test.papr");
-        save_project(&project, &path, None, None).unwrap();
+        save_project(&project, &path, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert_eq!(
@@ -1072,52 +769,6 @@ mod tests {
     }
 
     // ── Thumbnail Test ──
-
-    #[test]
-    fn thumbnail_generated_with_output() {
-        let res = 16u32;
-        let pixel_count = (res * res) as usize;
-        let color: Vec<Color> = vec![Color::new(0.5, 0.3, 0.2, 1.0); pixel_count];
-        let height: Vec<f32> = vec![0.5; pixel_count];
-        let normal_map: Vec<[f32; 3]> = vec![[0.5, 0.5, 1.0]; pixel_count];
-
-        let project = make_empty_project();
-        let output = OutputCache {
-            color: &color,
-            height: &height,
-            normal_map: &normal_map,
-            stroke_time_order: &[],
-            stroke_time_arc: &[],
-            resolution: res,
-            snapshot_hash: None,
-        };
-
-        let path = temp_pap_path("with_thumbnail.papr");
-        save_project(&project, &path, Some(output), None).unwrap();
-
-        let file = std::fs::File::open(&path).unwrap();
-        let archive = ZipArchive::new(file).unwrap();
-        let names: Vec<&str> = archive.file_names().collect();
-        assert!(
-            names.contains(&"thumbnails/preview.png"),
-            "thumbnail should be present when output exists"
-        );
-    }
-
-    #[test]
-    fn no_thumbnail_without_output() {
-        let project = make_empty_project();
-        let path = temp_pap_path("no_thumbnail.papr");
-        save_project(&project, &path, None, None).unwrap();
-
-        let file = std::fs::File::open(&path).unwrap();
-        let archive = ZipArchive::new(file).unwrap();
-        let names: Vec<&str> = archive.file_names().collect();
-        assert!(
-            !names.contains(&"thumbnails/preview.png"),
-            "no thumbnail without output"
-        );
-    }
 
     // ── Error Handling Tests ──
 
@@ -1176,7 +827,7 @@ mod tests {
         let project = make_project_with_layers();
         let path = temp_pap_path("integrity.papr");
 
-        save_project(&project, &path, None, None).unwrap();
+        save_project(&project, &path, None).unwrap();
         let result = load_project(&path).unwrap();
         let loaded = result.project;
 
@@ -1220,7 +871,7 @@ mod tests {
         project.obj_aux = collect_obj_aux_files(&obj_path);
 
         let path = temp_pap_path("demo_obj_roundtrip.papr");
-        save_project(&project, &path, None, None).unwrap();
+        save_project(&project, &path, None).unwrap();
 
         let result = load_project(&path).unwrap();
         let loaded_mesh = result.mesh.expect("mesh should be loaded");
@@ -1262,7 +913,7 @@ mod tests {
         project.presets = PresetLibrary::built_in();
 
         let path = temp_pap_path("presets_rt.papr");
-        save_project(&project, &path, None, None).unwrap();
+        save_project(&project, &path, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert_eq!(
@@ -1287,7 +938,7 @@ mod tests {
         project.layers = vec![make_test_layer("test", 0, 1)];
 
         let path = temp_pap_path("visible_default.papr");
-        save_project(&project, &path, None, None).unwrap();
+        save_project(&project, &path, None).unwrap();
         let result = load_project(&path).unwrap();
 
         assert!(result.project.layers[0].visible);
