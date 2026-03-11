@@ -13,7 +13,7 @@ pub mod widgets;
 
 use eframe::egui;
 use eframe::egui_wgpu;
-use state::{AppState, GuideTool};
+use state::{AppState, GuideTool, UnsavedAction};
 
 use pa_painter::compositing::{
     fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
@@ -1017,6 +1017,12 @@ impl PainterApp {
 
 impl eframe::App for PainterApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Intercept window close when there are unsaved changes.
+        if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.state.unsaved_confirm = Some(UnsavedAction::Quit);
+        }
+
         // On macOS, rfd dialogs pump the event loop and can re-enter update().
         // Absorb all input so the UI renders (keeping egui state consistent)
         // but nothing is interactive.
@@ -1131,11 +1137,11 @@ impl PainterApp {
         }
         if self.state.pending_open {
             self.state.pending_open = false;
-            dialogs::open_project(&mut self.state, ctx);
-            self.state.cached_mesh_normals = None;
-            self.state.path_worker.discard();
-            self.state.group_dim_cache.invalidate();
-            self.init_mesh_preview();
+            if self.state.dirty {
+                self.state.unsaved_confirm = Some(UnsavedAction::Open);
+            } else {
+                self.do_open_project(ctx);
+            }
         }
         if self.state.pending_save {
             self.state.pending_save = false;
@@ -1159,7 +1165,11 @@ impl PainterApp {
         }
         if self.state.pending_new {
             self.state.pending_new = false;
-            dialogs::new_project(&mut self.state, ctx);
+            if self.state.dirty {
+                self.state.unsaved_confirm = Some(UnsavedAction::New);
+            } else {
+                self.do_new_project(ctx);
+            }
         }
         if self.state.pending_reload_mesh {
             self.state.pending_reload_mesh = false;
@@ -1618,6 +1628,81 @@ impl PainterApp {
 
         Self::show_export_settings_window(ctx, &mut self.state);
 
+        // Unsaved Changes Confirmation Window (modal)
+        let mut unsaved_action = None;
+        if self.state.unsaved_confirm.is_some() {
+            let screen = ctx.content_rect();
+            egui::Area::new(egui::Id::new("unsaved_dim"))
+                .fixed_pos(screen.min)
+                .order(egui::Order::Middle)
+                .interactable(true)
+                .show(ctx, |ui: &mut egui::Ui| {
+                    let rect = egui::Rect::from_min_size(screen.min, screen.size());
+                    ui.painter()
+                        .rect_filled(rect, 0.0, egui::Color32::from_black_alpha(80));
+                    ui.allocate_exact_size(screen.size(), egui::Sense::click_and_drag());
+                });
+
+            egui::Window::new("Unsaved changes")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .order(egui::Order::Foreground)
+                .fixed_size([320.0, 0.0])
+                .show(ctx, |ui: &mut egui::Ui| {
+                    ui.vertical_centered(|ui: &mut egui::Ui| {
+                        ui.label("Current project has unsaved changes.");
+                        ui.label("Discard changes and continue?");
+                    });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        let btn_w = 80.0_f32;
+                        let gap = 12.0_f32;
+                        ui.spacing_mut().item_spacing.x = gap;
+                        let total = btn_w * 2.0 + gap;
+                        let pad = ((ui.available_width() - total) / 2.0).max(0.0);
+                        ui.add_space(pad);
+                        if ui
+                            .add(egui::Button::new("Cancel").min_size(egui::Vec2::new(btn_w, 28.0)))
+                            .clicked()
+                        {
+                            unsaved_action = Some(false);
+                        }
+                        let accent = egui::Color32::from_rgb(200, 80, 60);
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Discard").color(egui::Color32::WHITE),
+                                )
+                                .fill(accent)
+                                .min_size(egui::Vec2::new(btn_w, 28.0)),
+                            )
+                            .clicked()
+                        {
+                            unsaved_action = Some(true);
+                        }
+                    });
+                });
+        }
+        match unsaved_action {
+            Some(true) => {
+                let action = self.state.unsaved_confirm.take();
+                match action {
+                    Some(UnsavedAction::Open) => self.do_open_project(ctx),
+                    Some(UnsavedAction::New) => self.do_new_project(ctx),
+                    Some(UnsavedAction::Quit) => {
+                        self.state.dirty = false;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    None => {}
+                }
+            }
+            Some(false) => {
+                self.state.unsaved_confirm = None;
+            }
+            None => {}
+        }
+
         // Export Overwrite Confirmation Window (modal)
         let mut overwrite_action = None;
         if let Some(ref confirm) = self.state.export_overwrite_confirm {
@@ -1693,7 +1778,22 @@ impl PainterApp {
             self.state.show_export_settings = false;
             self.state.export_settings_draft = None;
             self.state.export_overwrite_confirm = None;
+            self.state.unsaved_confirm = None;
         }
+    }
+
+    /// Execute Open Project (file dialog + load).
+    fn do_open_project(&mut self, ctx: &egui::Context) {
+        dialogs::open_project(&mut self.state, ctx);
+        self.state.cached_mesh_normals = None;
+        self.state.path_worker.discard();
+        self.state.group_dim_cache.invalidate();
+        self.init_mesh_preview();
+    }
+
+    /// Execute New Project (file dialog + mesh load).
+    fn do_new_project(&mut self, ctx: &egui::Context) {
+        dialogs::new_project(&mut self.state, ctx);
     }
 
     /// Auto-preview debounce and remerge polling.

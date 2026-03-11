@@ -19,6 +19,14 @@ use super::undo::{UndoHistory, UndoSnapshot};
 
 // ── Export Worker ──────────────────────────────────────────────────
 
+/// Which action triggered the unsaved-changes confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsavedAction {
+    Open,
+    New,
+    Quit,
+}
+
 /// Pending overwrite confirmation shown as an egui window.
 pub struct ExportOverwriteConfirm {
     pub dir: PathBuf,
@@ -490,6 +498,8 @@ pub struct AppState {
     pub export_worker: ExportWorker,
     /// Pending overwrite confirmation (egui window, replaces rfd::MessageDialog).
     pub export_overwrite_confirm: Option<ExportOverwriteConfirm>,
+    /// Pending unsaved-changes confirmation before Open/New.
+    pub unsaved_confirm: Option<UnsavedAction>,
     /// True while a native file dialog is open (rfd).
     /// Guards against re-entrant UI actions on macOS where rfd pumps the event loop.
     pub modal_dialog_active: bool,
@@ -550,6 +560,7 @@ impl AppState {
             export_settings_draft: None,
             export_worker: ExportWorker::default(),
             export_overwrite_confirm: None,
+            unsaved_confirm: None,
             modal_dialog_active: false,
             remerge_running: false,
             remerge_progress: 0.0,
