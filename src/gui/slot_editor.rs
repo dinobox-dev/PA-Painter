@@ -33,73 +33,122 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     // ── Layer ──
     section_header(ui, "Layer");
     ui.indent("layer_content", |ui: &mut egui::Ui| {
-        // Name row — always-visible TextEdit, same pattern as sidebar Mesh/Color fields.
-        ui.horizontal(|ui: &mut egui::Ui| {
-            ui.label("Name");
-            let text_w = ui.available_width();
-            ui.add(
-                egui::TextEdit::singleline(&mut state.project.layers[idx].name)
-                    .desired_width(text_w),
-            );
-        });
+        egui::Grid::new("layer_info_grid")
+            .num_columns(2)
+            .spacing([6.0, 4.0])
+            .show(ui, |ui: &mut egui::Ui| {
+                // Name
+                ui.label("Name");
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.project.layers[idx].name)
+                        .desired_width(ui.available_width()),
+                );
+                ui.end_row();
 
-        // Group selector
-        {
-            let layer = &mut state.project.layers[idx];
-            ui.horizontal(|ui: &mut egui::Ui| {
+                // Group
                 ui.label("Group");
-                let combo_w = ui.available_width();
-                egui::ComboBox::from_id_salt("layer_group_combo")
-                    .selected_text(&layer.group_name)
-                    .width(combo_w)
-                    .show_ui(ui, |ui: &mut egui::Ui| {
-                        for name in &group_names {
-                            ui.selectable_value(&mut layer.group_name, name.clone(), name.as_str());
+                {
+                    let layer = &mut state.project.layers[idx];
+                    let combo_w = ui.available_width();
+                    egui::ComboBox::from_id_salt("layer_group_combo")
+                        .selected_text(&layer.group_name)
+                        .width(combo_w)
+                        .show_ui(ui, |ui: &mut egui::Ui| {
+                            for name in &group_names {
+                                ui.selectable_value(
+                                    &mut layer.group_name,
+                                    name.clone(),
+                                    name.as_str(),
+                                );
+                            }
+                        });
+                }
+                ui.end_row();
+
+                // Color source
+                ui.label("Color");
+                show_color_source_controls(ui, state, idx);
+                ui.end_row();
+
+                // Normal source
+                ui.label("Normal");
+                show_normal_source_controls(ui, state, idx);
+                ui.end_row();
+
+                // Seed
+                ui.label("Seed");
+                {
+                    let layer = &mut state.project.layers[idx];
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        use egui_phosphor::fill::SHUFFLE;
+                        const ICON_SIZE: f32 = 18.0;
+                        const ICON_FONT: f32 = 13.0;
+
+                        let margin = ui.spacing().button_padding.x * 2.0;
+                        let text_w = (ui.available_width()
+                            - ICON_SIZE
+                            - ui.spacing().item_spacing.x
+                            - margin)
+                            .max(20.0);
+
+                        let state_id = egui::Id::new("seed_edit_buf");
+                        let stored: Option<String> = ui.data_mut(|d| d.get_temp(state_id));
+                        let mut buf = stored.unwrap_or_else(|| seed_to_alpha(layer.seed));
+
+                        let te_resp = ui.add(
+                            egui::TextEdit::singleline(&mut buf)
+                                .desired_width(text_w)
+                                .font(egui::TextStyle::Monospace)
+                                .char_limit(6),
+                        );
+
+                        // Select all on initial focus
+                        if te_resp.gained_focus() {
+                            if let Some(mut state) =
+                                egui::TextEdit::load_state(ui.ctx(), te_resp.id)
+                            {
+                                state
+                                    .cursor
+                                    .set_char_range(Some(egui::text::CCursorRange::two(
+                                        egui::text::CCursor::new(0),
+                                        egui::text::CCursor::new(buf.len()),
+                                    )));
+                                state.store(ui.ctx(), te_resp.id);
+                            }
+                        }
+
+                        // Filter: keep only A-Z, auto-uppercase
+                        if te_resp.changed() {
+                            buf = buf
+                                .chars()
+                                .filter(|c| c.is_ascii_alphabetic())
+                                .map(|c| c.to_ascii_uppercase())
+                                .collect();
+                        }
+
+                        if te_resp.lost_focus() {
+                            if let Some(v) = alpha_to_seed(&buf) {
+                                layer.seed = v;
+                            }
+                            ui.data_mut(|d| d.remove::<String>(state_id));
+                        } else if te_resp.has_focus() {
+                            ui.data_mut(|d| d.insert_temp(state_id, buf));
+                        } else {
+                            ui.data_mut(|d| d.remove::<String>(state_id));
+                        }
+
+                        if small_icon_button(ui, SHUFFLE, ICON_FONT, ICON_SIZE, true)
+                            .on_hover_text("Shuffle")
+                            .clicked()
+                        {
+                            use rand::Rng;
+                            layer.seed = rand::thread_rng().gen_range(0..26u32.pow(6));
+                            ui.data_mut(|d| d.remove::<String>(state_id));
                         }
                     });
-            });
-        }
-
-        // Color source picker
-        show_color_source(ui, state, idx);
-
-        // Normal source picker
-        show_normal_source(ui, state, idx);
-
-        // Paint after Dry
-        {
-            let layer = &mut state.project.layers[idx];
-            slider_row(
-                ui,
-                "dry",
-                &mut layer.dry,
-                0.0..=1.0,
-                "Paint after Dry",
-                Some(0.01),
-                2,
-            );
-        }
-
-        // Seed row: 6-letter code + Shuffle button
-        {
-            let layer = &mut state.project.layers[idx];
-            ui.horizontal(|ui: &mut egui::Ui| {
-                ui.label("Seed");
-                let seed_text = seed_to_alpha(layer.seed);
-                ui.add(
-                    egui::TextEdit::singleline(&mut seed_text.clone())
-                        .desired_width(56.0)
-                        .font(egui::TextStyle::Monospace)
-                        .interactive(false),
-                );
-                if ui.small_button("Shuffle").clicked() {
-                    layer.seed = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| (d.as_millis() & 0xFFFFFFFF) as u32)
-                        .unwrap_or(1234);
                 }
+                ui.end_row();
             });
-        }
     });
 
     ui.separator();
@@ -211,6 +260,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             &mut layer.paint.color_variation,
             0.0..=0.5,
             "Color Var",
+            Some(0.01),
+            2,
+        );
+        slider_row(
+            ui,
+            "dry",
+            &mut layer.dry,
+            0.0..=1.0,
+            "Paint after Dry",
             Some(0.01),
             2,
         );
@@ -653,7 +711,7 @@ fn show_combined_stroke_curve(
     // Update stroke preview cache if stale
     preview::update_stroke_cache(ui.ctx(), paint, seed, cache);
 
-    let canvas_w = ui.available_width().min(256.0);
+    let canvas_w = ui.available_width();
     let (response, painter) = ui.allocate_painter(
         egui::Vec2::new(canvas_w, CANVAS_H),
         egui::Sense::click_and_drag(),
@@ -981,20 +1039,18 @@ fn layer_material<'a>(
     mesh.materials.get(idx)
 }
 
-/// Color source picker: \[Mesh\]\[File\]\[Solid\] + context UI.
-fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
+/// Color source controls for Grid cell (no label).
+/// Draws icon buttons + context widget in a horizontal, plus file buttons if needed.
+fn show_color_source_controls(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
     let group_name = state.project.layers[layer_idx].group_name.clone();
     let has_color_textures =
         layer_material(state, &group_name).is_some_and(|mat| mat.base_color_texture.is_some());
-
     let mode = current_mode(&state.project.layers[layer_idx].base_color);
 
     ui.horizontal(|ui: &mut egui::Ui| {
-        ui.label("Color");
         ui.spacing_mut().item_spacing.x = 1.0;
 
         use egui_phosphor::fill::{CUBE, FOLDER_OPEN, PALETTE};
-        // Mesh button — only enabled if this layer's material has a color texture
         if source_button(
             ui,
             CUBE,
@@ -1005,8 +1061,6 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
             let mat_idx = layer_material_index(state, &group_name).unwrap_or(0);
             state.project.layers[layer_idx].base_color = TextureSource::MeshMaterial(mat_idx);
         }
-
-        // File button
         if source_button(
             ui,
             FOLDER_OPEN,
@@ -1019,8 +1073,6 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
         ) {
             state.project.layers[layer_idx].base_color = TextureSource::File(None);
         }
-
-        // Solid button
         if source_button(
             ui,
             PALETTE,
@@ -1035,59 +1087,38 @@ fn show_color_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) 
         }
 
         ui.spacing_mut().item_spacing.x = 4.0;
+        ui.add_space(4.0);
 
-        // Context UI based on current mode
         let mesh_ref = &state.loaded_mesh;
         match &mut state.project.layers[layer_idx].base_color {
             TextureSource::MeshMaterial(ref mut mat_idx) => {
                 show_material_combo(ui, mesh_ref, mat_idx, "color_mat_combo", true);
             }
-            TextureSource::File(ref tex) => {
-                show_file_label(ui, tex);
+            TextureSource::File(ref mut tex_opt) => {
+                show_file_with_actions(ui, tex_opt);
             }
             TextureSource::Solid(ref mut rgb) => {
-                let mut color = egui::Color32::from_rgb(
-                    (rgb[0] * 255.0) as u8,
-                    (rgb[1] * 255.0) as u8,
-                    (rgb[2] * 255.0) as u8,
-                );
-                if ui.color_edit_button_srgba(&mut color).changed() {
-                    rgb[0] = color.r() as f32 / 255.0;
-                    rgb[1] = color.g() as f32 / 255.0;
-                    rgb[2] = color.b() as f32 / 255.0;
-                }
+                show_solid_color_fill(ui, rgb);
             }
             TextureSource::None => {
-                // Shouldn't happen for color — treat as solid gray
                 state.project.layers[layer_idx].base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
             }
         }
     });
-
-    // File open/replace/clear buttons on separate row when in File mode
-    if matches!(
-        state.project.layers[layer_idx].base_color,
-        TextureSource::File(_)
-    ) {
-        show_file_buttons(ui, &mut state.project.layers[layer_idx].base_color, "color");
-    }
 }
 
-/// Normal source picker: \[Mesh\]\[File\]\[∅ None\] + context UI.
-fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
+/// Normal source controls for Grid cell (no label).
+fn show_normal_source_controls(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize) {
     let group_name = state.project.layers[layer_idx].group_name.clone();
     let has_normal_textures =
         layer_material(state, &group_name).is_some_and(|mat| mat.normal_texture.is_some());
-
     let old_normal = state.project.layers[layer_idx].base_normal.clone();
     let mode = current_mode(&state.project.layers[layer_idx].base_normal);
 
     ui.horizontal(|ui: &mut egui::Ui| {
-        ui.label("Normal");
         ui.spacing_mut().item_spacing.x = 1.0;
 
         use egui_phosphor::fill::{CUBE, FOLDER_OPEN, PROHIBIT};
-        // Mesh button — only enabled if this layer's material has a normal texture
         if source_button(
             ui,
             CUBE,
@@ -1098,8 +1129,6 @@ fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
             let mat_idx = layer_material_index(state, &group_name).unwrap_or(0);
             state.project.layers[layer_idx].base_normal = TextureSource::MeshMaterial(mat_idx);
         }
-
-        // File button
         if source_button(
             ui,
             FOLDER_OPEN,
@@ -1112,8 +1141,6 @@ fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
         ) {
             state.project.layers[layer_idx].base_normal = TextureSource::File(None);
         }
-
-        // None button
         if source_button(
             ui,
             PROHIBIT,
@@ -1125,15 +1152,15 @@ fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
         }
 
         ui.spacing_mut().item_spacing.x = 4.0;
+        ui.add_space(4.0);
 
-        // Context UI based on current mode
         let mesh_ref = &state.loaded_mesh;
         match &mut state.project.layers[layer_idx].base_normal {
             TextureSource::MeshMaterial(ref mut mat_idx) => {
                 show_material_combo(ui, mesh_ref, mat_idx, "normal_mat_combo", false);
             }
-            TextureSource::File(ref tex) => {
-                show_file_label(ui, tex);
+            TextureSource::File(ref mut tex_opt) => {
+                show_file_with_actions(ui, tex_opt);
             }
             TextureSource::None | TextureSource::Solid(_) => {
                 let weak = ui.visuals().weak_text_color();
@@ -1142,19 +1169,6 @@ fn show_normal_source(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usize)
         }
     });
 
-    // File open/replace/clear buttons on separate row when in File mode
-    if matches!(
-        state.project.layers[layer_idx].base_normal,
-        TextureSource::File(_)
-    ) {
-        show_file_buttons(
-            ui,
-            &mut state.project.layers[layer_idx].base_normal,
-            "normal",
-        );
-    }
-
-    // base_normal affects merge stage — trigger remerge on change
     if state.project.layers[layer_idx].base_normal != old_normal {
         state.pending_remerge = true;
     }
@@ -1230,7 +1244,7 @@ fn show_material_combo(
         format!("Material {}", *mat_idx)
     };
 
-    let combo_w = ui.available_width().min(140.0);
+    let combo_w = ui.available_width();
     egui::ComboBox::from_id_salt(id_salt)
         .selected_text(&current_text)
         .width(combo_w)
@@ -1242,50 +1256,59 @@ fn show_material_combo(
         });
 }
 
-/// Show file label text (filename or "(no file)").
-fn show_file_label(ui: &mut egui::Ui, tex: &Option<EmbeddedTexture>) {
-    match tex {
-        Some(t) => {
-            let weak = ui.visuals().weak_text_color();
-            ui.colored_label(weak, &t.label);
-        }
-        None => {
-            let warn = egui::Color32::from_rgb(255, 180, 0);
-            ui.colored_label(warn, "(no file)");
-        }
-    }
+/// File label + action icons on the same line.
+/// Has file: [filename…] [swap] [x]  —  No file: [folder_open]
+/// Solid color picker that fills remaining width.
+fn show_solid_color_fill(ui: &mut egui::Ui, rgb: &mut [f32; 3]) {
+    let w = ui.available_width();
+    ui.spacing_mut().interact_size.x = w;
+    egui::color_picker::color_edit_button_rgb(ui, rgb);
 }
 
-/// File open/replace/clear buttons row.
-fn show_file_buttons(ui: &mut egui::Ui, source: &mut TextureSource, kind: &str) {
-    let has_file = matches!(source, TextureSource::File(Some(_)));
+fn show_file_with_actions(ui: &mut egui::Ui, tex_opt: &mut Option<EmbeddedTexture>) {
+    use egui_phosphor::fill::{SWAP, X_CIRCLE};
+    const ICON_SIZE: f32 = 18.0;
+    const ICON_FONT: f32 = 13.0;
 
-    ui.horizontal(|ui: &mut egui::Ui| {
-        // Indent to align with context area
-        ui.add_space(52.0);
-
-        if has_file {
-            if ui.small_button("Replace").clicked() {
-                if let Some(tex) = pick_and_load_texture() {
-                    *source = TextureSource::File(Some(tex));
-                }
-            }
-            if ui.small_button("Clear").clicked() {
-                *source = TextureSource::File(None);
-            }
-        } else {
-            let label = if kind == "color" {
-                "Open image..."
-            } else {
-                "Open normal..."
-            };
-            if ui.small_button(label).clicked() {
-                if let Some(tex) = pick_and_load_texture() {
-                    *source = TextureSource::File(Some(tex));
-                }
+    if let Some(ref tex) = tex_opt {
+        let label_text = tex.label.clone();
+        // Pre-subtract icon space (2 icons + 2 spacings between 3 widgets)
+        let icons_w = ICON_SIZE * 2.0 + ui.spacing().item_spacing.x * 2.0;
+        let label_w = (ui.available_width() - icons_w).max(20.0);
+        let weak = ui.visuals().weak_text_color();
+        ui.add_sized(
+            [label_w, ui.spacing().interact_size.y],
+            egui::Label::new(egui::RichText::new(&label_text).color(weak)).truncate(),
+        )
+        .on_hover_text(&label_text);
+        if small_icon_button(ui, SWAP, ICON_FONT, ICON_SIZE, true)
+            .on_hover_text("Replace")
+            .clicked()
+        {
+            if let Some(new_tex) = pick_and_load_texture() {
+                *tex_opt = Some(new_tex);
             }
         }
-    });
+        if small_icon_button(ui, X_CIRCLE, ICON_FONT, ICON_SIZE, true)
+            .on_hover_text("Clear")
+            .clicked()
+        {
+            *tex_opt = None;
+        }
+    } else {
+        let btn_w = ui.available_width();
+        if ui
+            .add_sized(
+                [btn_w, ui.spacing().interact_size.y],
+                egui::Button::new("Open file…"),
+            )
+            .clicked()
+        {
+            if let Some(new_tex) = pick_and_load_texture() {
+                *tex_opt = Some(new_tex);
+            }
+        }
+    }
 }
 
 /// Open a file dialog and load a texture, returning an EmbeddedTexture.
@@ -1297,6 +1320,17 @@ fn seed_to_alpha(mut seed: u32) -> String {
         seed /= 26;
     }
     String::from_utf8_lossy(&chars).into_owned()
+}
+
+fn alpha_to_seed(s: &str) -> Option<u32> {
+    let mut result: u32 = 0;
+    for &b in s.as_bytes() {
+        if !b.is_ascii_uppercase() {
+            return None;
+        }
+        result = result.checked_mul(26)?.checked_add((b - b'A') as u32)?;
+    }
+    Some(result)
 }
 
 fn pick_and_load_texture() -> Option<EmbeddedTexture> {
