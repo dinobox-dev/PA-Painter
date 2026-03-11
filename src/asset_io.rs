@@ -182,19 +182,13 @@ pub fn collect_obj_aux_files(obj_path: &Path) -> Option<ObjAuxFiles> {
     for line in mtl_text.lines() {
         let trimmed = line.trim();
         // MTL texture directives we care about (matching mtl_to_material_info usage)
-        let tex_name = if let Some(rest) = trimmed.strip_prefix("map_Kd ") {
-            Some(rest.trim())
-        } else if let Some(rest) = trimmed.strip_prefix("map_Bump ") {
-            Some(rest.trim())
-        } else if let Some(rest) = trimmed.strip_prefix("bump ") {
-            Some(rest.trim())
-        } else if let Some(rest) = trimmed.strip_prefix("norm ") {
-            Some(rest.trim())
-        } else if let Some(rest) = trimmed.strip_prefix("map_Kn ") {
-            Some(rest.trim())
-        } else {
-            None
-        };
+        let tex_name = trimmed
+            .strip_prefix("map_Kd ")
+            .or_else(|| trimmed.strip_prefix("map_Bump "))
+            .or_else(|| trimmed.strip_prefix("bump "))
+            .or_else(|| trimmed.strip_prefix("norm "))
+            .or_else(|| trimmed.strip_prefix("map_Kn "))
+            .map(|rest| rest.trim());
 
         if let Some(name) = tex_name {
             if name.is_empty() || !seen.insert(name.to_string()) {
