@@ -133,6 +133,92 @@ pub fn load_mesh_from_bytes(bytes: &[u8], format: &str) -> Result<LoadedMesh, Me
     }
 }
 
+/// Load a mesh from raw bytes with auxiliary OBJ files (MTL + textures).
+/// Falls back to plain `load_mesh_from_bytes` for non-OBJ formats or missing aux data.
+pub fn load_mesh_from_bytes_with_aux(
+    bytes: &[u8],
+    format: &str,
+    aux: Option<&ObjAuxFiles>,
+) -> Result<LoadedMesh, MeshError> {
+    match (format, aux) {
+        ("obj", Some(aux)) => load_obj_from_bytes_with_aux(bytes, aux),
+        _ => load_mesh_from_bytes(bytes, format),
+    }
+}
+
+/// Auxiliary files collected alongside an OBJ mesh (MTL + referenced textures).
+/// Stored in the project so they can be embedded in .papr and restored on load.
+#[derive(Debug, Clone, Default)]
+pub struct ObjAuxFiles {
+    /// Raw MTL file bytes.
+    pub mtl_bytes: Vec<u8>,
+    /// Texture files referenced by the MTL, keyed by their MTL-relative path.
+    pub texture_files: Vec<(String, Vec<u8>)>,
+}
+
+/// Collect MTL and referenced texture files for an OBJ mesh.
+/// Returns `None` if the OBJ has no `mtllib` directive or the MTL cannot be read.
+pub fn collect_obj_aux_files(obj_path: &Path) -> Option<ObjAuxFiles> {
+    let obj_dir = obj_path.parent();
+    let raw = std::fs::read(obj_path).ok()?;
+    let text = String::from_utf8_lossy(&raw);
+
+    // Find mtllib directive (first one wins, matching tobj behavior)
+    let mtl_name = text
+        .lines()
+        .find(|l| l.starts_with("mtllib "))
+        .map(|l| l["mtllib ".len()..].trim().to_string())?;
+
+    let mtl_path = obj_dir
+        .map(|d| d.join(&mtl_name))
+        .unwrap_or_else(|| PathBuf::from(&mtl_name));
+    let mtl_bytes = std::fs::read(&mtl_path).ok()?;
+
+    // Parse MTL text for texture path directives
+    let mtl_text = String::from_utf8_lossy(&mtl_bytes);
+    let mut seen = HashSet::new();
+    let mut texture_files = Vec::new();
+
+    for line in mtl_text.lines() {
+        let trimmed = line.trim();
+        // MTL texture directives we care about (matching mtl_to_material_info usage)
+        let tex_name = if let Some(rest) = trimmed.strip_prefix("map_Kd ") {
+            Some(rest.trim())
+        } else if let Some(rest) = trimmed.strip_prefix("map_Bump ") {
+            Some(rest.trim())
+        } else if let Some(rest) = trimmed.strip_prefix("bump ") {
+            Some(rest.trim())
+        } else if let Some(rest) = trimmed.strip_prefix("norm ") {
+            Some(rest.trim())
+        } else if let Some(rest) = trimmed.strip_prefix("map_Kn ") {
+            Some(rest.trim())
+        } else {
+            None
+        };
+
+        if let Some(name) = tex_name {
+            if name.is_empty() || !seen.insert(name.to_string()) {
+                continue;
+            }
+            let tex_path = obj_dir
+                .map(|d| d.join(name))
+                .unwrap_or_else(|| PathBuf::from(name));
+            match std::fs::read(&tex_path) {
+                Ok(bytes) => texture_files.push((name.to_string(), bytes)),
+                Err(e) => warn!(
+                    "OBJ aux: failed to read texture '{}': {e}",
+                    tex_path.display()
+                ),
+            }
+        }
+    }
+
+    Some(ObjAuxFiles {
+        mtl_bytes,
+        texture_files,
+    })
+}
+
 fn obj_load_options() -> tobj::LoadOptions {
     tobj::LoadOptions {
         triangulate: false, // We handle triangulation ourselves for shorter-diagonal split
@@ -195,6 +281,43 @@ fn load_obj_from_bytes(bytes: &[u8]) -> Result<LoadedMesh, MeshError> {
     )
     .map_err(|e| MeshError::ParseError(e.to_string()))?;
     build_mesh_from_obj(&models)
+}
+
+/// Load OBJ from bytes with auxiliary MTL + texture data (from .papr embedding).
+/// Replicates the full `load_obj` pipeline: MTL parsing → disambiguate → material info.
+fn load_obj_from_bytes_with_aux(bytes: &[u8], aux: &ObjAuxFiles) -> Result<LoadedMesh, MeshError> {
+    let text = String::from_utf8_lossy(bytes);
+    let mtl_bytes = aux.mtl_bytes.clone();
+    let (models, raw_materials) = tobj::load_obj_buf(
+        &mut Cursor::new(text.as_bytes()),
+        &obj_load_options(),
+        |_| {
+            let mtl_text = String::from_utf8_lossy(&mtl_bytes);
+            tobj::load_mtl_buf(&mut Cursor::new(mtl_text.as_bytes()))
+        },
+    )
+    .map_err(|e| MeshError::ParseError(e.to_string()))?;
+
+    let mut mesh = build_mesh_from_obj(&models)?;
+
+    if let Ok(materials) = raw_materials {
+        disambiguate_groups_with_materials(&mut mesh.groups, &models, &materials);
+
+        // Build texture lookup from aux data
+        let tex_map: std::collections::HashMap<&str, &[u8]> = aux
+            .texture_files
+            .iter()
+            .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+            .collect();
+
+        mesh.materials = materials
+            .iter()
+            .enumerate()
+            .map(|(i, mat)| mtl_to_material_info_from_aux(mat, i, &tex_map))
+            .collect();
+    }
+
+    Ok(mesh)
 }
 
 fn build_mesh_from_obj(models: &[tobj::Model]) -> Result<LoadedMesh, MeshError> {
@@ -411,6 +534,87 @@ fn mtl_to_material_info(
         base_color_texture,
         normal_texture,
     }
+}
+
+/// Like `mtl_to_material_info` but loads textures from in-memory bytes
+/// instead of the filesystem. Used when restoring OBJ materials from .papr.
+fn mtl_to_material_info_from_aux(
+    mat: &tobj::Material,
+    idx: usize,
+    texture_files: &std::collections::HashMap<&str, &[u8]>,
+) -> MeshMaterialInfo {
+    let name = if mat.name.is_empty() {
+        format!("Material {idx}")
+    } else {
+        mat.name.clone()
+    };
+
+    let has_explicit_color = mat.diffuse.is_some() || mat.diffuse_texture.is_some();
+    let diffuse = mat.diffuse.unwrap_or([0.8, 0.8, 0.8]);
+    let base_color_factor = [
+        diffuse[0].powf(2.2),
+        diffuse[1].powf(2.2),
+        diffuse[2].powf(2.2),
+        1.0,
+    ];
+
+    let base_color_texture = mat.diffuse_texture.as_ref().and_then(|tex_path| {
+        let bytes = texture_files.get(tex_path.as_str())?;
+        match load_texture_from_bytes(bytes) {
+            Ok(tex) => Some(tex),
+            Err(e) => {
+                warn!("MTL aux: failed to decode diffuse texture '{tex_path}': {e}");
+                None
+            }
+        }
+    });
+
+    let normal_texture = mat.normal_texture.as_ref().and_then(|tex_path| {
+        let bytes = texture_files.get(tex_path.as_str())?;
+        match load_texture_from_bytes(bytes) {
+            Ok(tex) => Some(tex),
+            Err(e) => {
+                warn!("MTL aux: failed to decode normal texture '{tex_path}': {e}");
+                None
+            }
+        }
+    });
+
+    MeshMaterialInfo {
+        name,
+        base_color_factor,
+        has_explicit_color,
+        base_color_texture,
+        normal_texture,
+    }
+}
+
+/// Decode a texture image from raw file bytes (PNG/TGA/etc.) to linear RGBA float.
+fn load_texture_from_bytes(bytes: &[u8]) -> Result<LoadedTexture, TextureError> {
+    let img = image::load_from_memory(bytes)
+        .map_err(|e| TextureError::DecodeError(e.to_string()))?
+        .to_rgba8();
+
+    let width = img.width();
+    let height = img.height();
+
+    let pixels: Vec<[f32; 4]> = img
+        .pixels()
+        .map(|p| {
+            [
+                srgb_to_linear(p[0] as f32 / 255.0),
+                srgb_to_linear(p[1] as f32 / 255.0),
+                srgb_to_linear(p[2] as f32 / 255.0),
+                p[3] as f32 / 255.0,
+            ]
+        })
+        .collect();
+
+    Ok(LoadedTexture {
+        pixels,
+        width,
+        height,
+    })
 }
 
 /// Convert a glTF image to a LoadedTexture, applying sRGB → linear conversion.
@@ -1396,6 +1600,29 @@ f 1/1 2/2 3/3 4/4
             (p0[2] - 0.125).abs() < 1e-5,
             "B: expected 0.125, got {}",
             p0[2]
+        );
+    }
+
+    /// Regression: loading Demo.obj from disk vs from bytes+aux must
+    /// produce identical group names and material counts.
+    #[test]
+    fn demo_obj_disk_vs_bytes_aux_groups_match() {
+        let obj_path = fixtures_dir().join("usemtl_disambiguate.obj");
+
+        let disk_mesh = load_mesh(&obj_path).expect("disk load failed");
+        let disk_groups: Vec<&str> = disk_mesh.groups.iter().map(|g| g.name.as_str()).collect();
+
+        let obj_bytes = std::fs::read(&obj_path).unwrap();
+        let aux = collect_obj_aux_files(&obj_path);
+        let aux_mesh = load_mesh_from_bytes_with_aux(&obj_bytes, "obj", aux.as_ref())
+            .expect("bytes+aux load failed");
+        let aux_groups: Vec<&str> = aux_mesh.groups.iter().map(|g| g.name.as_str()).collect();
+
+        assert_eq!(disk_groups, aux_groups, "Group names must match");
+        assert_eq!(
+            disk_mesh.materials.len(),
+            aux_mesh.materials.len(),
+            "Material counts must match"
         );
     }
 }

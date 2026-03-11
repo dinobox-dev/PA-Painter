@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use eframe::egui;
 
-use pa_painter::asset_io::{extract_uv_edges, load_mesh, LoadedMesh, MeshMaterialInfo};
+use pa_painter::asset_io::{
+    collect_obj_aux_files, extract_uv_edges, load_mesh, LoadedMesh, MeshMaterialInfo,
+};
 use pa_painter::compositing::LayerMaps;
 use pa_painter::glb_export;
 use pa_painter::object_normal::MeshNormalData;
@@ -1025,6 +1027,13 @@ fn build_mesh_load_popup(
     let is_glb = format == "glb" || format == "gltf";
     let has_mtl = !is_glb && !mesh.materials.is_empty();
 
+    // Collect OBJ auxiliary files (MTL + referenced textures) for .papr embedding
+    let pending_obj_aux = if format == "obj" {
+        collect_obj_aux_files(&path)
+    } else {
+        None
+    };
+
     let layer_names: Vec<String> = mesh.groups.iter().map(|g| g.name.clone()).collect();
     let layer_names = if layer_names.is_empty() {
         vec!["__all__".to_string()]
@@ -1072,6 +1081,7 @@ fn build_mesh_load_popup(
         pending_path: path,
         pending_format: format.to_string(),
         pending_bytes: mesh_bytes,
+        pending_obj_aux,
     }
 }
 
@@ -1096,6 +1106,7 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
     state.project.mesh_ref.format = popup.pending_format;
     state.project.mesh_ref.filename = popup.filename.clone();
     state.project.mesh_bytes = popup.pending_bytes;
+    state.project.obj_aux = popup.pending_obj_aux;
 
     if popup.is_replace {
         // ── Replace mesh ──
@@ -1217,6 +1228,7 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
         let mut new_project = Project::default();
         std::mem::swap(&mut new_project.mesh_ref, &mut state.project.mesh_ref);
         new_project.mesh_bytes = state.project.mesh_bytes.take();
+        new_project.obj_aux = state.project.obj_aux.take();
         state.project = new_project;
         state.project_path = None;
         state.dirty = false;

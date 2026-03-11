@@ -7,7 +7,7 @@ use std::time::Instant;
 use eframe::egui;
 use glam::{Vec2, Vec3};
 
-use pa_painter::asset_io::LoadedMesh;
+use pa_painter::asset_io::{LoadedMesh, ObjAuxFiles};
 use pa_painter::project::Project;
 use pa_painter::types::{ExportSettings, Layer, OutputSettings, TextureSource};
 
@@ -364,6 +364,8 @@ pub struct MeshLoadPopup {
     pub pending_format: String,
     /// Raw mesh bytes for .papr embedding.
     pub pending_bytes: Option<Vec<u8>>,
+    /// OBJ auxiliary files (MTL + textures) for .papr embedding.
+    pub pending_obj_aux: Option<ObjAuxFiles>,
 }
 
 /// Summary of a mesh reload diff, shown as a dismissible window.

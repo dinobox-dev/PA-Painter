@@ -24,7 +24,8 @@ use zip::{ZipArchive, ZipWriter};
 
 use crate::asset_io::{
     decode_linear_png_bytes, decode_srgb_png_bytes, encode_pixels_as_linear_png,
-    encode_pixels_as_srgb_png, linear_to_srgb, load_mesh_from_bytes, LoadedMesh,
+    encode_pixels_as_srgb_png, linear_to_srgb, load_mesh_from_bytes_with_aux, LoadedMesh,
+    ObjAuxFiles,
 };
 use crate::types::{
     Color, EmbeddedTexture, ExportSettings, Layer, OutputSettings, PaintLayer, PresetLibrary,
@@ -137,6 +138,9 @@ pub struct Project {
     /// Raw mesh file bytes for embedding in .papr ZIP.
     /// Populated on new project / load, written to `assets/mesh.*` on save.
     pub mesh_bytes: Option<Vec<u8>>,
+    /// Auxiliary OBJ files (MTL + textures). Only relevant for OBJ format meshes.
+    /// Stored in .papr so the full material pipeline can be replayed on load.
+    pub obj_aux: Option<ObjAuxFiles>,
     /// Runtime path cache — one entry per layer in order-sorted sequence.
     /// Not serialized to disk.
     pub cached_paths: Option<Vec<Vec<StrokePath>>>,
@@ -163,6 +167,7 @@ impl Default for Project {
             settings: OutputSettings::default(),
             export_settings: ExportSettings::default(),
             mesh_bytes: None,
+            obj_aux: None,
             cached_paths: None,
             path_cache_key: None,
         }
@@ -389,6 +394,16 @@ pub fn save_project(
         zip.write_all(bytes)?;
     }
 
+    // assets/mesh.mtl + assets/mesh_textures/* — OBJ auxiliary files
+    if let Some(ref aux) = project.obj_aux {
+        zip.start_file("assets/mesh.mtl", options)?;
+        zip.write_all(&aux.mtl_bytes)?;
+        for (name, bytes) in &aux.texture_files {
+            zip.start_file(format!("assets/mesh_textures/{name}"), raw_options)?;
+            zip.write_all(bytes)?;
+        }
+    }
+
     // assets/layer_{n}_color.png / layer_{n}_normal.png — File-mode textures
     for (i, layer) in project.layers.iter().enumerate() {
         if let TextureSource::File(Some(ref tex)) = layer.base_color {
@@ -499,14 +514,17 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
     // assets/mesh.* — find embedded mesh
     let (mesh_bytes, mesh_format) = read_mesh_asset(&mut archive, &data.mesh_ref.format);
 
-    // Parse mesh from embedded bytes
+    // assets/mesh.mtl + assets/mesh_textures/* — OBJ auxiliary files
+    let obj_aux = read_obj_aux_files(&mut archive);
+
+    // Parse mesh from embedded bytes (with MTL/textures for OBJ)
     let loaded_mesh = if let Some(ref bytes) = mesh_bytes {
         let fmt = if mesh_format.is_empty() {
             "glb"
         } else {
             &mesh_format
         };
-        match load_mesh_from_bytes(bytes, fmt) {
+        match load_mesh_from_bytes_with_aux(bytes, fmt, obj_aux.as_ref()) {
             Ok(mesh) => Some(mesh),
             Err(e) => {
                 warn!("Failed to load embedded mesh: {e}");
@@ -578,6 +596,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
         settings: data.settings,
         export_settings: data.export_settings,
         mesh_bytes,
+        obj_aux,
         cached_paths: None,
         path_cache_key: None,
     };
@@ -628,6 +647,40 @@ fn read_mesh_asset(
         }
     }
     (None, String::new())
+}
+
+/// Read OBJ auxiliary files (MTL + textures) from the ZIP if present.
+fn read_obj_aux_files(archive: &mut ZipArchive<std::fs::File>) -> Option<ObjAuxFiles> {
+    let mtl_bytes = read_bytes_optional(archive, "assets/mesh.mtl")?;
+
+    // Scan ZIP entries for assets/mesh_textures/*
+    let tex_names: Vec<String> = (0..archive.len())
+        .filter_map(|i| {
+            let entry = archive.by_index(i).ok()?;
+            let name = entry.name().to_string();
+            if name.starts_with("assets/mesh_textures/")
+                && name.len() > "assets/mesh_textures/".len()
+            {
+                // Extract the relative texture filename (as stored in MTL)
+                Some(name["assets/mesh_textures/".len()..].to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut texture_files = Vec::new();
+    for tex_name in tex_names {
+        let zip_path = format!("assets/mesh_textures/{tex_name}");
+        if let Some(bytes) = read_bytes_optional(archive, &zip_path) {
+            texture_files.push((tex_name, bytes));
+        }
+    }
+
+    Some(ObjAuxFiles {
+        mtl_bytes,
+        texture_files,
+    })
 }
 
 /// Load cached output maps (color, height, normal) from the `output/` directory.
@@ -803,6 +856,7 @@ mod tests {
             settings: OutputSettings::default(),
             export_settings: ExportSettings::default(),
             mesh_bytes: None,
+            obj_aux: None,
             cached_paths: None,
             path_cache_key: None,
         }
@@ -825,6 +879,7 @@ mod tests {
             },
             export_settings: ExportSettings::default(),
             mesh_bytes: None,
+            obj_aux: None,
             cached_paths: None,
             path_cache_key: None,
         }
@@ -1146,6 +1201,40 @@ mod tests {
         assert_eq!(
             project.settings.normal_strength,
             loaded.settings.normal_strength
+        );
+    }
+
+    /// Regression: .papr round-trip with OBJ mesh must preserve group names and materials.
+    #[test]
+    fn round_trip_obj_aux_groups() {
+        use crate::asset_io::{collect_obj_aux_files, load_mesh};
+
+        let obj_path = crate::test_fixtures_dir().join("usemtl_disambiguate.obj");
+
+        let mesh = load_mesh(&obj_path).unwrap();
+        let group_names: Vec<String> = mesh.groups.iter().map(|g| g.name.clone()).collect();
+
+        let mut project = make_empty_project();
+        project.mesh_ref.format = "obj".to_string();
+        project.mesh_bytes = std::fs::read(&obj_path).ok();
+        project.obj_aux = collect_obj_aux_files(&obj_path);
+
+        let path = temp_pap_path("demo_obj_roundtrip.papr");
+        save_project(&project, &path, None, None).unwrap();
+
+        let result = load_project(&path).unwrap();
+        let loaded_mesh = result.mesh.expect("mesh should be loaded");
+        let loaded_groups: Vec<String> =
+            loaded_mesh.groups.iter().map(|g| g.name.clone()).collect();
+
+        assert_eq!(
+            group_names, loaded_groups,
+            "Group names must survive round-trip"
+        );
+        assert_eq!(
+            mesh.materials.len(),
+            loaded_mesh.materials.len(),
+            "Material count must survive round-trip"
         );
     }
 
