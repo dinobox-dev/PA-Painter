@@ -634,14 +634,22 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
             se: r,
         };
 
-        // ── Export (left zone) — doubles as progress bar during generation ──
+        // ── Export (left zone) — doubles as progress bar during generation/remerge ──
         let generating = state.generation.is_running();
+        let remerging = state.remerge_running;
+        let busy = generating || remerging;
         let (export_rect, export_resp) =
             ui.allocate_exact_size(btn_size, egui::Sense::click() | egui::Sense::hover());
 
-        if generating {
+        if busy {
             // Progress bar mode
-            let progress = state.generation.overall_progress();
+            let (progress, label) = if generating {
+                let p = state.generation.overall_progress();
+                (p, format!("Generating… {:.0}%", p * 100.0))
+            } else {
+                let p = state.remerge_progress;
+                (p, format!("Applying… {:.0}%", p * 100.0))
+            };
             ui.painter()
                 .rect_filled(export_rect, left_rounding, base_fill);
 
@@ -666,7 +674,6 @@ pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
             }
 
             // Label
-            let label = format!("Generating… {:.0}%", progress * 100.0);
             ui.painter().text(
                 export_rect.center(),
                 egui::Align2::CENTER_CENTER,

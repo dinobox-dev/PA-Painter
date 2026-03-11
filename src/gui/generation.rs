@@ -660,14 +660,30 @@ pub struct RemergeResult {
 }
 
 /// Lightweight async worker for re-merge operations.
-#[derive(Default)]
 pub struct RemergeWorker {
     handle: Option<thread::JoinHandle<Option<RemergeResult>>>,
+    progress: Arc<AtomicU32>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Default for RemergeWorker {
+    fn default() -> Self {
+        Self {
+            handle: None,
+            progress: Arc::new(AtomicU32::new(0f32.to_bits())),
+            cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 impl RemergeWorker {
     pub fn is_running(&self) -> bool {
         self.handle.as_ref().is_some_and(|h| !h.is_finished())
+    }
+
+    /// Current remerge progress (0.0–1.0).
+    pub fn progress(&self) -> f32 {
+        f32::from_bits(self.progress.load(Ordering::Relaxed))
     }
 
     pub fn poll(&mut self) -> Option<RemergeResult> {
@@ -688,13 +704,27 @@ impl RemergeWorker {
     }
 
     pub fn start(&mut self, input: RemergeInput) {
-        self.handle = Some(thread::spawn(move || run_remerge(input)));
+        // Cancel previous work (old thread will see the old cancel flag)
+        self.cancel.store(true, Ordering::Relaxed);
+        // Create fresh atomics for the new run
+        self.cancel = Arc::new(AtomicBool::new(false));
+        self.progress = Arc::new(AtomicU32::new(0f32.to_bits()));
+        let progress = Arc::clone(&self.progress);
+        let cancel = Arc::clone(&self.cancel);
+        self.handle = Some(thread::spawn(move || {
+            run_remerge(input, &progress, &cancel)
+        }));
     }
 }
 
-fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
+fn run_remerge(
+    input: RemergeInput,
+    progress: &AtomicU32,
+    cancel: &AtomicBool,
+) -> Option<RemergeResult> {
     let settings = &input.settings;
     let resolution = settings.resolution_preset.resolution();
+    set_progress(progress, 0.0);
 
     // Collect visible layers sorted by order
     let mut sorted_layers: Vec<&Layer> = input.layers.iter().filter(|l| l.visible).collect();
@@ -753,6 +783,10 @@ fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
     );
 
     // Fill base colors
+    set_progress(progress, 0.1);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     if settings.background_mode != BackgroundMode::Transparent {
         for (si, layer) in sorted_layers.iter().enumerate() {
             let bc = resolve_base_color(&layer.base_color, materials);
@@ -763,6 +797,10 @@ fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
     }
 
     // Merge
+    set_progress(progress, 0.2);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let layer_dry: Vec<f32> = sorted_layers.iter().map(|l| l.dry).collect();
     let layer_settings = vec![LayerCompositeSettings::default(); sorted_layers.len()];
     merge_layers(
@@ -774,9 +812,17 @@ fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
     );
 
     // Sobel
+    set_progress(progress, 0.4);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     compute_height_gradients(&mut global);
 
     // Normal map
+    set_progress(progress, 0.5);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let normal_data = if settings.normal_mode == NormalMode::DepictedForm {
         input.cached_normals.as_ref().map(|(_, nd)| nd.as_ref())
     } else {
@@ -813,6 +859,10 @@ fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
     };
 
     // UDN normal blending
+    set_progress(progress, 0.7);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     for (si, layer) in sorted_layers.iter().enumerate() {
         let bn = resolve_base_normal(&layer.base_normal, materials);
         if let Some(ref pixels) = bn.pixels {
@@ -828,6 +878,10 @@ fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
         }
     }
 
+    set_progress(progress, 0.8);
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
     let display_color =
         super::textures::color_buffer_to_image(&global.color, resolution, resolution);
     let display_height = super::textures::height_buffer_to_image(&global.height, resolution);
@@ -837,6 +891,7 @@ fn run_remerge(input: RemergeInput) -> Option<RemergeResult> {
     let gpu_color_pixels = super::mesh_preview::convert_color_pixels(&global.color);
     let gpu_normal_pixels = super::mesh_preview::convert_normal_pixels(&normal_map);
 
+    set_progress(progress, 1.0);
     Some(RemergeResult {
         color: global.color,
         height: global.height,

@@ -1125,9 +1125,9 @@ impl PainterApp {
             self.state.pending_replace_mesh = false;
             dialogs::replace_mesh(&mut self.state);
         }
-        if self.state.pending_remerge && !self.remerge_worker.is_running() {
+        if self.state.pending_remerge {
             self.state.pending_remerge = false;
-            self.start_remerge();
+            self.start_remerge(); // cancels any in-flight remerge automatically
         }
     }
 
@@ -1310,14 +1310,17 @@ impl PainterApp {
         }
 
         // Remerge worker
+        self.state.remerge_running = self.remerge_worker.is_running();
+        self.state.remerge_progress = self.remerge_worker.progress();
         if let Some(result) = self.remerge_worker.poll() {
+            self.state.remerge_running = false;
             self.apply_remerge_result(ctx, result);
             if self.state.pending_remerge {
                 self.state.pending_remerge = false;
                 self.start_remerge();
             }
         }
-        if self.remerge_worker.is_running() {
+        if self.state.remerge_running {
             ctx.request_repaint();
         }
     }

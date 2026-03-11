@@ -325,6 +325,10 @@ pub struct AppState {
     // ── Export Settings Panel ──
     pub show_export_settings: bool,
 
+    // ── Remerge status (synced from PainterApp each frame) ──
+    pub remerge_running: bool,
+    pub remerge_progress: f32,
+
     // ── Undo/Redo ──
     pub undo: UndoHistory,
 }
@@ -374,6 +378,8 @@ impl AppState {
             auto_preview_timer: None,
             auto_gen_suppressed: false,
             show_export_settings: false,
+            remerge_running: false,
+            remerge_progress: 0.0,
             undo: UndoHistory::default(),
         }
     }
