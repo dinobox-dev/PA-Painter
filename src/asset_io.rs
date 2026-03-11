@@ -269,9 +269,15 @@ fn build_mesh_from_obj(models: &[tobj::Model]) -> Result<LoadedMesh, MeshError> 
                         ]);
                     }
                 } else {
-                    return Err(MeshError::ParseError(format!(
-                        "Polygons with {arity} vertices not supported"
-                    )));
+                    // N-gon (5+ vertices): fan triangulation from vertex 0
+                    let i0 = mesh.indices[idx_offset];
+                    for j in 1..(arity - 1) {
+                        indices.extend_from_slice(&[
+                            base_vertex + i0,
+                            base_vertex + mesh.indices[idx_offset + j],
+                            base_vertex + mesh.indices[idx_offset + j + 1],
+                        ]);
+                    }
                 }
                 idx_offset += arity;
             }
