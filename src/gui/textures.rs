@@ -74,21 +74,6 @@ pub fn color_buffer_to_image(colors: &[Color], width: u32, height: u32) -> egui:
     egui::ColorImage::new([width as usize, height as usize], pixels)
 }
 
-/// Convert a `Vec<Color>` (linear float RGBA) to an egui TextureHandle.
-pub fn color_buffer_to_handle(
-    ctx: &egui::Context,
-    colors: &[Color],
-    width: u32,
-    height: u32,
-    name: &str,
-) -> egui::TextureHandle {
-    ctx.load_texture(
-        name,
-        color_buffer_to_image(colors, width, height),
-        egui::TextureOptions::LINEAR,
-    )
-}
-
 /// Convert a height map (f32 values in \[0,1\]) to a ColorImage.
 pub fn height_buffer_to_image(heights: &[f32], resolution: u32) -> egui::ColorImage {
     let pixels: Vec<egui::Color32> = heights
@@ -99,20 +84,6 @@ pub fn height_buffer_to_image(heights: &[f32], resolution: u32) -> egui::ColorIm
         })
         .collect();
     egui::ColorImage::new([resolution as usize, resolution as usize], pixels)
-}
-
-/// Convert a height map (f32 values in \[0,1\]) to a grayscale texture.
-pub fn height_buffer_to_handle(
-    ctx: &egui::Context,
-    heights: &[f32],
-    resolution: u32,
-    name: &str,
-) -> egui::TextureHandle {
-    ctx.load_texture(
-        name,
-        height_buffer_to_image(heights, resolution),
-        egui::TextureOptions::LINEAR,
-    )
 }
 
 /// Convert a normal map (`Vec<[f32; 3]>` with components in \[0,1\]) to a ColorImage.
@@ -128,20 +99,6 @@ pub fn normal_map_to_image(normals: &[[f32; 3]], resolution: u32) -> egui::Color
         })
         .collect();
     egui::ColorImage::new([resolution as usize, resolution as usize], pixels)
-}
-
-/// Convert a normal map to a texture.
-pub fn normal_map_to_handle(
-    ctx: &egui::Context,
-    normals: &[[f32; 3]],
-    resolution: u32,
-    name: &str,
-) -> egui::TextureHandle {
-    ctx.load_texture(
-        name,
-        normal_map_to_image(normals, resolution),
-        egui::TextureOptions::LINEAR,
-    )
 }
 
 /// Convert a stroke ID buffer to a color-coded ColorImage.
@@ -160,20 +117,6 @@ pub fn stroke_id_to_image(ids: &[u32], resolution: u32) -> egui::ColorImage {
         })
         .collect();
     egui::ColorImage::new([resolution as usize, resolution as usize], pixels)
-}
-
-/// Convert a stroke ID buffer to a color-coded visualization texture.
-pub fn stroke_id_to_handle(
-    ctx: &egui::Context,
-    ids: &[u32],
-    resolution: u32,
-    name: &str,
-) -> egui::TextureHandle {
-    ctx.load_texture(
-        name,
-        stroke_id_to_image(ids, resolution),
-        egui::TextureOptions::LINEAR,
-    )
 }
 
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
