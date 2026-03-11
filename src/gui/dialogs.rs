@@ -151,6 +151,7 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                 let gpu_normal_pixels =
                     super::mesh_preview::convert_normal_pixels(&output.normal_map);
 
+                // Move images into GenResult, then extract via std::mem::replace (zero clones)
                 state.generated = Some(super::generation::GenResult {
                     color: output.color,
                     height: output.height,
@@ -166,32 +167,33 @@ pub fn open_project(state: &mut AppState, ctx: &eframe::egui::Context) -> bool {
                     gen_normal_strength: state.project.settings.normal_strength,
                     gen_normal_mode: state.project.settings.normal_mode,
                     gen_background_mode: state.project.settings.background_mode,
-                    display_color: display_color.clone(),
-                    display_height: display_height.clone(),
-                    display_normal: display_normal.clone(),
-                    display_stroke_id: display_stroke_id.clone(),
+                    display_color,
+                    display_height,
+                    display_normal,
+                    display_stroke_id,
                     gpu_color_pixels,
                     gpu_normal_pixels,
                 });
-                // Create texture handles so UV View displays the maps
+                let empty_img = egui::ColorImage::new([0, 0], vec![]);
+                let gen = state.generated.as_mut().expect("just assigned above");
                 state.textures.color = Some(ctx.load_texture(
                     "loaded_color",
-                    display_color,
+                    std::mem::replace(&mut gen.display_color, empty_img.clone()),
                     egui::TextureOptions::LINEAR,
                 ));
                 state.textures.height = Some(ctx.load_texture(
                     "loaded_height",
-                    display_height,
+                    std::mem::replace(&mut gen.display_height, empty_img.clone()),
                     egui::TextureOptions::LINEAR,
                 ));
                 state.textures.normal = Some(ctx.load_texture(
                     "loaded_normal",
-                    display_normal,
+                    std::mem::replace(&mut gen.display_normal, empty_img.clone()),
                     egui::TextureOptions::LINEAR,
                 ));
                 state.textures.stroke_id = Some(ctx.load_texture(
                     "loaded_stroke_id",
-                    display_stroke_id,
+                    std::mem::replace(&mut gen.display_stroke_id, empty_img),
                     egui::TextureOptions::LINEAR,
                 ));
             } else {
