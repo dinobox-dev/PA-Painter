@@ -168,6 +168,11 @@ fn load_obj(path: &Path) -> Result<LoadedMesh, MeshError> {
 
     // Convert MTL materials to MeshMaterialInfo
     if let Ok(materials) = raw_materials {
+        // Rename duplicate-named groups using material names.
+        // tobj gives all usemtl-split fragments the same model name (e.g. "unnamed_object")
+        // when the OBJ lacks explicit `g` directives, making mask lookup by name ambiguous.
+        disambiguate_groups_with_materials(&mut mesh.groups, &models, &materials);
+
         mesh.materials = materials
             .iter()
             .enumerate()
@@ -298,6 +303,47 @@ fn build_mesh_from_obj(models: &[tobj::Model]) -> Result<LoadedMesh, MeshError> 
         groups,
         materials: vec![],
     })
+}
+
+/// Rename groups that share the same name using material names from the MTL file.
+/// Only groups whose name appears more than once are renamed.
+fn disambiguate_groups_with_materials(
+    groups: &mut [MeshGroup],
+    models: &[tobj::Model],
+    materials: &[tobj::Material],
+) {
+    use std::collections::HashMap;
+
+    // Count how many groups share each name
+    let mut name_counts: HashMap<String, usize> = HashMap::new();
+    for g in groups.iter() {
+        *name_counts.entry(g.name.clone()).or_insert(0) += 1;
+    }
+
+    // Only rename groups with duplicate names
+    let mut used_names: HashMap<String, usize> = HashMap::new();
+    for (group, model) in groups.iter_mut().zip(models.iter()) {
+        if name_counts.get(&group.name).copied().unwrap_or(0) <= 1 {
+            continue;
+        }
+        // Try to use material name
+        let new_name = model
+            .mesh
+            .material_id
+            .and_then(|id| materials.get(id))
+            .map(|m| m.name.clone())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| group.name.clone());
+
+        // Ensure uniqueness by appending suffix if needed
+        let count = used_names.entry(new_name.clone()).or_insert(0);
+        group.name = if *count == 0 {
+            new_name.clone()
+        } else {
+            format!("{new_name}_{count}")
+        };
+        *used_names.get_mut(&new_name).unwrap() += 1;
+    }
 }
 
 /// Convert a tobj::Material to MeshMaterialInfo, loading texture files relative to `obj_dir`.
@@ -938,6 +984,27 @@ f 1 2 3
         let def = &mesh.materials[2];
         assert_eq!(def.name, "Default");
         assert!((def.base_color_factor[0] - 0.8_f32.powf(2.2)).abs() < 0.01);
+    }
+
+    #[test]
+    fn load_obj_usemtl_without_groups_disambiguates() {
+        let path = Path::new("tests/fixtures/usemtl_no_groups.obj");
+        let mesh = load_mesh(path).unwrap();
+
+        // tobj splits by usemtl into 2 models, both named "unnamed_object".
+        // disambiguate_groups_with_materials should rename them to material names.
+        assert_eq!(mesh.groups.len(), 2);
+        assert_eq!(mesh.groups[0].name, "Skin");
+        assert_eq!(mesh.groups[1].name, "Fabric");
+
+        // Each group should have its own triangle
+        assert_eq!(mesh.groups[0].index_count, 3);
+        assert_eq!(mesh.groups[1].index_count, 3);
+
+        // Materials should still be loaded
+        assert_eq!(mesh.materials.len(), 2);
+        assert_eq!(mesh.materials[0].name, "Skin");
+        assert_eq!(mesh.materials[1].name, "Fabric");
     }
 
     #[test]

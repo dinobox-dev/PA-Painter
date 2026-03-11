@@ -1,0 +1,21 @@
+# OBJ with usemtl but no explicit g directives
+# tobj splits by material but names all models "unnamed_object"
+mtllib usemtl_no_groups.mtl
+
+v 0.0 0.0 0.0
+v 1.0 0.0 0.0
+v 0.5 1.0 0.0
+v 2.0 0.0 0.0
+v 2.5 1.0 0.0
+
+vt 0.0 0.0
+vt 0.5 0.0
+vt 0.25 1.0
+vt 0.5 0.0
+vt 1.0 0.0
+vt 0.75 1.0
+
+usemtl Skin
+f 1/1 2/2 3/3
+usemtl Fabric
+f 2/4 4/5 5/6
