@@ -588,37 +588,121 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
 
 /// Draw the bottom-pinned section: Export buttons + thin progress bar underneath.
 pub fn show_bottom(ui: &mut egui::Ui, state: &mut AppState) {
-    ui.add_space(4.0);
-
+    ui.add_space(8.0);
     // ── Export buttons ──
     let has_result = state.generated.is_some();
     let stale = has_result && state.stale_reason().is_some();
 
     let total_width = ui.available_width();
-    let spacing = ui.spacing().item_spacing.x;
-    let gear_w = 28.0;
-    let btn_size = egui::Vec2::new(total_width - spacing - gear_w, 32.0);
+    let btn_h = 40.0;
+    let gear_w = btn_h;
+    let btn_size = egui::Vec2::new(total_width - gear_w, btn_h);
 
     ui.horizontal(|ui| {
         ui.set_width(total_width);
+        ui.set_height(btn_h);
+        ui.spacing_mut().item_spacing.x = 0.0;
 
-        let export_btn = egui::Button::new("Export").min_size(btn_size).truncate();
-        let export_resp = ui.add_enabled(has_result, export_btn);
-        if export_resp.clicked() {
+        // Disable hover expansion for buttons in this bar
+        ui.visuals_mut().widgets.hovered.expansion = 0.0;
+        ui.visuals_mut().widgets.active.expansion = 0.0;
+
+        // Shared base fill: same color for both halves based on enabled state
+        let base_fill = if has_result {
+            ui.visuals().widgets.inactive.bg_fill
+        } else {
+            // Blend toward panel background for a clearly muted look
+            let bg = ui.visuals().widgets.inactive.bg_fill;
+            let panel = ui.visuals().panel_fill;
+            egui::Color32::from_rgb(
+                ((bg.r() as u16 + panel.r() as u16) / 2) as u8,
+                ((bg.g() as u16 + panel.g() as u16) / 2) as u8,
+                ((bg.b() as u16 + panel.b() as u16) / 2) as u8,
+            )
+        };
+        let r: u8 = 3; // match egui default button rounding
+        let left_rounding = egui::Rounding {
+            nw: r,
+            ne: 0,
+            sw: r,
+            se: 0,
+        };
+        let right_rounding = egui::Rounding {
+            nw: 0,
+            ne: r,
+            sw: 0,
+            se: r,
+        };
+
+        // ── Export (left zone) ──
+        let (export_rect, export_resp) =
+            ui.allocate_exact_size(btn_size, egui::Sense::click() | egui::Sense::hover());
+        {
+            let fill = if has_result && export_resp.hovered() {
+                ui.visuals().widgets.hovered.bg_fill
+            } else {
+                base_fill
+            };
+            ui.painter().rect_filled(export_rect, left_rounding, fill);
+            let text_color = if !has_result {
+                ui.visuals().widgets.noninteractive.fg_stroke.color
+            } else if export_resp.hovered() {
+                ui.visuals().widgets.hovered.fg_stroke.color
+            } else {
+                ui.visuals().widgets.inactive.fg_stroke.color
+            };
+            ui.painter().text(
+                export_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Export",
+                egui::TextStyle::Button.resolve(ui.style()),
+                text_color,
+            );
+        }
+        if has_result && export_resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if has_result && export_resp.clicked() {
             state.pending_export = true;
         }
-
-        if stale {
+        if stale && export_resp.hovered() {
             export_resp
                 .on_hover_text("Result is outdated — parameters changed since last generation");
         }
 
-        // ⚙ gear button
-        let gear_btn = egui::Button::new("\u{2699}").min_size(egui::Vec2::new(gear_w, 32.0));
-        if ui.add(gear_btn).clicked() {
+        // ── ⚙ gear (right zone, always clickable) ──
+        let (gear_rect, gear_resp) = ui.allocate_exact_size(
+            egui::Vec2::new(gear_w, btn_h),
+            egui::Sense::click() | egui::Sense::hover(),
+        );
+        if gear_resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        {
+            let fill = if gear_resp.hovered() {
+                ui.visuals().widgets.hovered.bg_fill
+            } else {
+                base_fill
+            };
+            ui.painter().rect_filled(gear_rect, right_rounding, fill);
+            let text_color = if gear_resp.hovered() {
+                ui.visuals().widgets.hovered.fg_stroke.color
+            } else {
+                ui.visuals().widgets.inactive.fg_stroke.color
+            };
+            ui.painter().text(
+                gear_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "\u{2699}",
+                egui::TextStyle::Body.resolve(ui.style()),
+                text_color,
+            );
+        }
+        if gear_resp.clicked() {
             state.show_export_settings = !state.show_export_settings;
         }
     });
+    ui.add_space(2.0);
 }
 
 pub fn build_group_names(state: &AppState) -> Vec<String> {

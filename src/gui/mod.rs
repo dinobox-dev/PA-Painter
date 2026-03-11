@@ -979,6 +979,10 @@ impl PainterApp {
 
 impl eframe::App for PainterApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Repaint while the pointer is over the window so hover reactions are instant.
+        if ctx.input(|i| i.pointer.has_pointer()) {
+            ctx.request_repaint();
+        }
         self.init_lazy(ctx);
         self.handle_keyboard(ctx);
 
@@ -1403,9 +1407,12 @@ impl PainterApp {
             .min_width(220.0)
             .max_width(400.0)
             .show(ctx, |ui: &mut egui::Ui| {
-                egui::TopBottomPanel::bottom("left_bottom").show_inside(ui, |ui: &mut egui::Ui| {
-                    sidebar::show_bottom(ui, &mut self.state);
-                });
+                egui::TopBottomPanel::bottom("left_bottom")
+                    .frame(egui::Frame::none().inner_margin(0.0))
+                    .show_separator_line(false)
+                    .show_inside(ui, |ui: &mut egui::Ui| {
+                        sidebar::show_bottom(ui, &mut self.state);
+                    });
                 sidebar::show_top(ui, &mut self.state);
                 sidebar::show_layers_header(ui, &mut self.state);
                 egui::ScrollArea::vertical().show(ui, |ui: &mut egui::Ui| {
