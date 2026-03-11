@@ -23,6 +23,7 @@ use super::undo::{UndoHistory, UndoSnapshot};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnsavedAction {
     Open,
+    OpenExample,
     New,
     Quit,
 }
@@ -452,6 +453,7 @@ pub struct AppState {
 
     // ── Deferred Actions (set by child widgets, consumed by PainterApp) ──
     pub pending_open: bool,
+    pub pending_open_example: bool,
     pub pending_new: bool,
     pub pending_save: bool,
     pub pending_export: bool,
@@ -540,6 +542,7 @@ impl AppState {
             generated: None,
             path_worker: preview::PathOverlayWorker::default(),
             pending_open: false,
+            pending_open_example: false,
             pending_new: false,
             pending_save: false,
             pending_export: false,

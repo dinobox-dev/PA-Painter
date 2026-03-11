@@ -96,6 +96,66 @@ fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool {
     changed
 }
 
+// ── Embedded Example ───────────────────────────────────────────────
+
+const EXAMPLE_PAPR: &[u8] = include_bytes!("../../examples/PAPainterLogo.papr");
+
+/// Load the embedded example project.
+/// Returns true if successfully loaded.
+pub fn open_example(state: &mut AppState) -> bool {
+    // Write to a temp file so load_project can read it as a normal .papr
+    let tmp = std::env::temp_dir().join("pa_painter_example.papr");
+    if let Err(e) = std::fs::write(&tmp, EXAMPLE_PAPR) {
+        state.status_message = format!("Failed to write example: {e}");
+        return false;
+    }
+
+    match load_project(&tmp) {
+        Ok(result) => {
+            state.status_message = "Loaded example project".to_string();
+
+            if let Some(mesh) = result.mesh {
+                apply_loaded_mesh(state, mesh);
+            }
+
+            let editor_state_json = result.editor_state_json.clone();
+
+            if !result.project.layers.is_empty() {
+                state.selected_layer = Some(0);
+            }
+
+            state.project = result.project;
+            state.project_path = None; // no save path — force Save As
+            state.dirty = false;
+            state.generation_snapshot = None;
+            state.generation.discard();
+            state.textures.color = None;
+            state.textures.height = None;
+            state.textures.normal = None;
+            state.textures.stroke_id = None;
+            state.path_overlay.clear();
+            state.undo.clear();
+
+            if let Some(json) = editor_state_json {
+                if let Ok(es) = serde_json::from_str::<super::state::EditorState>(&json) {
+                    state.apply_editor_state(es);
+                }
+            }
+
+            state.generated = None;
+            state.auto_gen_suppressed = false;
+
+            // Clean up temp file
+            let _ = std::fs::remove_file(&tmp);
+            true
+        }
+        Err(e) => {
+            state.status_message = format!("Failed to load example: {e:?}");
+            false
+        }
+    }
+}
+
 // ── Project Operations ─────────────────────────────────────────────
 
 /// Open a file dialog and load a .papr project.

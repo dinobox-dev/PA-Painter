@@ -4,6 +4,7 @@
 
 # Project files
 *.papr
+!examples/*.papr
 *.obj
 !tests/fixtures/*.obj
 output/

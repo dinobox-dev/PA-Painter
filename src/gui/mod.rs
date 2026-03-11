@@ -1153,6 +1153,14 @@ impl PainterApp {
                 self.do_open_project(ctx);
             }
         }
+        if self.state.pending_open_example {
+            self.state.pending_open_example = false;
+            if self.state.dirty {
+                self.state.unsaved_confirm = Some(UnsavedAction::OpenExample);
+            } else {
+                self.do_open_example();
+            }
+        }
         if self.state.pending_save {
             self.state.pending_save = false;
             dialogs::save_project_action(&mut self.state);
@@ -1425,6 +1433,10 @@ impl PainterApp {
                     if ui.button("Open Project...").clicked() {
                         ui.close();
                         self.state.pending_open = true;
+                    }
+                    if ui.button("Open Example").clicked() {
+                        ui.close();
+                        self.state.pending_open_example = true;
                     }
                     if ui.button("Save  ⌘S").clicked() {
                         ui.close();
@@ -1699,6 +1711,7 @@ impl PainterApp {
                 let action = self.state.unsaved_confirm.take();
                 match action {
                     Some(UnsavedAction::Open) => self.do_open_project(ctx),
+                    Some(UnsavedAction::OpenExample) => self.do_open_example(),
                     Some(UnsavedAction::New) => self.do_new_project(ctx),
                     Some(UnsavedAction::Quit) => {
                         self.state.dirty = false;
@@ -1795,6 +1808,15 @@ impl PainterApp {
     /// Execute Open Project (file dialog + load).
     fn do_open_project(&mut self, ctx: &egui::Context) {
         dialogs::open_project(&mut self.state, ctx);
+        self.state.cached_mesh_normals = None;
+        self.state.path_worker.discard();
+        self.state.group_dim_cache.invalidate();
+        self.init_mesh_preview_no_fit();
+    }
+
+    /// Execute Open Example (embedded demo project).
+    fn do_open_example(&mut self) {
+        dialogs::open_example(&mut self.state);
         self.state.cached_mesh_normals = None;
         self.state.path_worker.discard();
         self.state.group_dim_cache.invalidate();
