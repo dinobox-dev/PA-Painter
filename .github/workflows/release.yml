@@ -11,8 +11,25 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify:
+    name: Verify tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check version consistency
+        run: |
+          TAG=${GITHUB_REF#refs/tags/v}
+          CARGO=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "$TAG" != "$CARGO" ]; then
+            echo "::error::Tag v${TAG} does not match Cargo.toml version ${CARGO}"
+            exit 1
+          fi
+          echo "Version match confirmed: v${CARGO}"
+
   build:
     name: Build ${{ matrix.name }}
+    needs: verify
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -141,4 +158,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref, '-') }}
           files: artifacts/**/*
