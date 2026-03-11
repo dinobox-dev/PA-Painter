@@ -46,5 +46,15 @@ egui-phosphor = { version = "0.11.0", default-features = false, features = ["fil
 log = "0.4"
 env_logger = "0.11"
 
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [dev-dependencies]
 smallvec = "1"
+
+[package.metadata.bundle.bin.pa-painter-gui]
+name = "PA Painter"
+identifier = "com.dinobox.pa-painter"
+icon = ["assets/icon.icns", "assets/icon.ico", "assets/icon_default.png"]
+copyright = "Copyright © 2026 DiNo Box Inc."
+category = "public.app-category.graphics-design"
