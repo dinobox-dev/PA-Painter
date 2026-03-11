@@ -1142,14 +1142,14 @@ impl PainterApp {
                 if let Some(ref rs) = self.render_state {
                     if self.state.mesh_preview.gpu_ready {
                         if let Some(ref gen) = self.state.generated {
-                            mesh_preview::upload_color_texture(
+                            mesh_preview::upload_color_texture_raw(
                                 rs,
-                                &gen.color,
+                                &gen.gpu_color_pixels,
                                 gen.resolution as usize,
                             );
-                            mesh_preview::upload_normal_texture(
+                            mesh_preview::upload_normal_texture_raw(
                                 rs,
-                                &gen.normal_map,
+                                &gen.gpu_normal_pixels,
                                 gen.resolution as usize,
                             );
                             let sc = mesh_preview::upload_time_texture(
