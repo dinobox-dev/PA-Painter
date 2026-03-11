@@ -577,7 +577,15 @@ impl PainterApp {
     }
 
     /// Initialize or update 3D preview GPU resources after mesh load.
+    fn init_mesh_preview_no_fit(&mut self) {
+        self.init_mesh_preview_inner(false);
+    }
+
     fn init_mesh_preview(&mut self) {
+        self.init_mesh_preview_inner(true);
+    }
+
+    fn init_mesh_preview_inner(&mut self, fit_camera: bool) {
         let Some(ref rs) = self.render_state else {
             return;
         };
@@ -591,7 +599,9 @@ impl PainterApp {
         } else {
             mesh_preview::upload_mesh(rs, mesh);
         }
-        self.state.mesh_preview.fit_to_mesh(mesh);
+        if fit_camera {
+            self.state.mesh_preview.fit_to_mesh(mesh);
+        }
 
         // Sync GPU textures with current generation state
         if self.state.mesh_preview.show_result() {
@@ -1788,7 +1798,7 @@ impl PainterApp {
         self.state.cached_mesh_normals = None;
         self.state.path_worker.discard();
         self.state.group_dim_cache.invalidate();
-        self.init_mesh_preview();
+        self.init_mesh_preview_no_fit();
     }
 
     /// Execute New Project (file dialog + mesh load).
