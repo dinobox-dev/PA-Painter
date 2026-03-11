@@ -1258,7 +1258,7 @@ fn show_material_combo(
 }
 
 /// File label + action icons on the same line.
-/// Has file: [filename…] [swap] [x]  —  No file: [folder_open]
+/// Has file: \[filename…\] \[swap\] \[x\]  —  No file: \[folder_open\]
 /// Solid color picker that fills remaining width.
 fn show_solid_color_fill(ui: &mut egui::Ui, rgb: &mut [f32; 3]) {
     let w = ui.available_width();
