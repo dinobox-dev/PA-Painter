@@ -52,6 +52,7 @@ winresource = "0.1"
 
 [dev-dependencies]
 smallvec = "1"
+tempfile = "3"
 
 [package.metadata.bundle.bin.pa-painter-gui]
 name = "PA Painter"
