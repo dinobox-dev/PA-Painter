@@ -352,14 +352,12 @@ pub fn render_direction_field_overlay(
 
     // For each grid cell, draw an arrow
     let offset = arrow_spacing / 2;
-    let mut cy = offset;
-    while cy < resolution {
-        let mut cx = offset;
-        while cx < resolution {
+    let spacing = arrow_spacing as usize;
+    for cy in (offset as usize..res).step_by(spacing) {
+        for cx in (offset as usize..res).step_by(spacing) {
             let uv = Vec2::new((cx as f32 + 0.5) * inv_res, (cy as f32 + 0.5) * inv_res);
             let dir = direction_at(uv, guides);
             if dir.length_squared() < 1e-6 {
-                cx += arrow_spacing;
                 continue;
             }
 
@@ -377,10 +375,7 @@ pub fn render_direction_field_overlay(
             let right = head_base - perp * head_w;
             draw_line_aa(&mut pixels, res, tip, left, line_w, [255, 255, 255, 220]);
             draw_line_aa(&mut pixels, res, tip, right, line_w, [255, 255, 255, 220]);
-
-            cx += arrow_spacing;
         }
-        cy += arrow_spacing;
     }
 
     pixels
