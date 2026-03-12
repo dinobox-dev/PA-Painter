@@ -907,11 +907,12 @@ mod tests {
 
         // Check coverage within interior [0.1, 0.9] to avoid UV edge effects
         let margin = (0.1 * resolution as f32) as u32;
-        let inner = margin..(resolution - margin);
+        let inner_start = margin;
+        let inner_end = resolution - margin;
         let mut total = 0u32;
         let mut hit = 0u32;
-        for py in inner.clone() {
-            for px in inner.clone() {
+        for py in inner_start..inner_end {
+            for px in inner_start..inner_end {
                 total += 1;
                 if covered[(py * resolution + px) as usize] {
                     hit += 1;
