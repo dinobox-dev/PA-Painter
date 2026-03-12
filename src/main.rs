@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process;
 
+use clap::Parser;
 use log::{error, info};
 
 use pa_painter::asset_io::load_mesh;
@@ -17,83 +18,50 @@ use pa_painter::stretch_map::{compute_stretch_map, StretchMap};
 use pa_painter::types::NormalMode;
 use pa_painter::uv_mask::UvMask;
 
-fn usage() -> ! {
-    eprintln!("Usage: pa-painter <project.papr> [options]");
-    eprintln!();
-    eprintln!("Options:");
-    eprintln!("  -o, --output <dir>       Output directory (default: ./output)");
-    eprintln!("  -r, --resolution <px>    Override output resolution");
-    eprintln!("  -f, --format <fmt>       Export format: png (default) or exr");
-    eprintln!("      --per-layer          Export each layer as separate textures");
-    eprintln!("  -h, --help               Show this help");
-    process::exit(1);
+#[derive(Clone, clap::ValueEnum)]
+enum CliFormat {
+    Png,
+    Exr,
+}
+
+#[derive(Parser)]
+#[command(
+    name = "pa-painter",
+    about = "Procedural paint stroke generator for 3D assets"
+)]
+struct Cli {
+    /// Project file (.papr)
+    project: PathBuf,
+
+    /// Output directory
+    #[arg(short, long, default_value = "output")]
+    output: PathBuf,
+
+    /// Override output resolution (1–16384)
+    #[arg(short, long, value_parser = clap::value_parser!(u32).range(1..=16384))]
+    resolution: Option<u32>,
+
+    /// Export format
+    #[arg(short, long, default_value = "png")]
+    format: CliFormat,
+
+    /// Export each layer as separate textures
+    #[arg(long)]
+    per_layer: bool,
 }
 
 fn main() {
     env_logger::init();
 
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
-        usage();
-    }
-
-    let project_path = PathBuf::from(&args[0]);
-    let mut output_dir = PathBuf::from("output");
-    let mut resolution_override: Option<u32> = None;
-    let mut format = ExportFormat::Png;
-    let mut per_layer = false;
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "-o" | "--output" => {
-                i += 1;
-                output_dir = PathBuf::from(args.get(i).unwrap_or_else(|| {
-                    eprintln!("Error: --output requires a directory path");
-                    process::exit(1);
-                }));
-            }
-            "-r" | "--resolution" => {
-                i += 1;
-                let val = args.get(i).unwrap_or_else(|| {
-                    eprintln!("Error: --resolution requires a number");
-                    process::exit(1);
-                });
-                let parsed: u32 = val.parse().unwrap_or_else(|_| {
-                    eprintln!("Error: invalid resolution '{val}'");
-                    process::exit(1);
-                });
-                if parsed == 0 || parsed > 16384 {
-                    eprintln!("Error: resolution must be between 1 and 16384, got {parsed}");
-                    process::exit(1);
-                }
-                resolution_override = Some(parsed);
-            }
-            "-f" | "--format" => {
-                i += 1;
-                let val = args.get(i).unwrap_or_else(|| {
-                    eprintln!("Error: --format requires png or exr");
-                    process::exit(1);
-                });
-                format = match val.as_str() {
-                    "png" => ExportFormat::Png,
-                    "exr" => ExportFormat::Exr,
-                    other => {
-                        eprintln!("Error: unknown format '{other}' (use png or exr)");
-                        process::exit(1);
-                    }
-                };
-            }
-            "--per-layer" => {
-                per_layer = true;
-            }
-            other => {
-                eprintln!("Error: unknown option '{other}'");
-                usage();
-            }
-        }
-        i += 1;
-    }
+    let cli = Cli::parse();
+    let project_path = cli.project;
+    let output_dir = cli.output;
+    let format = match cli.format {
+        CliFormat::Png => ExportFormat::Png,
+        CliFormat::Exr => ExportFormat::Exr,
+    };
+    let resolution_override = cli.resolution;
+    let per_layer = cli.per_layer;
 
     // Load project
     let load_result = load_project(&project_path).unwrap_or_else(|e| {
