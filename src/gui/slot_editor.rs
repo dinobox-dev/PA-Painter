@@ -554,13 +554,15 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
 
     let enabled = is_custom && !save_open;
     let btn_resp = small_icon_button(ui, FLOPPY_DISK, 14.0, 20.0, enabled);
+    let btn_clicked = btn_resp.clicked();
+    let btn_rect = btn_resp.rect;
     if enabled {
-        btn_resp.clone().on_hover_text("Save as Preset");
+        btn_resp.on_hover_text("Save as Preset");
     } else {
-        btn_resp.clone().on_hover_text("Matches existing preset");
+        btn_resp.on_hover_text("Matches existing preset");
     }
 
-    let just_opened = enabled && btn_resp.clicked();
+    let just_opened = enabled && btn_clicked;
     if just_opened {
         save_open = true;
         ui.data_mut(|d| d.insert_temp::<String>(save_name_id, String::new()));
@@ -581,10 +583,7 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
 
         let area_resp = egui::Area::new(egui::Id::new("save_preset_popup"))
             .order(egui::Order::Foreground)
-            .fixed_pos(egui::Pos2::new(
-                btn_resp.rect.left(),
-                btn_resp.rect.bottom() + 4.0,
-            ))
+            .fixed_pos(egui::Pos2::new(btn_rect.left(), btn_rect.bottom() + 4.0))
             .show(ui.ctx(), |ui: &mut egui::Ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui: &mut egui::Ui| {
                     use egui_phosphor::fill::{CHECK, X};
@@ -605,10 +604,11 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
 
                         // Save (check) icon
                         let save_resp = small_icon_button(ui, CHECK, 14.0, btn_side, can_save);
+                        let save_clicked = save_resp.clicked();
                         if can_save {
-                            save_resp.clone().on_hover_text("Save (Enter)");
+                            save_resp.on_hover_text("Save (Enter)");
                         }
-                        if (save_resp.clicked() || enter) && can_save {
+                        if (save_clicked || enter) && can_save {
                             let preset = PaintPreset {
                                 name: name.trim().to_string(),
                                 values: state.project.layers[layer_idx].paint.clone(),
@@ -628,8 +628,9 @@ fn show_save_preset_icon(ui: &mut egui::Ui, state: &mut AppState, layer_idx: usi
 
                         // Cancel (X) icon
                         let cancel_resp = small_icon_button(ui, X, 14.0, btn_side, true);
-                        cancel_resp.clone().on_hover_text("Cancel (Esc)");
-                        if cancel_resp.clicked() {
+                        let cancel_clicked = cancel_resp.clicked();
+                        cancel_resp.on_hover_text("Cancel (Esc)");
+                        if cancel_clicked {
                             close = true;
                         }
                     });
