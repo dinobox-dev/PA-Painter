@@ -340,16 +340,15 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
         return None;
     }
 
-    // No base color texture for path generation (per-layer base in Commit 3).
     let paint_layer = input.layer.to_paint_layer();
-    let paths = path_placement::generate_paths_cancellable(
+    let paths = path_placement::generate_paths(
         &paint_layer,
         0,
-        None, // color_ref: per-layer base will be added in Commit 3
-        normal_ref,
-        None,
-        None,
-        Some(cancel),
+        &path_placement::PathContext {
+            normal_data: normal_ref,
+            cancel: Some(cancel),
+            ..Default::default()
+        },
     );
 
     if cancel.load(Ordering::Relaxed) {

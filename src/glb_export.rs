@@ -942,7 +942,7 @@ mod tests {
         use crate::compositing::composite_all_with_paths;
         use crate::object_normal::compute_mesh_normal_data;
         use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
-        use crate::path_placement::generate_paths;
+        use crate::path_placement::{generate_paths, PathContext};
         use crate::types::{
             BackgroundMode, Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings,
             PaintLayer, StrokeParams,
@@ -977,7 +977,14 @@ mod tests {
         };
 
         // Generate paths with overscan + Poisson + 3 passes
-        let paths = generate_paths(&layer, 0, None, Some(&nd), None, None);
+        let paths = generate_paths(
+            &layer,
+            0,
+            &PathContext {
+                normal_data: Some(&nd),
+                ..Default::default()
+            },
+        );
         eprintln!("Overscan+Poisson: {} paths generated", paths.len());
 
         let cached_paths = vec![paths];

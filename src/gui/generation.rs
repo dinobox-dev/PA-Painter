@@ -16,7 +16,7 @@ use pa_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use pa_painter::output::{
     blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
 };
-use pa_painter::path_placement::generate_paths_cancellable;
+use pa_painter::path_placement::{generate_paths, PathContext};
 use pa_painter::stretch_map::{compute_stretch_map, StretchMap};
 use pa_painter::stroke_color::ColorTextureRef;
 use pa_painter::types::{
@@ -378,14 +378,16 @@ fn run_pipeline(
                 height: base.tex_height,
             });
             let mask = mask_refs.get(layer_index).and_then(|m| *m);
-            let result = generate_paths_cancellable(
+            let result = generate_paths(
                 layer,
                 layer_index as u32,
-                tex_ref.as_ref(),
-                normal_data,
-                mask,
-                stretch_ref,
-                Some(cancel),
+                &PathContext {
+                    color_tex: tex_ref.as_ref(),
+                    normal_data,
+                    mask,
+                    stretch_map: stretch_ref,
+                    cancel: Some(cancel),
+                },
             );
             let done = completed_paths.fetch_add(1, Ordering::Relaxed) + 1;
             set_progress(progress, p_paths + path_span * done as f32 / n_path_miss);

@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use crate::brush_profile::{generate_brush_profile, jitter_brush_profile};
 use crate::math::{lerp, lerp_color, perpendicular, smoothstep};
 use crate::object_normal::{try_sample_object_normal, MeshNormalData};
-use crate::path_placement::generate_paths;
+use crate::path_placement::{generate_paths, PathContext};
 use crate::rng::SeededRng;
 use crate::stretch_map::StretchMap;
 use crate::stroke_color::ColorTextureRef;
@@ -569,10 +569,13 @@ pub fn generate_all_paths(
             generate_paths(
                 layer,
                 layer_index as u32,
-                tex_ref.as_ref(),
-                normal_data,
-                mask,
-                stretch_map,
+                &PathContext {
+                    color_tex: tex_ref.as_ref(),
+                    normal_data,
+                    mask,
+                    stretch_map,
+                    ..Default::default()
+                },
             )
         })
         .collect();
@@ -687,10 +690,13 @@ pub fn composite_all_with_paths(
                 generate_paths(
                     layer,
                     layer_index as u32,
-                    tex_ref.as_ref(),
-                    normal_data,
-                    mask,
-                    stretch_map,
+                    &PathContext {
+                        color_tex: tex_ref.as_ref(),
+                        normal_data,
+                        mask,
+                        stretch_map,
+                        ..Default::default()
+                    },
                 )
             })
             .collect::<Vec<_>>();
@@ -809,10 +815,13 @@ pub fn composite_layer(
         paths_owned = generate_paths(
             layer,
             layer_index,
-            tex_ref.as_ref(),
-            normal_data,
-            mask,
-            stretch_map,
+            &PathContext {
+                color_tex: tex_ref.as_ref(),
+                normal_data,
+                mask,
+                stretch_map,
+                ..Default::default()
+            },
         );
         &paths_owned
     };

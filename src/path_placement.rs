@@ -26,6 +26,19 @@ use crate::uv_mask::UvMask;
 const STRETCH_CLAMP_MIN: f32 = 0.5;
 const STRETCH_CLAMP_MAX: f32 = 2.0;
 
+/// Optional context for path generation.
+///
+/// Groups mesh-dependent data and a cancellation token that would otherwise
+/// bloat the `generate_paths` parameter list.  All fields default to `None`.
+#[derive(Default)]
+pub struct PathContext<'a> {
+    pub color_tex: Option<&'a ColorTextureRef<'a>>,
+    pub normal_data: Option<&'a MeshNormalData>,
+    pub mask: Option<&'a UvMask>,
+    pub stretch_map: Option<&'a StretchMap>,
+    pub cancel: Option<&'a AtomicBool>,
+}
+
 /// Check cancellation token, returning early if set.
 #[inline]
 fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {
@@ -342,36 +355,20 @@ pub fn filter_overlapping_paths(
 ///
 /// Returns paths in paint order (sorted by seed y-coordinate, top to bottom).
 /// Each path is assigned a globally unique stroke ID: `(layer_index << 16) | index`.
+///
+/// Optional mesh data and a cancellation token are passed via [`PathContext`].
+/// When the cancellation token is set, the function returns an empty Vec as
+/// soon as possible.
 pub fn generate_paths(
     layer: &PaintLayer,
     layer_index: u32,
-    color_tex: Option<&ColorTextureRef<'_>>,
-    normal_data: Option<&MeshNormalData>,
-    mask: Option<&UvMask>,
-    stretch_map: Option<&StretchMap>,
+    ctx: &PathContext<'_>,
 ) -> Vec<StrokePath> {
-    generate_paths_cancellable(
-        layer,
-        layer_index,
-        color_tex,
-        normal_data,
-        mask,
-        stretch_map,
-        None,
-    )
-}
-
-/// Like [`generate_paths`] but accepts an optional cancellation token.
-/// When the token is set, the function returns an empty Vec as soon as possible.
-pub fn generate_paths_cancellable(
-    layer: &PaintLayer,
-    layer_index: u32,
-    color_tex: Option<&ColorTextureRef<'_>>,
-    normal_data: Option<&MeshNormalData>,
-    mask: Option<&UvMask>,
-    stretch_map: Option<&StretchMap>,
-    cancel: Option<&AtomicBool>,
-) -> Vec<StrokePath> {
+    let color_tex = ctx.color_tex;
+    let normal_data = ctx.normal_data;
+    let mask = ctx.mask;
+    let stretch_map = ctx.stretch_map;
+    let cancel = ctx.cancel;
     // Path geometry is resolution-independent in UV space: seed density and
     // curve shape are identical at any output resolution.  Tracing at
     // BASE_RESOLUTION avoids O(R) point bloat while the compositing stage
@@ -833,8 +830,8 @@ mod tests {
     #[test]
     fn generate_paths_determinism() {
         let layer = make_layer();
-        let paths1 = generate_paths(&layer, 0, None, None, None, None);
-        let paths2 = generate_paths(&layer, 0, None, None, None, None);
+        let paths1 = generate_paths(&layer, 0, &PathContext::default());
+        let paths2 = generate_paths(&layer, 0, &PathContext::default());
 
         assert_eq!(paths1.len(), paths2.len());
         for (a, b) in paths1.iter().zip(paths2.iter()) {
@@ -851,7 +848,7 @@ mod tests {
     #[test]
     fn generate_paths_sorted_by_y() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, None, None, None, None);
+        let paths = generate_paths(&layer, 0, &PathContext::default());
 
         assert!(!paths.is_empty(), "should generate some paths");
         for i in 1..paths.len() {
@@ -869,7 +866,7 @@ mod tests {
     #[test]
     fn generate_paths_unique_stroke_ids() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, None, None, None, None);
+        let paths = generate_paths(&layer, 0, &PathContext::default());
 
         let mut ids: Vec<u32> = paths.iter().map(|p| p.stroke_id).collect();
         ids.sort();
@@ -881,7 +878,7 @@ mod tests {
     fn area_coverage_90_percent() {
         let layer = make_layer();
         let resolution = 512u32;
-        let paths = generate_paths(&layer, 0, None, None, None, None);
+        let paths = generate_paths(&layer, 0, &PathContext::default());
 
         let mut covered = vec![false; (resolution * resolution) as usize];
         let brush_radius_uv = layer.params.brush_width / resolution as f32 / 2.0;
@@ -931,7 +928,7 @@ mod tests {
     #[test]
     fn paths_stay_within_uv() {
         let layer = make_layer();
-        let paths = generate_paths(&layer, 0, None, None, None, None);
+        let paths = generate_paths(&layer, 0, &PathContext::default());
 
         for path in &paths {
             for point in &path.points {
@@ -1101,7 +1098,7 @@ mod tests {
     fn visual_horizontal_strokes() {
         let layer = make_layer();
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, None, None, None, None);
+        let paths = generate_paths(&layer, 0, &PathContext::default());
 
         eprintln!("visual_horizontal_strokes: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "horizontal_strokes.png");
@@ -1148,7 +1145,7 @@ mod tests {
             ],
         };
         let resolution = 512;
-        let paths = generate_paths(&layer, 0, None, None, None, None);
+        let paths = generate_paths(&layer, 0, &PathContext::default());
 
         eprintln!("visual_spiral_guides: {} paths generated", paths.len());
         draw_paths_to_png(&paths, resolution, "spiral_guides.png");
@@ -1249,8 +1246,12 @@ mod tests {
         let mut layer_on = layer_off.clone();
         layer_on.params.color_break_threshold = Some(0.08);
 
-        let paths_off = generate_paths(&layer_off, 0, Some(&tex_ref), None, None, None);
-        let paths_on = generate_paths(&layer_on, 0, Some(&tex_ref), None, None, None);
+        let tex_ctx = PathContext {
+            color_tex: Some(&tex_ref),
+            ..Default::default()
+        };
+        let paths_off = generate_paths(&layer_off, 0, &tex_ctx);
+        let paths_on = generate_paths(&layer_on, 0, &tex_ctx);
 
         eprintln!(
             "color_break OFF: {} paths, ON: {} paths",
@@ -2060,8 +2061,12 @@ mod tests {
         let mut layer_on = layer_off.clone();
         layer_on.params.normal_break_threshold = Some(0.5);
 
-        let paths_off = generate_paths(&layer_off, 0, None, Some(&nd), None, None);
-        let paths_on = generate_paths(&layer_on, 0, None, Some(&nd), None, None);
+        let nd_ctx = PathContext {
+            normal_data: Some(&nd),
+            ..Default::default()
+        };
+        let paths_off = generate_paths(&layer_off, 0, &nd_ctx);
+        let paths_on = generate_paths(&layer_on, 0, &nd_ctx);
 
         eprintln!(
             "normal_break OFF: {} paths, ON: {} paths",
@@ -2153,7 +2158,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_base = generate_paths(&layer_base, 0, None, None, None, None);
+        let paths_base = generate_paths(&layer_base, 0, &PathContext::default());
 
         // ── 2. Method A: tight spacing ──
         let layer_a = PaintLayer {
@@ -2165,7 +2170,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_a = generate_paths(&layer_a, 0, None, None, None, None);
+        let paths_a = generate_paths(&layer_a, 0, &PathContext::default());
 
         // ── 3. Method A+B: tight spacing + relaxed overlap filter ──
         let layer_ab = PaintLayer {
@@ -2179,7 +2184,7 @@ mod tests {
             },
             guides: guides.clone(),
         };
-        let paths_ab = generate_paths(&layer_ab, 0, None, None, None, None);
+        let paths_ab = generate_paths(&layer_ab, 0, &PathContext::default());
 
         eprintln!("=== Density Comparison ===");
         eprintln!("  Baseline:      {} paths", paths_base.len());
