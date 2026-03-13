@@ -1085,7 +1085,7 @@ fn show_color_source_controls(ui: &mut egui::Ui, state: &mut AppState, layer_idx
             state.project.layers[layer_idx].base_color,
             TextureSource::Solid(_) | TextureSource::None
         ) {
-            state.project.layers[layer_idx].base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
+            state.project.layers[layer_idx].base_color = TextureSource::Solid([1.0, 1.0, 1.0]);
         }
 
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -1103,7 +1103,7 @@ fn show_color_source_controls(ui: &mut egui::Ui, state: &mut AppState, layer_idx
                 show_solid_color_fill(ui, rgb);
             }
             TextureSource::None => {
-                state.project.layers[layer_idx].base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
+                state.project.layers[layer_idx].base_color = TextureSource::Solid([1.0, 1.0, 1.0]);
             }
         }
     });

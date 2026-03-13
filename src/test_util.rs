@@ -33,7 +33,7 @@ pub fn make_project_layer_with_order(order: i32) -> Layer {
             influence: 1.5,
             strength: 1.0,
         }],
-        base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+        base_color: TextureSource::Solid([1.0, 1.0, 1.0]),
         base_normal: TextureSource::None,
         dry: 1.0,
         seed: order as u32,

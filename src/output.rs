@@ -1116,7 +1116,7 @@ mod tests {
         let maps = composite_all(
             &[layer.clone()],
             res,
-            &[LayerBaseColor::solid(Color::rgb(0.5, 0.5, 0.5))],
+            &[LayerBaseColor::solid(Color::WHITE)],
             &settings,
             None,
             &[],
@@ -1158,7 +1158,7 @@ mod tests {
         let maps = composite_all(
             &[layer.clone()],
             res,
-            &[LayerBaseColor::solid(Color::rgb(0.5, 0.5, 0.5))],
+            &[LayerBaseColor::solid(Color::WHITE)],
             &settings,
             None,
             &[],

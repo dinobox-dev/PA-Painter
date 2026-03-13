@@ -636,7 +636,7 @@ fn default_visible() -> bool {
 }
 
 fn default_base_color_source() -> TextureSource {
-    TextureSource::Solid([0.5, 0.5, 0.5])
+    TextureSource::Solid([1.0, 1.0, 1.0])
 }
 
 /// A paint layer binding a mesh group to paint settings and guides.

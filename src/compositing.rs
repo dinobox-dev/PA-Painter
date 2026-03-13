@@ -183,7 +183,7 @@ pub fn resolve_base_color(
     use crate::types::{checkerboard_warning_texture, pixels_to_colors};
 
     match source {
-        TextureSource::None => LayerBaseColor::solid(Color::rgb(0.5, 0.5, 0.5)),
+        TextureSource::None => LayerBaseColor::solid(Color::WHITE),
         TextureSource::Solid(rgb) => LayerBaseColor::solid(Color::rgb(rgb[0], rgb[1], rgb[2])),
         TextureSource::MeshMaterial(idx) => {
             if let Some(mat) = materials.get(*idx) {
@@ -200,16 +200,16 @@ pub fn resolve_base_color(
                     LayerBaseColor::solid(Color::rgb(f[0], f[1], f[2]))
                 }
             } else {
-                LayerBaseColor::solid(Color::rgb(0.5, 0.5, 0.5))
+                LayerBaseColor::solid(Color::WHITE)
             }
         }
         TextureSource::File(Some(tex)) => {
             if tex.pixels.is_empty() {
-                LayerBaseColor::solid(Color::rgb(0.5, 0.5, 0.5))
+                LayerBaseColor::solid(Color::WHITE)
             } else {
                 let colors = pixels_to_colors(&tex.pixels);
                 LayerBaseColor {
-                    solid_color: Color::rgb(0.5, 0.5, 0.5),
+                    solid_color: Color::WHITE,
                     texture: Some(colors),
                     tex_width: tex.width,
                     tex_height: tex.height,
@@ -559,7 +559,7 @@ pub fn generate_all_paths(
             let base = base_colors
                 .get(layer_index)
                 .map(|bc| bc.as_source())
-                .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+                .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
             let tex_ref = base.texture.map(|data| ColorTextureRef {
                 data,
                 width: base.tex_width,
@@ -645,8 +645,8 @@ pub fn composite_all_with_paths(
         resolution,
         cached_paths.is_some()
     );
-    // Initialize with neutral gray; per-layer base colors are painted into regions below.
-    let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
+    // Initialize with white; per-layer base colors are painted into regions below.
+    let default_base = BaseColorSource::solid(Color::WHITE);
     let mut global = GlobalMaps::new(
         resolution,
         &default_base,
@@ -680,7 +680,7 @@ pub fn composite_all_with_paths(
                 let base = base_colors
                     .get(layer_index)
                     .map(|bc| bc.as_source())
-                    .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+                    .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
                 let tex_ref = base.texture.map(|data| ColorTextureRef {
                     data,
                     width: base.tex_width,
@@ -709,7 +709,7 @@ pub fn composite_all_with_paths(
         let base = base_colors
             .get(layer_index)
             .map(|bc| bc.as_source())
-            .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+            .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
         let mask = masks.get(layer_index).and_then(|m| *m);
         composite_layer(
             layer,

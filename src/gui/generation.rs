@@ -371,7 +371,7 @@ fn run_pipeline(
                 .layer_base_colors
                 .get(layer_index)
                 .map(|bc| bc.as_source())
-                .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+                .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
             let tex_ref = base.texture.map(|data| ColorTextureRef {
                 data,
                 width: base.tex_width,
@@ -437,7 +437,7 @@ fn run_pipeline(
                     .layer_base_colors
                     .get(layer_index)
                     .map(|bc| bc.as_source())
-                    .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+                    .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
                 let mask = mask_refs.get(layer_index).and_then(|m| *m);
                 result_maps.push(Arc::new(render_layer(
                     layer,
@@ -457,7 +457,7 @@ fn run_pipeline(
                     .layer_base_colors
                     .get(layer_index)
                     .map(|bc| bc.as_source())
-                    .unwrap_or_else(|| BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5)));
+                    .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
                 let mask = mask_refs.get(layer_index).and_then(|m| *m);
                 let paths_arc = Arc::new(std::mem::take(&mut fresh_paths[fresh_path_idx]));
                 fresh_path_idx += 1;
@@ -495,7 +495,7 @@ fn run_pipeline(
         .collect();
 
     // 4b: Initialize GlobalMaps with base colors and merge layers
-    let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
+    let default_base = BaseColorSource::solid(Color::WHITE);
     let mut global = GlobalMaps::new(
         input.resolution,
         &default_base,
@@ -776,7 +776,7 @@ fn run_remerge(
     let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 
     // Initialize GlobalMaps
-    let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
+    let default_base = BaseColorSource::solid(Color::WHITE);
     let mut global = GlobalMaps::new(
         resolution,
         &default_base,

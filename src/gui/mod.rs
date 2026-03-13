@@ -444,7 +444,7 @@ impl PainterApp {
         let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 
         // Fill base colors
-        let default_base = BaseColorSource::solid(Color::rgb(0.5, 0.5, 0.5));
+        let default_base = BaseColorSource::solid(Color::WHITE);
         let mut global = GlobalMaps::new(
             resolution,
             &default_base,

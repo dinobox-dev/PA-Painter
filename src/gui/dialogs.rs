@@ -328,7 +328,7 @@ pub fn reload_mesh(state: &mut AppState) {
                     order,
                     paint: PaintValues::default(),
                     guides: vec![],
-                    base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+                    base_color: TextureSource::Solid([1.0, 1.0, 1.0]),
                     base_normal: TextureSource::None,
                     dry: 1.0,
                     seed,
@@ -910,7 +910,7 @@ fn auto_map_glb(mat: &MeshMaterialInfo, idx: usize) -> (TextureSource, TextureSo
         let f = mat.base_color_factor;
         TextureSource::Solid([f[0], f[1], f[2]])
     } else {
-        TextureSource::Solid([0.5, 0.5, 0.5])
+        TextureSource::Solid([1.0, 1.0, 1.0])
     };
     let normal = if mat.normal_texture.is_some() {
         TextureSource::MeshMaterial(idx)
@@ -936,7 +936,7 @@ fn auto_map_mtl(mat: &MeshMaterialInfo) -> (TextureSource, TextureSource, bool) 
         let f = mat.base_color_factor;
         TextureSource::Solid([f[0], f[1], f[2]])
     } else {
-        TextureSource::Solid([0.5, 0.5, 0.5])
+        TextureSource::Solid([1.0, 1.0, 1.0])
     };
     let normal = if let Some(ref tex) = mat.normal_texture {
         let content_hash = EmbeddedTexture::compute_content_hash(&tex.pixels);
@@ -957,7 +957,7 @@ fn auto_map_mtl(mat: &MeshMaterialInfo) -> (TextureSource, TextureSource, bool) 
 
 /// Default mapping (no material info).
 fn default_mapping() -> (TextureSource, TextureSource) {
-    (TextureSource::Solid([0.5, 0.5, 0.5]), TextureSource::None)
+    (TextureSource::Solid([1.0, 1.0, 1.0]), TextureSource::None)
 }
 
 /// Build proposed mappings for each layer from materials.
@@ -1151,7 +1151,7 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
                 order,
                 paint: PaintValues::default(),
                 guides: vec![],
-                base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+                base_color: TextureSource::Solid([1.0, 1.0, 1.0]),
                 base_normal: TextureSource::None,
                 dry: 1.0,
                 seed,
@@ -1167,7 +1167,7 @@ pub fn apply_mesh_load_popup(state: &mut AppState) {
             }
             if !has_materials {
                 if let TextureSource::MeshMaterial(_) = layer.base_color {
-                    layer.base_color = TextureSource::Solid([0.5, 0.5, 0.5]);
+                    layer.base_color = TextureSource::Solid([1.0, 1.0, 1.0]);
                 }
                 if let TextureSource::MeshMaterial(_) = layer.base_normal {
                     layer.base_normal = TextureSource::None;

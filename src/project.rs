@@ -603,7 +603,7 @@ mod tests {
                 viscosity: 0.0,
             },
             guides,
-            base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+            base_color: TextureSource::Solid([1.0, 1.0, 1.0]),
             base_normal: TextureSource::None,
             dry: 1.0,
             seed: order as u32,

@@ -371,7 +371,7 @@ pub fn show_layers_header(ui: &mut egui::Ui, state: &mut AppState) {
                             order: 0, // reassigned below
                             paint: PaintValues::default(),
                             guides: vec![],
-                            base_color: TextureSource::Solid([0.5, 0.5, 0.5]),
+                            base_color: TextureSource::Solid([1.0, 1.0, 1.0]),
                             base_normal: TextureSource::None,
                             dry: 1.0,
                             seed: next_seed,
