@@ -829,7 +829,8 @@ mod tests {
             export_normal_png, generate_normal_map, generate_normal_map_depicted_form,
         };
         use crate::types::{
-            Guide, LayerBaseColor, NormalMode, OutputSettings, PaintLayer, StrokeParams,
+            Guide, LayerBaseColor, NormalMode, NormalYConvention, OutputSettings, PaintLayer,
+            StrokeParams,
         };
 
         let fixtures = crate::test_fixtures_dir();
@@ -882,6 +883,7 @@ mod tests {
             &normals_surface,
             res,
             &out_dir.join("surface_paint_normal.png"),
+            NormalYConvention::OpenGL,
         )
         .expect("save surface_paint_normal.png");
 
@@ -899,6 +901,7 @@ mod tests {
             &normals_depicted,
             res,
             &out_dir.join("depicted_form_normal.png"),
+            NormalYConvention::OpenGL,
         )
         .expect("save depicted_form_normal.png");
 
@@ -1036,7 +1039,8 @@ mod tests {
             export_normal_png, generate_normal_map_depicted_form, normalize_height_map,
         };
         use crate::types::{
-            Guide, LayerBaseColor, NormalMode, OutputSettings, PaintLayer, StrokeParams,
+            Guide, LayerBaseColor, NormalMode, NormalYConvention, OutputSettings, PaintLayer,
+            StrokeParams,
         };
 
         let fixtures = crate::test_fixtures_dir();
@@ -1162,7 +1166,8 @@ mod tests {
 
             // Normal map
             let path = out_dir.join(format!("{label}_normal.png"));
-            export_normal_png(&normals, res, &path).expect("save normal");
+            export_normal_png(&normals, res, &path, NormalYConvention::OpenGL)
+                .expect("save normal");
 
             // Raw object-space stroke normals (diagnostic)
             let obj_pixels: Vec<u8> = (0..(res * res) as usize)
@@ -1195,6 +1200,7 @@ mod tests {
                 res,
                 0.05,
                 &out_dir.join(format!("{label}.glb")),
+                NormalYConvention::OpenGL,
             )
             .expect("save GLB preview");
         }

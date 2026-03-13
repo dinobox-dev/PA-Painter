@@ -1057,6 +1057,20 @@ impl StrokePath {
     }
 }
 
+/// Normal map Y-axis convention for export.
+///
+/// Controls the green channel direction in exported normal maps.
+/// The internal renderer always uses its own consistent convention;
+/// this setting only affects exported PNGs and GLB files.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NormalYConvention {
+    /// +Y = up (Blender, Godot, glTF, Maya).
+    #[default]
+    OpenGL,
+    /// +Y = down (Unreal Engine, Unity default, 3ds Max).
+    DirectX,
+}
+
 /// Normal map generation mode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NormalMode {
@@ -1178,6 +1192,11 @@ pub struct ExportSettings {
     /// Embed normal map in the 3D model.
     #[serde(default = "default_true")]
     pub embed_normal: bool,
+
+    // ── Normal Convention ──
+    /// Y-axis convention for exported normal maps.
+    #[serde(default)]
+    pub normal_y: NormalYConvention,
 }
 
 fn default_true() -> bool {
@@ -1198,6 +1217,7 @@ impl Default for ExportSettings {
             export_model: false,
             embed_color: true,
             embed_normal: true,
+            normal_y: NormalYConvention::default(),
         }
     }
 }

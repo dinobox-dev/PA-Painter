@@ -19,7 +19,9 @@ use pa_painter::compositing::{
     fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
 };
 use pa_painter::output::{blend_normals_udn, ExportFormat};
-use pa_painter::types::{BaseColorSource, Color, TextureSource, BASE_RESOLUTION};
+use pa_painter::types::{
+    BaseColorSource, Color, NormalYConvention, TextureSource, BASE_RESOLUTION,
+};
 use pa_painter::uv_mask::UvMask;
 
 /// Count unique non-zero order values in a stroke time map (= number of strokes).
@@ -705,6 +707,25 @@ impl PainterApp {
                         ui.add_space(2.0);
                         ui.checkbox(&mut es.embed_color, "Embed color texture");
                         ui.checkbox(&mut es.embed_normal, "Embed normal map");
+                    });
+                }
+
+                // ── Normal Y Convention ──
+                // Show when any normal output is enabled (texture or GLB).
+                let any_normal =
+                    (es.export_maps && es.include_normal) || (es.export_model && es.embed_normal);
+                if any_normal {
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        ui.colored_label(weak, "Normal Y axis");
+                        ui.selectable_value(&mut es.normal_y, NormalYConvention::OpenGL, "OpenGL");
+                        ui.selectable_value(
+                            &mut es.normal_y,
+                            NormalYConvention::DirectX,
+                            "DirectX",
+                        );
                     });
                 }
 

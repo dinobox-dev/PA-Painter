@@ -13,7 +13,7 @@ use glam::Vec2;
 
 use crate::asset_io::{linear_to_srgb, LoadedMesh};
 use crate::object_normal::compute_vertex_normals;
-use crate::types::Color;
+use crate::types::{Color, NormalYConvention};
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -32,6 +32,7 @@ pub fn export_preview_glb(
     resolution: u32,
     displacement_scale: f32,
     path: &Path,
+    normal_y: NormalYConvention,
 ) -> Result<(), crate::output::OutputError> {
     info!("Exporting preview GLB: {}", path.display());
     export_preview_glb_inner(
@@ -43,6 +44,7 @@ pub fn export_preview_glb(
         displacement_scale,
         false,
         path,
+        normal_y,
     )
 }
 
@@ -55,6 +57,7 @@ pub fn export_preview_glb_transparent(
     resolution: u32,
     displacement_scale: f32,
     path: &Path,
+    normal_y: NormalYConvention,
 ) -> Result<(), crate::output::OutputError> {
     export_preview_glb_inner(
         mesh,
@@ -65,6 +68,7 @@ pub fn export_preview_glb_transparent(
         displacement_scale,
         true,
         path,
+        normal_y,
     )
 }
 
@@ -78,10 +82,11 @@ fn export_preview_glb_inner(
     displacement_scale: f32,
     alpha_blend: bool,
     path: &Path,
+    normal_y: NormalYConvention,
 ) -> Result<(), crate::output::OutputError> {
     // 1. Encode textures to in-memory PNGs
     let color_png = encode_color_png(color_map, resolution)?;
-    let normal_png = encode_normal_png(normal_map, resolution)?;
+    let normal_png = encode_normal_png(normal_map, resolution, normal_y)?;
 
     // 2. Subdivide mesh (only if displacement is active) and displace by height
     let subdiv_level = if displacement_scale > 0.0 { 8 } else { 1 };
@@ -252,17 +257,9 @@ fn encode_color_png(
 fn encode_normal_png(
     normal_map: &[[f32; 3]],
     resolution: u32,
+    convention: NormalYConvention,
 ) -> Result<Vec<u8>, crate::output::OutputError> {
-    let pixels: Vec<u8> = normal_map
-        .iter()
-        .flat_map(|n| {
-            [
-                (n[0].clamp(0.0, 1.0) * 255.0).round() as u8,
-                (n[1].clamp(0.0, 1.0) * 255.0).round() as u8,
-                (n[2].clamp(0.0, 1.0) * 255.0).round() as u8,
-            ]
-        })
-        .collect();
+    let pixels = crate::output::normals_to_pixels(normal_map, convention);
 
     let mut buf = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(std::io::Cursor::new(&mut buf));
@@ -544,6 +541,7 @@ fn write_glb(path: &Path, json_chunk: &[u8], bin_chunk: &[u8]) -> Result<(), std
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::NormalYConvention;
     use glam::Vec3;
 
     fn make_unit_triangle() -> LoadedMesh {
@@ -598,6 +596,7 @@ mod tests {
             res,
             0.05,
             &path,
+            NormalYConvention::OpenGL,
         )
         .expect("GLB export should succeed");
 
@@ -784,13 +783,19 @@ mod tests {
                 res,
                 0.0,
                 &path,
+                NormalYConvention::OpenGL,
             )
             .expect("sphere GLB export");
 
             // Dump normal map PNG for comparison
             let normal_png_path = out_dir.join(format!("{label}_normal.png"));
-            crate::output::export_normal_png(&normals, res, &normal_png_path)
-                .expect("save normal PNG");
+            crate::output::export_normal_png(
+                &normals,
+                res,
+                &normal_png_path,
+                NormalYConvention::OpenGL,
+            )
+            .expect("save normal PNG");
 
             // Dump color map PNG
             let color_png_path = out_dir.join(format!("{label}_color.png"));
@@ -827,6 +832,7 @@ mod tests {
             res,
             0.05,
             &path,
+            NormalYConvention::OpenGL,
         )
         .unwrap();
 
@@ -919,6 +925,7 @@ mod tests {
             res,
             0.0,
             &path,
+            NormalYConvention::OpenGL,
         )
         .expect("transparent GLB export");
 
@@ -1021,6 +1028,7 @@ mod tests {
             res,
             0.0,
             &glb_path,
+            NormalYConvention::OpenGL,
         )
         .expect("overscan GLB export");
 
@@ -1029,7 +1037,8 @@ mod tests {
             .expect("save color PNG");
 
         let normal_path = out_dir.join("sphere_overscan_poisson_normal.png");
-        crate::output::export_normal_png(&normals, res, &normal_path).expect("save normal PNG");
+        crate::output::export_normal_png(&normals, res, &normal_path, NormalYConvention::OpenGL)
+            .expect("save normal PNG");
 
         assert!(glb_path.exists());
         let (doc, _, _) = gltf::import(&glb_path).expect("gltf should parse overscan GLB");

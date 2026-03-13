@@ -14,7 +14,9 @@ use crate::compositing::{GlobalMaps, LayerMaps};
 use crate::math::smoothstep;
 use crate::object_normal::MeshNormalData;
 use crate::stroke_color::hsv_to_rgb;
-use crate::types::{BackgroundMode, Color, HsvColor, NormalMode, OutputSettings};
+use crate::types::{
+    BackgroundMode, Color, HsvColor, NormalMode, NormalYConvention, OutputSettings,
+};
 use crate::uv_mask::UvMask;
 
 // ── Error Type ──
@@ -52,6 +54,7 @@ pub struct LayerExportOptions<'a> {
     pub include_height: bool,
     pub include_normal: bool,
     pub include_time_map: bool,
+    pub normal_y: NormalYConvention,
 }
 
 // ── Height Map Normalization ──
@@ -351,24 +354,35 @@ pub fn export_color_png(
     Ok(())
 }
 
+/// Encode normal-map floats to RGB8 pixels, applying the chosen Y-axis convention.
+///
+/// The internal tangent-space convention uses bitangent = +V (image-downward).
+/// For OpenGL convention (+Y = up), the green channel is flipped;
+/// for DirectX convention (+Y = down), it is kept as-is.
+pub fn normals_to_pixels(normals: &[[f32; 3]], convention: NormalYConvention) -> Vec<u8> {
+    let flip_y = convention == NormalYConvention::OpenGL;
+    normals
+        .iter()
+        .flat_map(|n| {
+            let g = if flip_y { 1.0 - n[1] } else { n[1] };
+            [
+                (n[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (n[2].clamp(0.0, 1.0) * 255.0).round() as u8,
+            ]
+        })
+        .collect()
+}
+
 /// Export a normal map as an RGB PNG (linear, no gamma).
 pub fn export_normal_png(
     normals: &[[f32; 3]],
     resolution: u32,
     path: &Path,
+    convention: NormalYConvention,
 ) -> Result<(), OutputError> {
     debug!("Exporting normal PNG: {}", path.display());
-    let pixels: Vec<u8> = normals
-        .iter()
-        .flat_map(|n| {
-            [
-                (n[0].clamp(0.0, 1.0) * 255.0).round() as u8,
-                (n[1].clamp(0.0, 1.0) * 255.0).round() as u8,
-                (n[2].clamp(0.0, 1.0) * 255.0).round() as u8,
-            ]
-        })
-        .collect();
-
+    let pixels = normals_to_pixels(normals, convention);
     image::save_buffer(
         path,
         &pixels,
@@ -663,6 +677,7 @@ pub fn export_layer_maps(
             &normals,
             res,
             &output_dir.join(format!("{prefix}_normal.png")),
+            opts.normal_y,
         )?;
         count += 1;
     }
@@ -697,6 +712,7 @@ pub fn export_all(
     output_dir: &Path,
     format: ExportFormat,
     normal_data: Option<&MeshNormalData>,
+    normal_y: NormalYConvention,
 ) -> Result<(), OutputError> {
     info!(
         "Exporting all maps to {} ({:?})",
@@ -760,6 +776,7 @@ pub fn export_all(
         &normals,
         global.resolution,
         &output_dir.join("normal_map.png"),
+        normal_y,
     )?;
     export_stroke_id_png(
         &global.stroke_id,
@@ -798,7 +815,7 @@ mod tests {
     use crate::asset_io::{linear_to_srgb, load_texture};
     use crate::compositing::composite_all;
     use crate::test_util::make_layer_with_order;
-    use crate::types::{Color, LayerBaseColor, OutputSettings};
+    use crate::types::{Color, LayerBaseColor, NormalYConvention, OutputSettings};
 
     const EPS: f32 = 1e-4;
 
@@ -1004,7 +1021,7 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("normal_flat_test.png");
 
-        export_normal_png(&normals, res, &path).unwrap();
+        export_normal_png(&normals, res, &path, NormalYConvention::OpenGL).unwrap();
 
         let img = image::open(&path).unwrap().to_rgb8();
         let pixel = img.get_pixel(0, 0);
@@ -1149,7 +1166,15 @@ mod tests {
         let dir = std::env::temp_dir()
             .join("pap_test_output")
             .join("export_all_png");
-        export_all(&maps, &settings, &dir, ExportFormat::Png, None).unwrap();
+        export_all(
+            &maps,
+            &settings,
+            &dir,
+            ExportFormat::Png,
+            None,
+            NormalYConvention::OpenGL,
+        )
+        .unwrap();
 
         // Verify files exist
         assert!(
@@ -1191,7 +1216,15 @@ mod tests {
         let dir = std::env::temp_dir()
             .join("pap_test_output")
             .join("export_all_exr");
-        export_all(&maps, &settings, &dir, ExportFormat::Exr, None).unwrap();
+        export_all(
+            &maps,
+            &settings,
+            &dir,
+            ExportFormat::Exr,
+            None,
+            NormalYConvention::OpenGL,
+        )
+        .unwrap();
 
         assert!(
             dir.join("color_map.exr").exists(),

@@ -699,7 +699,7 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
             step.store(count, Ordering::Relaxed);
         }
         if es.include_normal {
-            export_normal_png(&normal_map, res, &dir.join("normal_map.png"))
+            export_normal_png(&normal_map, res, &dir.join("normal_map.png"), es.normal_y)
                 .map_err(|e| format!("Export failed: {e:?}"))?;
             count += 1;
             step.store(count, Ordering::Relaxed);
@@ -748,6 +748,7 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
                         include_height: es.include_height,
                         include_normal: es.include_normal,
                         include_time_map: es.include_time_map,
+                        normal_y: es.normal_y,
                     },
                     &dir,
                 ) {
@@ -788,6 +789,7 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
                     res,
                     0.0,
                     &dir.join("preview.glb"),
+                    es.normal_y,
                 )
             } else {
                 glb_export::export_preview_glb(
@@ -798,6 +800,7 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
                     res,
                     0.0,
                     &dir.join("preview.glb"),
+                    es.normal_y,
                 )
             };
             result.map_err(|e| format!("GLB export failed: {e:?}"))?;

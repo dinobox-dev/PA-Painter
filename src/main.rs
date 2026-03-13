@@ -162,12 +162,15 @@ fn main() {
     );
 
     // Export
+    let normal_y = project.export_settings.normal_y;
+
     export_all(
         &global,
         &project.settings,
         &output_dir,
         format,
         normal_data.as_ref(),
+        normal_y,
     )
     .unwrap_or_else(|e| {
         error!("Export failed: {e:?}");
@@ -213,6 +216,7 @@ fn main() {
                     include_height: true,
                     include_normal: true,
                     include_time_map: false,
+                    normal_y,
                 },
                 &output_dir,
             )
