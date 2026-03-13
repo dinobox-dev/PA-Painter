@@ -8,7 +8,7 @@ use log::{debug, info};
 use rayon::prelude::*;
 
 use crate::brush_profile::{generate_brush_profile, jitter_brush_profile};
-use crate::math::{lerp, lerp_color, perpendicular, smoothstep};
+use crate::math::{lerp, perpendicular, smoothstep};
 use crate::object_normal::{try_sample_object_normal, MeshNormalData};
 use crate::path_placement::{generate_paths, PathContext};
 use crate::rng::SeededRng;
@@ -318,7 +318,6 @@ pub struct StrokeAppearance {
     pub color: Color,
     pub id: u32,
     pub normal: Option<[f32; 3]>,
-    pub transparent: bool,
     /// Per-pixel normal clamp: skip pixels whose mesh normal deviates too
     /// far from the stroke's reference normal. `None` = disabled.
     pub normal_break_threshold: Option<f32>,
@@ -359,7 +358,6 @@ pub fn composite_stroke(
     let stroke_color = appearance.color;
     let stroke_id = appearance.id;
     let stroke_normal = appearance.normal;
-    let transparent = appearance.transparent;
     let res = resolution;
     let local_w = local_height.width;
     let local_h = local_height.height;
@@ -485,36 +483,37 @@ pub fn composite_stroke(
 
                 // Color: always subtractive mix when overlapping existing paint.
                 // Within a layer, strokes are wet and pigments mix on contact.
+                //
+                // Internal representation is premultiplied alpha:
+                //   stored.rgb = straight.rgb * alpha
+                // This ensures a single compositing formula works for both
+                // transparent and opaque backgrounds.
                 let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h);
-                if transparent {
-                    if global.stroke_id[idx] == 0 {
-                        global.color[idx] =
-                            Color::new(stroke_color.r, stroke_color.g, stroke_color.b, opacity);
-                    } else {
-                        let prev = global.color[idx];
-                        let blended = if !same_stroke && prev_h > 0.0 {
-                            let mix_ratio = prev_h.min(1.0);
-                            subtractive_mix(prev, stroke_color, mix_ratio)
-                        } else {
-                            stroke_color
-                        };
-                        global.color[idx] = Color::new(
-                            lerp(prev.r, blended.r, opacity),
-                            lerp(prev.g, blended.g, opacity),
-                            lerp(prev.b, blended.b, opacity),
-                            prev.a + opacity * (1.0 - prev.a),
-                        );
-                    }
+                let prev = global.color[idx];
+                let prev_a = prev.a;
+
+                // Un-premultiply previous color for subtractive mixing
+                let prev_straight = if prev_a > 0.0 {
+                    Color::rgb(prev.r / prev_a, prev.g / prev_a, prev.b / prev_a)
                 } else {
-                    let existing = global.color[idx];
-                    let blended = if !same_stroke && prev_h > 0.0 {
-                        let mix_ratio = prev_h.min(1.0);
-                        subtractive_mix(existing, stroke_color, mix_ratio)
-                    } else {
-                        stroke_color
-                    };
-                    global.color[idx] = lerp_color(existing, blended, opacity);
-                }
+                    prev
+                };
+
+                let blended = if !same_stroke && prev_h > 0.0 {
+                    let mix_ratio = prev_h.min(1.0);
+                    subtractive_mix(prev_straight, stroke_color, mix_ratio)
+                } else {
+                    stroke_color
+                };
+
+                // Premultiplied alpha compositing (Porter-Duff "over")
+                let inv = 1.0 - opacity;
+                global.color[idx] = Color::new(
+                    blended.r * opacity + prev.r * inv,
+                    blended.g * opacity + prev.g * inv,
+                    blended.b * opacity + prev.b * inv,
+                    opacity + prev_a * inv,
+                );
 
                 global.stroke_id[idx] = stroke_id;
 
@@ -794,7 +793,7 @@ pub fn composite_layer(
     layer: &PaintLayer,
     layer_index: u32,
     global: &mut GlobalMaps,
-    settings: &OutputSettings,
+    _settings: &OutputSettings,
     base_color: &BaseColorSource,
     cached_paths: Option<&[StrokePath]>,
     normal_data: Option<&MeshNormalData>,
@@ -802,7 +801,6 @@ pub fn composite_layer(
     stretch_map: Option<&StretchMap>,
 ) {
     let resolution = global.resolution;
-    let transparent = settings.background_mode == BackgroundMode::Transparent;
     let paths_owned;
     let paths: &[StrokePath] = if let Some(cached) = cached_paths {
         cached
@@ -914,7 +912,6 @@ pub fn composite_layer(
                 color: stroke_colors[i],
                 id: paths[i].stroke_id,
                 normal: stroke_normals[i],
-                transparent,
                 normal_break_threshold: scaled.normal_break_threshold,
                 time_order,
             },
@@ -1011,11 +1008,9 @@ pub fn merge_layers(
     layer_dry: &[f32],
     settings: &[LayerCompositeSettings],
     global: &mut GlobalMaps,
-    background_mode: BackgroundMode,
 ) {
     debug!("Merging {} layers", layers.len());
     let size = (global.resolution * global.resolution) as usize;
-    let transparent = background_mode == BackgroundMode::Transparent;
 
     for (i, layer) in layers.iter().enumerate() {
         debug_assert_eq!(layer.resolution, global.resolution);
@@ -1057,31 +1052,46 @@ pub fn merge_layers(
             // ── Color ──
             // dry=0 (wet): subtractive mix (pigments blend on wet surface)
             // dry=1: opaque over (paint covers dried surface)
-            let above_color = layer.color[idx];
+            //
+            // Both layer and global colors are premultiplied alpha.
+            // Un-premultiply for subtractive mixing, then composite back.
+            let above_pm = layer.color[idx];
+            let above_a = above_pm.a;
+            let above_straight = if above_a > 0.0 {
+                Color::rgb(
+                    above_pm.r / above_a,
+                    above_pm.g / above_a,
+                    above_pm.b / above_a,
+                )
+            } else {
+                above_pm
+            };
+
+            let prev = global.color[idx];
+            let prev_a = prev.a;
+            let prev_straight = if prev_a > 0.0 {
+                Color::rgb(prev.r / prev_a, prev.g / prev_a, prev.b / prev_a)
+            } else {
+                prev
+            };
+
             let blended = if h_below > 0.0 && wet > 0.0 {
                 let mix_ratio = wet * h_below.min(1.0);
-                subtractive_mix(global.color[idx], above_color, mix_ratio)
+                subtractive_mix(prev_straight, above_straight, mix_ratio)
             } else {
-                above_color
+                above_straight
             };
 
             let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h_above) * layer_opacity;
 
-            if transparent {
-                if global.stroke_id[idx] == 0 {
-                    global.color[idx] = Color::new(blended.r, blended.g, blended.b, opacity);
-                } else {
-                    let prev = global.color[idx];
-                    global.color[idx] = Color::new(
-                        lerp(prev.r, blended.r, opacity),
-                        lerp(prev.g, blended.g, opacity),
-                        lerp(prev.b, blended.b, opacity),
-                        prev.a + opacity * (1.0 - prev.a),
-                    );
-                }
-            } else {
-                global.color[idx] = lerp_color(global.color[idx], blended, opacity);
-            }
+            // Premultiplied alpha compositing (Porter-Duff "over")
+            let inv = 1.0 - opacity;
+            global.color[idx] = Color::new(
+                blended.r * opacity + prev.r * inv,
+                blended.g * opacity + prev.g * inv,
+                blended.b * opacity + prev.b * inv,
+                opacity + prev_a * inv,
+            );
 
             global.stroke_id[idx] = layer.stroke_id[idx];
 
@@ -1095,6 +1105,7 @@ pub fn merge_layers(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::lerp_color;
     use crate::test_util::make_layer_with_order;
     use crate::types::{BaseColorSource, LayerBaseColor, NormalMode};
 

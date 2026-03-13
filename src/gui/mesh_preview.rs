@@ -787,16 +787,27 @@ pub fn upload_mesh(render_state: &egui_wgpu::RenderState, mesh: &LoadedMesh) {
 
 // ── CPU pixel conversion (thread-safe, no GPU) ───────────────────
 
-/// Convert color data to raw RGBA bytes for GPU upload. Can run on any thread.
+/// Convert color data (premultiplied alpha) to raw RGBA bytes for GPU upload.
+/// Un-premultiplies before converting. Can run on any thread.
 pub fn convert_color_pixels(color_data: &[pa_painter::types::Color]) -> Vec<u8> {
     color_data
         .iter()
         .flat_map(|c| {
+            let a = c.a.clamp(0.0, 1.0);
+            let (r, g, b) = if a > 0.0 {
+                (
+                    (c.r / a).clamp(0.0, 1.0),
+                    (c.g / a).clamp(0.0, 1.0),
+                    (c.b / a).clamp(0.0, 1.0),
+                )
+            } else {
+                (0.0, 0.0, 0.0)
+            };
             [
-                linear_to_srgb_u8(c.r),
-                linear_to_srgb_u8(c.g),
-                linear_to_srgb_u8(c.b),
-                (c.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+                linear_to_srgb_u8(r),
+                linear_to_srgb_u8(g),
+                linear_to_srgb_u8(b),
+                (a * 255.0).round() as u8,
             ]
         })
         .collect()

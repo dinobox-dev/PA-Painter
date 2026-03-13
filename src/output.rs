@@ -283,6 +283,9 @@ pub fn export_height_png(height: &[f32], resolution: u32, path: &Path) -> Result
 /// Export a color map as an sRGB PNG.
 /// Applies linear_to_srgb() per RGB channel before writing.
 /// When `with_alpha` is true, outputs RGBA8 with the alpha channel from Color.
+///
+/// Internal color data is premultiplied alpha; this function un-premultiplies
+/// before writing so the PNG stores straight (non-premultiplied) RGBA.
 pub fn export_color_png(
     color: &[Color],
     resolution: u32,
@@ -298,11 +301,21 @@ pub fn export_color_png(
         let pixels: Vec<u8> = color
             .iter()
             .flat_map(|c| {
+                let a = c.a.clamp(0.0, 1.0);
+                let (r, g, b) = if a > 0.0 {
+                    (
+                        (c.r / a).clamp(0.0, 1.0),
+                        (c.g / a).clamp(0.0, 1.0),
+                        (c.b / a).clamp(0.0, 1.0),
+                    )
+                } else {
+                    (0.0, 0.0, 0.0)
+                };
                 [
-                    (linear_to_srgb(c.r.clamp(0.0, 1.0)) * 255.0).round() as u8,
-                    (linear_to_srgb(c.g.clamp(0.0, 1.0)) * 255.0).round() as u8,
-                    (linear_to_srgb(c.b.clamp(0.0, 1.0)) * 255.0).round() as u8,
-                    (c.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    (linear_to_srgb(r) * 255.0).round() as u8,
+                    (linear_to_srgb(g) * 255.0).round() as u8,
+                    (linear_to_srgb(b) * 255.0).round() as u8,
+                    (a * 255.0).round() as u8,
                 ]
             })
             .collect();
@@ -315,6 +328,7 @@ pub fn export_color_png(
             image::ColorType::Rgba8,
         )?;
     } else {
+        // Opaque mode: alpha is 1.0 everywhere, so premultiplied == straight.
         let pixels: Vec<u8> = color
             .iter()
             .flat_map(|c| {
@@ -472,6 +486,9 @@ pub fn export_height_exr(height: &[f32], resolution: u32, path: &Path) -> Result
 
 /// Export a color map as a float32 EXR (linear, NO sRGB conversion).
 /// When `with_alpha` is true, outputs RGBA; otherwise RGB.
+///
+/// Internal color data is premultiplied alpha; this function un-premultiplies
+/// before writing so the EXR stores straight (non-premultiplied) RGBA.
 pub fn export_color_exr(
     color: &[Color],
     resolution: u32,
@@ -490,10 +507,16 @@ pub fn export_color_exr(
     if with_alpha {
         write_rgba_file(path, res, res, |x, y| {
             let c = &color[y * res + x];
-            (c.r, c.g, c.b, c.a)
+            let a = c.a;
+            if a > 0.0 {
+                (c.r / a, c.g / a, c.b / a, a)
+            } else {
+                (0.0, 0.0, 0.0, 0.0)
+            }
         })
         .map_err(|e| OutputError::ExrError(e.to_string()))?;
     } else {
+        // Opaque mode: alpha is 1.0 everywhere, so premultiplied == straight.
         write_rgb_file(path, res, res, |x, y| {
             let c = &color[y * res + x];
             (c.r, c.g, c.b)

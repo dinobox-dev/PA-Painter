@@ -58,16 +58,27 @@ pub fn loaded_texture_raw_handle(
     )
 }
 
-/// Convert a `Vec<Color>` (linear float RGBA) to a ColorImage (CPU-only, thread-safe).
+/// Convert a `Vec<Color>` (premultiplied alpha) to a ColorImage (CPU-only, thread-safe).
+/// Un-premultiplies before converting to egui's straight-alpha Color32.
 pub fn color_buffer_to_image(colors: &[Color], width: u32, height: u32) -> egui::ColorImage {
     let pixels: Vec<egui::Color32> = colors
         .iter()
         .map(|c| {
+            let a = c.a.clamp(0.0, 1.0);
+            let (r, g, b) = if a > 0.0 {
+                (
+                    (c.r / a).clamp(0.0, 1.0),
+                    (c.g / a).clamp(0.0, 1.0),
+                    (c.b / a).clamp(0.0, 1.0),
+                )
+            } else {
+                (0.0, 0.0, 0.0)
+            };
             egui::Color32::from_rgba_unmultiplied(
-                linear_to_srgb_u8(c.r),
-                linear_to_srgb_u8(c.g),
-                linear_to_srgb_u8(c.b),
-                (c.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+                linear_to_srgb_u8(r),
+                linear_to_srgb_u8(g),
+                linear_to_srgb_u8(b),
+                (a * 255.0).round() as u8,
             )
         })
         .collect();

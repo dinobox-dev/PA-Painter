@@ -521,13 +521,7 @@ fn run_pipeline(
         .collect();
     let layer_settings: Vec<LayerCompositeSettings> =
         vec![LayerCompositeSettings::default(); result_maps.len()];
-    merge_layers(
-        &layer_refs,
-        &layer_dry,
-        &layer_settings,
-        &mut global,
-        input.settings.background_mode,
-    );
+    merge_layers(&layer_refs, &layer_dry, &layer_settings, &mut global);
 
     // ── Compute gradients from global height map (Sobel) ──
     compute_height_gradients(&mut global);
@@ -805,13 +799,7 @@ fn run_remerge(
     }
     let layer_dry: Vec<f32> = sorted_layers.iter().map(|l| l.dry).collect();
     let layer_settings = vec![LayerCompositeSettings::default(); sorted_layers.len()];
-    merge_layers(
-        &layer_maps,
-        &layer_dry,
-        &layer_settings,
-        &mut global,
-        settings.background_mode,
-    );
+    merge_layers(&layer_maps, &layer_dry, &layer_settings, &mut global);
 
     // Sobel
     set_progress(progress, 0.4);
