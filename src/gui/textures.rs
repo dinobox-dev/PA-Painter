@@ -19,7 +19,7 @@ pub fn loaded_texture_to_handle(
                 linear_to_srgb_u8(p[0]),
                 linear_to_srgb_u8(p[1]),
                 linear_to_srgb_u8(p[2]),
-                (p[3].clamp(0.0, 1.0) * 255.0) as u8,
+                (p[3].clamp(0.0, 1.0) * 255.0).round() as u8,
             )
         })
         .collect();
@@ -46,7 +46,7 @@ pub fn loaded_texture_raw_handle(
                 linear_to_raw_u8(p[0]),
                 linear_to_raw_u8(p[1]),
                 linear_to_raw_u8(p[2]),
-                (p[3].clamp(0.0, 1.0) * 255.0) as u8,
+                (p[3].clamp(0.0, 1.0) * 255.0).round() as u8,
             )
         })
         .collect();
@@ -67,7 +67,7 @@ pub fn color_buffer_to_image(colors: &[Color], width: u32, height: u32) -> egui:
                 linear_to_srgb_u8(c.r),
                 linear_to_srgb_u8(c.g),
                 linear_to_srgb_u8(c.b),
-                (c.a.clamp(0.0, 1.0) * 255.0) as u8,
+                (c.a.clamp(0.0, 1.0) * 255.0).round() as u8,
             )
         })
         .collect();
@@ -79,7 +79,7 @@ pub fn height_buffer_to_image(heights: &[f32], resolution: u32) -> egui::ColorIm
     let pixels: Vec<egui::Color32> = heights
         .iter()
         .map(|&h| {
-            let v = (h.clamp(0.0, 1.0) * 255.0) as u8;
+            let v = (h.clamp(0.0, 1.0) * 255.0).round() as u8;
             egui::Color32::from_gray(v)
         })
         .collect();
@@ -92,9 +92,9 @@ pub fn normal_map_to_image(normals: &[[f32; 3]], resolution: u32) -> egui::Color
         .iter()
         .map(|n| {
             egui::Color32::from_rgb(
-                (n[0].clamp(0.0, 1.0) * 255.0) as u8,
-                (n[1].clamp(0.0, 1.0) * 255.0) as u8,
-                (n[2].clamp(0.0, 1.0) * 255.0) as u8,
+                (n[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (n[1].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (n[2].clamp(0.0, 1.0) * 255.0).round() as u8,
             )
         })
         .collect();
@@ -137,7 +137,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
 
 /// Linear float \[0,1\] to u8 without gamma correction (for non-color data like normal maps).
 pub(super) fn linear_to_raw_u8(l: f32) -> u8 {
-    (l.clamp(0.0, 1.0) * 255.0) as u8
+    (l.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 pub(super) fn linear_to_srgb_u8(l: f32) -> u8 {
@@ -146,5 +146,5 @@ pub(super) fn linear_to_srgb_u8(l: f32) -> u8 {
     } else {
         1.055 * l.powf(1.0 / 2.4) - 0.055
     };
-    (s.clamp(0.0, 1.0) * 255.0) as u8
+    (s.clamp(0.0, 1.0) * 255.0).round() as u8
 }

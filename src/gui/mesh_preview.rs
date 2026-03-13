@@ -796,7 +796,7 @@ pub fn convert_color_pixels(color_data: &[pa_painter::types::Color]) -> Vec<u8> 
                 linear_to_srgb_u8(c.r),
                 linear_to_srgb_u8(c.g),
                 linear_to_srgb_u8(c.b),
-                (c.a.clamp(0.0, 1.0) * 255.0) as u8,
+                (c.a.clamp(0.0, 1.0) * 255.0).round() as u8,
             ]
         })
         .collect()
@@ -808,9 +808,9 @@ pub fn convert_normal_pixels(normal_data: &[[f32; 3]]) -> Vec<u8> {
         .iter()
         .flat_map(|n| {
             [
-                (n[0].clamp(0.0, 1.0) * 255.0) as u8,
-                (n[1].clamp(0.0, 1.0) * 255.0) as u8,
-                (n[2].clamp(0.0, 1.0) * 255.0) as u8,
+                (n[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (n[1].clamp(0.0, 1.0) * 255.0).round() as u8,
+                (n[2].clamp(0.0, 1.0) * 255.0).round() as u8,
                 255u8,
             ]
         })
