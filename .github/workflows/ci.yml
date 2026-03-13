@@ -21,6 +21,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: License
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+
       - name: Format
         run: cargo fmt --check
 
