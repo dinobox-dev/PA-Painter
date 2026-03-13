@@ -236,85 +236,82 @@ fn compute_smooth_normals(mesh: &LoadedMesh) -> Vec<Vec3> {
     normals
 }
 
-// ── Tangent computation ───────────────────────────────────────────
+// ── MikkTSpace tangent computation ─────────────────────────────────
 
-/// Compute per-vertex tangent vectors from mesh geometry and UV coordinates.
-/// Returns `[f32; 4]` per vertex: xyz = tangent direction, w = handedness sign.
-fn compute_tangents(mesh: &LoadedMesh, normals: &[Vec3]) -> Vec<[f32; 4]> {
-    let n = mesh.positions.len();
-    let mut tan_accum = vec![Vec3::ZERO; n];
-    let mut bitan_accum = vec![Vec3::ZERO; n];
-
-    for tri in mesh.indices.chunks(3) {
-        if tri.len() < 3 {
-            continue;
-        }
-        let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
-        let v0 = mesh.positions[i0];
-        let v1 = mesh.positions[i1];
-        let v2 = mesh.positions[i2];
-        let e1 = v1 - v0;
-        let e2 = v2 - v0;
-
-        let uv0 = mesh.uvs.get(i0).copied().unwrap_or(glam::Vec2::ZERO);
-        let uv1 = mesh.uvs.get(i1).copied().unwrap_or(glam::Vec2::ZERO);
-        let uv2 = mesh.uvs.get(i2).copied().unwrap_or(glam::Vec2::ZERO);
-        let duv1 = uv1 - uv0;
-        let duv2 = uv2 - uv0;
-
-        let det = duv1.x * duv2.y - duv2.x * duv1.y;
-        if det.abs() < 1e-8 {
-            continue; // degenerate UV triangle
-        }
-        let r = 1.0 / det;
-        let t = (e1 * duv2.y - e2 * duv1.y) * r;
-        let b = (e2 * duv1.x - e1 * duv2.x) * r;
-
-        tan_accum[i0] += t;
-        tan_accum[i1] += t;
-        tan_accum[i2] += t;
-        bitan_accum[i0] += b;
-        bitan_accum[i1] += b;
-        bitan_accum[i2] += b;
-    }
-
-    (0..n)
-        .map(|i| {
-            let n_vec = normals[i];
-            let t = tan_accum[i];
-            // Gram-Schmidt orthogonalize: T' = normalize(T - N * dot(N, T))
-            let t_ortho = (t - n_vec * n_vec.dot(t)).normalize_or_zero();
-            if t_ortho.length_squared() < 0.5 {
-                // Fallback for degenerate tangent
-                return [1.0, 0.0, 0.0, 1.0];
-            }
-            // Handedness: sign(dot(cross(N, T), B))
-            let w = if n_vec.cross(t_ortho).dot(bitan_accum[i]) < 0.0 {
-                -1.0
-            } else {
-                1.0
-            };
-            [t_ortho.x, t_ortho.y, t_ortho.z, w]
-        })
-        .collect()
+/// MikkTSpace adapter for GPU tangent computation.
+/// Outputs per-face-vertex `[f32; 4]` (xyz = tangent, w = handedness sign).
+struct GpuMikkTSpaceInput<'a> {
+    mesh: &'a LoadedMesh,
+    normals: &'a [Vec3],
+    /// Per-face-vertex tangents, indexed as `[face * 3 + local_vert]`.
+    tangents: Vec<[f32; 4]>,
 }
 
-fn build_vertices(mesh: &LoadedMesh) -> Vec<Vertex> {
+impl mikktspace::Geometry for GpuMikkTSpaceInput<'_> {
+    fn num_faces(&self) -> usize {
+        self.mesh.indices.len() / 3
+    }
+
+    fn num_vertices_of_face(&self, _face: usize) -> usize {
+        3
+    }
+
+    fn position(&self, face: usize, vert: usize) -> [f32; 3] {
+        let idx = self.mesh.indices[face * 3 + vert] as usize;
+        self.mesh.positions[idx].into()
+    }
+
+    fn normal(&self, face: usize, vert: usize) -> [f32; 3] {
+        let idx = self.mesh.indices[face * 3 + vert] as usize;
+        self.normals[idx].into()
+    }
+
+    fn tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
+        let idx = self.mesh.indices[face * 3 + vert] as usize;
+        let uv = self.mesh.uvs.get(idx).copied().unwrap_or(glam::Vec2::ZERO);
+        uv.into()
+    }
+
+    fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
+        self.tangents[face * 3 + vert] = tangent;
+    }
+}
+
+/// Build per-face-vertex vertices with MikkTSpace tangents.
+///
+/// Returns `(vertices, indices)` where each face gets its own 3 vertices
+/// so that per-face-vertex tangents from MikkTSpace are preserved exactly.
+fn build_vertices(mesh: &LoadedMesh) -> (Vec<Vertex>, Vec<u32>) {
     let normals = compute_smooth_normals(mesh);
-    let tangents = compute_tangents(mesh, &normals);
-    mesh.positions
-        .iter()
-        .enumerate()
-        .map(|(i, &pos)| Vertex {
-            position: pos.into(),
-            normal: normals[i].into(),
-            uv: [
-                mesh.uvs.get(i).map(|u| u.x).unwrap_or(0.0),
-                mesh.uvs.get(i).map(|u| u.y).unwrap_or(0.0),
-            ],
-            tangent: tangents[i],
-        })
-        .collect()
+    let face_count = mesh.indices.len() / 3;
+
+    let mut mikk = GpuMikkTSpaceInput {
+        mesh,
+        normals: &normals,
+        tangents: vec![[1.0, 0.0, 0.0, 1.0]; face_count * 3],
+    };
+    mikktspace::generate_tangents(&mut mikk);
+
+    let total = face_count * 3;
+    let mut vertices = Vec::with_capacity(total);
+    let mut indices = Vec::with_capacity(total);
+
+    for (face, tri) in mesh.indices.chunks_exact(3).enumerate() {
+        for local in 0..3 {
+            let vi = tri[local] as usize;
+            let fv = face * 3 + local;
+            let uv = mesh.uvs.get(vi).copied().unwrap_or(glam::Vec2::ZERO);
+            vertices.push(Vertex {
+                position: mesh.positions[vi].into(),
+                normal: normals[vi].into(),
+                uv: [uv.x, uv.y],
+                tangent: mikk.tangents[fv],
+            });
+            indices.push(fv as u32);
+        }
+    }
+
+    (vertices, indices)
 }
 
 // ── Initialization ─────────────────────────────────────────────────
@@ -519,7 +516,7 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
     let device = &render_state.device;
     let queue = &render_state.queue;
 
-    let vertices = build_vertices(mesh);
+    let (vertices, indices) = build_vertices(mesh);
     let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("mesh_vertex_buf"),
         contents: bytemuck::cast_slice(&vertices),
@@ -527,10 +524,10 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
     });
     let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("mesh_index_buf"),
-        contents: bytemuck::cast_slice(&mesh.indices),
+        contents: bytemuck::cast_slice(&indices),
         usage: wgpu::BufferUsages::INDEX,
     });
-    let index_count = mesh.indices.len() as u32;
+    let index_count = indices.len() as u32;
 
     let uniforms = Uniforms {
         mvp: Mat4::IDENTITY.to_cols_array_2d(),
@@ -767,7 +764,7 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
 pub fn upload_mesh(render_state: &egui_wgpu::RenderState, mesh: &LoadedMesh) {
     let device = &render_state.device;
 
-    let vertices = build_vertices(mesh);
+    let (vertices, indices) = build_vertices(mesh);
     let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("mesh_vertex_buf"),
         contents: bytemuck::cast_slice(&vertices),
@@ -775,10 +772,10 @@ pub fn upload_mesh(render_state: &egui_wgpu::RenderState, mesh: &LoadedMesh) {
     });
     let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("mesh_index_buf"),
-        contents: bytemuck::cast_slice(&mesh.indices),
+        contents: bytemuck::cast_slice(&indices),
         usage: wgpu::BufferUsages::INDEX,
     });
-    let index_count = mesh.indices.len() as u32;
+    let index_count = indices.len() as u32;
 
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {

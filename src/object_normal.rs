@@ -6,6 +6,61 @@ use log::debug;
 
 use crate::asset_io::LoadedMesh;
 
+// ── MikkTSpace interface ──
+
+/// Adapter for the `mikktspace` crate's `Geometry` trait.
+///
+/// Wraps a `LoadedMesh` plus pre-computed vertex normals and collects
+/// per-face-vertex tangent/bitangent output from the MikkTSpace algorithm.
+struct MikkTSpaceInput<'a> {
+    mesh: &'a LoadedMesh,
+    vertex_normals: &'a [Vec3],
+    /// Per-face-vertex tangents, indexed as `[face * 3 + local_vert]`.
+    face_tangents: Vec<Vec3>,
+    /// Per-face-vertex bitangents, indexed as `[face * 3 + local_vert]`.
+    face_bitangents: Vec<Vec3>,
+}
+
+impl<'a> mikktspace::Geometry for MikkTSpaceInput<'a> {
+    fn num_faces(&self) -> usize {
+        self.mesh.indices.len() / 3
+    }
+
+    fn num_vertices_of_face(&self, _face: usize) -> usize {
+        3
+    }
+
+    fn position(&self, face: usize, vert: usize) -> [f32; 3] {
+        let idx = self.mesh.indices[face * 3 + vert] as usize;
+        self.mesh.positions[idx].into()
+    }
+
+    fn normal(&self, face: usize, vert: usize) -> [f32; 3] {
+        let idx = self.mesh.indices[face * 3 + vert] as usize;
+        self.vertex_normals[idx].into()
+    }
+
+    fn tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
+        let idx = self.mesh.indices[face * 3 + vert] as usize;
+        self.mesh.uvs[idx].into()
+    }
+
+    fn set_tangent(
+        &mut self,
+        tangent: [f32; 3],
+        bi_tangent: [f32; 3],
+        _f_mag_s: f32,
+        _f_mag_t: f32,
+        _bi_tangent_preserves_orientation: bool,
+        face: usize,
+        vert: usize,
+    ) {
+        let fv = face * 3 + vert;
+        self.face_tangents[fv] = Vec3::from(tangent);
+        self.face_bitangents[fv] = Vec3::from(bi_tangent);
+    }
+}
+
 /// Pre-computed mesh normal data rasterized into UV space.
 ///
 /// Each buffer is `resolution * resolution` in size, row-major.
@@ -23,7 +78,7 @@ pub struct MeshNormalData {
 ///
 /// Algorithm:
 /// 1. Compute area-weighted vertex normals from face normals.
-/// 2. Compute per-triangle TBN basis from UV gradients.
+/// 2. Compute MikkTSpace tangents per face-vertex.
 /// 3. Rasterize triangles in UV space using barycentric interpolation.
 pub fn compute_mesh_normal_data(mesh: &LoadedMesh, resolution: u32) -> MeshNormalData {
     debug!(
@@ -40,31 +95,38 @@ pub fn compute_mesh_normal_data(mesh: &LoadedMesh, resolution: u32) -> MeshNorma
     // Step 1: Compute area-weighted vertex normals
     let vertex_normals = compute_vertex_normals(mesh);
 
-    // Step 2: Compute area-weighted vertex tangents/bitangents
-    let (vertex_tangents, vertex_bitangents) = compute_vertex_tangents(mesh);
+    // Step 2: Compute MikkTSpace tangents (per-face-vertex)
+    let face_count = mesh.indices.len() / 3;
+    let mut mikk = MikkTSpaceInput {
+        mesh,
+        vertex_normals: &vertex_normals,
+        face_tangents: vec![Vec3::ZERO; face_count * 3],
+        face_bitangents: vec![Vec3::ZERO; face_count * 3],
+    };
 
-    // Step 3: Rasterize each triangle in UV space with per-vertex interpolation
-    for tri in mesh.indices.chunks_exact(3) {
+    if !mikktspace::generate_tangents(&mut mikk) {
+        debug!("MikkTSpace generation failed; tangents will be zero");
+    }
+
+    // Step 3: Rasterize each triangle in UV space with per-face-vertex interpolation
+    for (face_idx, tri) in mesh.indices.chunks_exact(3).enumerate() {
         let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
-
-        let uv0 = mesh.uvs[i0];
-        let uv1 = mesh.uvs[i1];
-        let uv2 = mesh.uvs[i2];
+        let fv = face_idx * 3;
 
         rasterize_triangle_uv(
-            uv0,
-            uv1,
-            uv2,
+            mesh.uvs[i0],
+            mesh.uvs[i1],
+            mesh.uvs[i2],
             [vertex_normals[i0], vertex_normals[i1], vertex_normals[i2]],
             [
-                vertex_tangents[i0],
-                vertex_tangents[i1],
-                vertex_tangents[i2],
+                mikk.face_tangents[fv],
+                mikk.face_tangents[fv + 1],
+                mikk.face_tangents[fv + 2],
             ],
             [
-                vertex_bitangents[i0],
-                vertex_bitangents[i1],
-                vertex_bitangents[i2],
+                mikk.face_bitangents[fv],
+                mikk.face_bitangents[fv + 1],
+                mikk.face_bitangents[fv + 2],
             ],
             resolution,
             &mut object_normals,
@@ -79,10 +141,9 @@ pub fn compute_mesh_normal_data(mesh: &LoadedMesh, resolution: u32) -> MeshNorma
         if n.length_squared() > 1e-12 {
             let n = n.normalize();
             object_normals[i] = n;
-            // MikkTSpace-compatible orthogonalization: preserve UV handedness.
-            // Gram-Schmidt T against N, then derive B via cross product with
-            // the original handedness sign so mirrored UV islands get correct
-            // bitangent direction.
+            // Re-orthogonalize after barycentric interpolation.
+            // Gram-Schmidt T against N, then derive B via cross product
+            // preserving the handedness that MikkTSpace encoded.
             let t = tangents[i];
             let b = bitangents[i];
             if t.length_squared() > 1e-12 {
@@ -150,43 +211,6 @@ pub fn sample_tbn(data: &MeshNormalData, uv: Vec2) -> (Vec3, Vec3, Vec3) {
 }
 
 // ── Internal helpers ──
-
-/// Compute area-weighted vertex tangents and bitangents from UV gradients.
-///
-/// Each triangle contributes its (un-normalized) T/B to its three vertices.
-/// Edge magnitudes provide implicit area weighting, analogous to `compute_vertex_normals`.
-fn compute_vertex_tangents(mesh: &LoadedMesh) -> (Vec<Vec3>, Vec<Vec3>) {
-    let n = mesh.positions.len();
-    let mut tangents = vec![Vec3::ZERO; n];
-    let mut bitangents = vec![Vec3::ZERO; n];
-
-    for tri in mesh.indices.chunks_exact(3) {
-        let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
-
-        let e1 = mesh.positions[i1] - mesh.positions[i0];
-        let e2 = mesh.positions[i2] - mesh.positions[i0];
-        let duv1 = mesh.uvs[i1] - mesh.uvs[i0];
-        let duv2 = mesh.uvs[i2] - mesh.uvs[i0];
-
-        let det = duv1.x * duv2.y - duv1.y * duv2.x;
-        if det.abs() < 1e-10 {
-            continue; // degenerate UV — no contribution
-        }
-
-        let inv_det = 1.0 / det;
-        let t = (e1 * duv2.y - e2 * duv1.y) * inv_det;
-        let b = (e2 * duv1.x - e1 * duv2.x) * inv_det;
-
-        tangents[i0] += t;
-        tangents[i1] += t;
-        tangents[i2] += t;
-        bitangents[i0] += b;
-        bitangents[i1] += b;
-        bitangents[i2] += b;
-    }
-
-    (tangents, bitangents)
-}
 
 /// Compute area-weighted vertex normals from face normals.
 pub fn compute_vertex_normals(mesh: &LoadedMesh) -> Vec<Vec3> {
