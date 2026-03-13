@@ -470,13 +470,14 @@ struct RenderTargets {
 }
 
 fn create_render_targets(device: &wgpu::Device, width: u32, height: u32) -> RenderTargets {
+    let size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
     let color_tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("mesh_render_color"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
+        size,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -490,11 +491,7 @@ fn create_render_targets(device: &wgpu::Device, width: u32, height: u32) -> Rend
     });
     let depth_tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("mesh_render_depth"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
+        size,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -716,7 +713,7 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
             entry_point: Some("fs_main"),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                blend: Some(wgpu::BlendState::REPLACE),
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),

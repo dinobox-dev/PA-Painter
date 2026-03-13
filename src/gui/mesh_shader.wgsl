@@ -49,20 +49,8 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(t_color, s_color, in.uv);
-    let normal_sample = textureSample(t_normal, s_color, in.uv);
-    // Decode [0,1] → [-1,1] tangent-space normal
-    let ts_normal = normalize(normal_sample.rgb * 2.0 - vec3(1.0));
-    // TBN matrix: tangent-space → world-space
-    let T = normalize(in.world_tangent);
-    let B = normalize(in.world_bitangent);
-    let N = normalize(in.world_normal);
-    let world_normal = normalize(T * ts_normal.x + B * ts_normal.y + N * ts_normal.z);
-    // Alpha=0 → vertex normal (placeholder), alpha=1 → TBN-transformed normal (generated)
-    let n = normalize(mix(N, world_normal, normal_sample.a));
-    let ndotl = max(dot(n, u.light_dir), 0.0);
-    let lighting = u.ambient + (1.0 - u.ambient) * ndotl;
-    let bg = vec3(0.18, 0.18, 0.2);
-    var base = mix(bg, tex_color.rgb * lighting, tex_color.a);
+
+    var alpha = tex_color.a;
 
     // Drawing mode: reveal strokes over time (seconds-based)
     if u.mode == 1u {
@@ -80,11 +68,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let reveal = smoothstep(pixel_time - edge, pixel_time, u.time);
         // Unpainted pixels (order==0 && arc==0) stay hidden until time > 0
         let painted = step(0.004, order + arc);
-        base = mix(vec3(0.18, 0.18, 0.2), base, reveal * painted);
+        alpha *= reveal * painted;
     }
+
+    // Lighting
+    let normal_sample = textureSample(t_normal, s_color, in.uv);
+    let ts_normal = normalize(normal_sample.rgb * 2.0 - vec3(1.0));
+    let T = normalize(in.world_tangent);
+    let B = normalize(in.world_bitangent);
+    let N = normalize(in.world_normal);
+    let world_normal = normalize(T * ts_normal.x + B * ts_normal.y + N * ts_normal.z);
+    let n = normalize(mix(N, world_normal, normal_sample.a));
+    let ndotl = max(dot(n, u.light_dir), 0.0);
+    let lighting = u.ambient + (1.0 - u.ambient) * ndotl;
+
+    var final_color = tex_color.rgb * lighting;
 
     // Alpha-blend overlay (direction field arrows, etc.) over lit surface
     let overlay = textureSample(t_overlay, s_color, in.uv);
-    let final_color = mix(base, overlay.rgb, overlay.a);
-    return vec4<f32>(final_color, 1.0);
+    final_color = mix(final_color, overlay.rgb, overlay.a);
+
+    // Premultiplied output — GPU blends over the background clear color
+    return vec4<f32>(final_color * alpha, alpha);
 }
