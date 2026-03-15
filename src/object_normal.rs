@@ -1192,16 +1192,17 @@ mod tests {
                 .expect("save obj_normal_rgb");
 
             // GLB 3D preview
-            crate::glb_export::export_preview_glb(
-                &mesh,
-                &maps.color,
-                &normalized_height,
-                &normals,
-                res,
-                0.05,
-                &out_dir.join(format!("{label}.glb")),
-                NormalYConvention::OpenGL,
-            )
+            crate::glb_export::export_preview_glb(&crate::glb_export::GlbExportParams {
+                mesh: &mesh,
+                color_map: &maps.color,
+                height_map: &normalized_height,
+                normal_map: &normals,
+                resolution: res,
+                displacement_scale: 0.05,
+                path: &out_dir.join(format!("{label}.glb")),
+                normal_y: NormalYConvention::OpenGL,
+                alpha_blend: false,
+            })
             .expect("save GLB preview");
         }
 

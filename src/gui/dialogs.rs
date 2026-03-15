@@ -780,29 +780,17 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
     if do_glb {
         if let Some(ref mesh) = mesh {
             let normalized_height = normalize_height_map(&height);
-            let result = if with_alpha {
-                glb_export::export_preview_glb_transparent(
-                    mesh,
-                    &color,
-                    &normalized_height,
-                    &normal_map,
-                    res,
-                    0.0,
-                    &dir.join("preview.glb"),
-                    es.normal_y,
-                )
-            } else {
-                glb_export::export_preview_glb(
-                    mesh,
-                    &color,
-                    &normalized_height,
-                    &normal_map,
-                    res,
-                    0.0,
-                    &dir.join("preview.glb"),
-                    es.normal_y,
-                )
-            };
+            let result = glb_export::export_preview_glb(&glb_export::GlbExportParams {
+                mesh,
+                color_map: &color,
+                height_map: &normalized_height,
+                normal_map: &normal_map,
+                resolution: res,
+                displacement_scale: 0.0,
+                path: &dir.join("preview.glb"),
+                normal_y: es.normal_y,
+                alpha_blend: with_alpha,
+            });
             result.map_err(|e| format!("GLB export failed: {e:?}"))?;
             count += 1;
             step.store(count, Ordering::Relaxed);

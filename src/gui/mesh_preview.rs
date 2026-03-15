@@ -297,8 +297,8 @@ fn build_vertices(mesh: &LoadedMesh) -> (Vec<Vertex>, Vec<u32>) {
     let mut indices = Vec::with_capacity(total);
 
     for (face, tri) in mesh.indices.chunks_exact(3).enumerate() {
-        for local in 0..3 {
-            let vi = tri[local] as usize;
+        for (local, &idx) in tri.iter().enumerate() {
+            let vi = idx as usize;
             let fv = face * 3 + local;
             let uv = mesh.uvs.get(vi).copied().unwrap_or(glam::Vec2::ZERO);
             vertices.push(Vertex {

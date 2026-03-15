@@ -17,92 +17,53 @@ use crate::types::{Color, NormalYConvention};
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
+/// Parameters for exporting a 3D preview GLB with paint textures.
+pub struct GlbExportParams<'a> {
+    pub mesh: &'a LoadedMesh,
+    pub color_map: &'a [Color],
+    pub height_map: &'a [f32],
+    pub normal_map: &'a [[f32; 3]],
+    pub resolution: u32,
+    pub displacement_scale: f32,
+    pub path: &'a Path,
+    pub normal_y: NormalYConvention,
+    pub alpha_blend: bool,
+}
+
 /// Export a 3D preview GLB with paint textures baked onto a subdivided mesh.
-///
-/// - `mesh`: original mesh (e.g. cube)
-/// - `color_map`: compositing result, linear RGBA, `resolution²` pixels
-/// - `height_map`: normalized [0, 1] height, `resolution²` pixels
-/// - `normal_map`: tangent-space normal map encoded [0, 1], `resolution²` pixels
-/// - `displacement_scale`: multiplier for height → vertex displacement
-pub fn export_preview_glb(
-    mesh: &LoadedMesh,
-    color_map: &[Color],
-    height_map: &[f32],
-    normal_map: &[[f32; 3]],
-    resolution: u32,
-    displacement_scale: f32,
-    path: &Path,
-    normal_y: NormalYConvention,
-) -> Result<(), crate::output::OutputError> {
-    info!("Exporting preview GLB: {}", path.display());
-    export_preview_glb_inner(
+pub fn export_preview_glb(params: &GlbExportParams) -> Result<(), crate::output::OutputError> {
+    info!("Exporting preview GLB: {}", params.path.display());
+
+    let GlbExportParams {
         mesh,
         color_map,
         height_map,
         normal_map,
         resolution,
         displacement_scale,
-        false,
         path,
         normal_y,
-    )
-}
-
-/// Export a 3D preview GLB with alpha-blended paint (transparent background).
-pub fn export_preview_glb_transparent(
-    mesh: &LoadedMesh,
-    color_map: &[Color],
-    height_map: &[f32],
-    normal_map: &[[f32; 3]],
-    resolution: u32,
-    displacement_scale: f32,
-    path: &Path,
-    normal_y: NormalYConvention,
-) -> Result<(), crate::output::OutputError> {
-    export_preview_glb_inner(
-        mesh,
-        color_map,
-        height_map,
-        normal_map,
-        resolution,
-        displacement_scale,
-        true,
-        path,
-        normal_y,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn export_preview_glb_inner(
-    mesh: &LoadedMesh,
-    color_map: &[Color],
-    height_map: &[f32],
-    normal_map: &[[f32; 3]],
-    resolution: u32,
-    displacement_scale: f32,
-    alpha_blend: bool,
-    path: &Path,
-    normal_y: NormalYConvention,
-) -> Result<(), crate::output::OutputError> {
+        alpha_blend,
+    } = params;
     // 1. Encode textures to in-memory PNGs
-    let color_png = encode_color_png(color_map, resolution)?;
-    let normal_png = encode_normal_png(normal_map, resolution, normal_y)?;
+    let color_png = encode_color_png(color_map, *resolution)?;
+    let normal_png = encode_normal_png(normal_map, *resolution, *normal_y)?;
 
     // 2. Subdivide mesh (only if displacement is active) and displace by height
-    let subdiv_level = if displacement_scale > 0.0 { 8 } else { 1 };
+    let subdiv_level = if *displacement_scale > 0.0 { 8 } else { 1 };
     let subdiv = subdivide_and_displace(
         mesh,
         height_map,
-        resolution,
+        *resolution,
         subdiv_level,
-        displacement_scale,
+        *displacement_scale,
     );
 
     // 3. Build BIN buffer (vertex data + index data + images)
     let bin = build_bin_buffer(&subdiv, &color_png, &normal_png);
 
     // 4. Build glTF JSON
-    let json = build_gltf_json(&subdiv, &bin, alpha_blend)?;
+    let json = build_gltf_json(&subdiv, &bin, *alpha_blend)?;
 
     // 5. Write GLB
     write_glb(path, &json, &bin.data)?;
@@ -588,16 +549,17 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("test_roundtrip.glb");
 
-        export_preview_glb(
-            &mesh,
-            &color_map,
-            &height_map,
-            &normal_map,
-            res,
-            0.05,
-            &path,
-            NormalYConvention::OpenGL,
-        )
+        export_preview_glb(&GlbExportParams {
+            mesh: &mesh,
+            color_map: &color_map,
+            height_map: &height_map,
+            normal_map: &normal_map,
+            resolution: res,
+            displacement_scale: 0.05,
+            path: &path,
+            normal_y: NormalYConvention::OpenGL,
+            alpha_blend: false,
+        })
         .expect("GLB export should succeed");
 
         // Verify file exists and starts with glTF magic
@@ -775,16 +737,17 @@ mod tests {
             };
 
             let path = out_dir.join(format!("{label}.glb"));
-            export_preview_glb(
-                &mesh,
-                &maps.color,
-                &normalized_height,
-                &normals,
-                res,
-                0.0,
-                &path,
-                NormalYConvention::OpenGL,
-            )
+            export_preview_glb(&GlbExportParams {
+                mesh: &mesh,
+                color_map: &maps.color,
+                height_map: &normalized_height,
+                normal_map: &normals,
+                resolution: res,
+                displacement_scale: 0.0,
+                path: &path,
+                normal_y: NormalYConvention::OpenGL,
+                alpha_blend: false,
+            })
             .expect("sphere GLB export");
 
             // Dump normal map PNG for comparison
@@ -824,16 +787,17 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("test_gltf_load.glb");
 
-        export_preview_glb(
-            &mesh,
-            &color_map,
-            &height_map,
-            &normal_map,
-            res,
-            0.05,
-            &path,
-            NormalYConvention::OpenGL,
-        )
+        export_preview_glb(&GlbExportParams {
+            mesh: &mesh,
+            color_map: &color_map,
+            height_map: &height_map,
+            normal_map: &normal_map,
+            resolution: res,
+            displacement_scale: 0.05,
+            path: &path,
+            normal_y: NormalYConvention::OpenGL,
+            alpha_blend: false,
+        })
         .unwrap();
 
         // Validate with the gltf crate
@@ -917,16 +881,17 @@ mod tests {
 
         let out_dir = crate::test_module_output_dir("glb_export");
         let path = out_dir.join("sphere_transparent.glb");
-        export_preview_glb_transparent(
-            &mesh,
-            &maps.color,
-            &normalized_height,
-            &normals,
-            res,
-            0.0,
-            &path,
-            NormalYConvention::OpenGL,
-        )
+        export_preview_glb(&GlbExportParams {
+            mesh: &mesh,
+            color_map: &maps.color,
+            height_map: &normalized_height,
+            normal_map: &normals,
+            resolution: res,
+            displacement_scale: 0.0,
+            path: &path,
+            normal_y: NormalYConvention::OpenGL,
+            alpha_blend: true,
+        })
         .expect("transparent GLB export");
 
         // Also dump the color map PNG with alpha
@@ -1020,16 +985,17 @@ mod tests {
         let out_dir = crate::test_module_output_dir("glb_export");
 
         let glb_path = out_dir.join("sphere_overscan_poisson.glb");
-        export_preview_glb_transparent(
-            &mesh,
-            &maps.color,
-            &normalized_height,
-            &normals,
-            res,
-            0.0,
-            &glb_path,
-            NormalYConvention::OpenGL,
-        )
+        export_preview_glb(&GlbExportParams {
+            mesh: &mesh,
+            color_map: &maps.color,
+            height_map: &normalized_height,
+            normal_map: &normals,
+            resolution: res,
+            displacement_scale: 0.0,
+            path: &glb_path,
+            normal_y: NormalYConvention::OpenGL,
+            alpha_blend: true,
+        })
         .expect("overscan GLB export");
 
         let color_path = out_dir.join("sphere_overscan_poisson_color.png");
