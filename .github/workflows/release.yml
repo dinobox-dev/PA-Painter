@@ -265,7 +265,11 @@ jobs:
     needs: [build-other, macos-universal]
     if: ${{ !contains(github.ref, '-') }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@v5
+
       - uses: actions/download-artifact@v5
         with:
           path: artifacts
@@ -294,3 +298,19 @@ jobs:
 
           ./butler push artifacts/universal-apple-darwin/* \
             "$ITCH_GAME:macos" --userversion "$VERSION"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          cat > release_notes.md <<'NOTES'
+          ## Download
+
+          **[Download from itch.io](https://dinoboxgamedev.itch.io/papainter)**
+
+          See [CHANGELOG.md](https://github.com/dinobox-dev/PA-Painter/blob/main/CHANGELOG.md) for details.
+          NOTES
+          gh release create "$TAG" \
+            --title "PA Painter $TAG" \
+            --notes-file release_notes.md
