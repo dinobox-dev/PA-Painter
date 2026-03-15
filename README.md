@@ -21,7 +21,11 @@ Originally built for *Practical Arcana* (coming soon), but works with any UV-map
 - **CLI renderer**: headless batch rendering for automation
 - **File format**: `.papr` project files with undo/redo support
 
-## Building
+## Download
+
+Pre-built binaries for Windows, Linux, and macOS are available on [itch.io](https://dinoboxgamedev.itch.io/papainter). macOS builds are code-signed and notarized by Apple.
+
+## Building from Source
 
 Requires Rust 1.87+ and a GPU with Vulkan/Metal/DX12 support (for the GUI).
 
