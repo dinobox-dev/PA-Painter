@@ -221,6 +221,11 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - name: Disable Windows Defender real-time monitoring
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
