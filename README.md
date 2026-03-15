@@ -1,6 +1,7 @@
 # PA Painter
 
 ![CI](https://github.com/dinobox-dev/PA-Painter/actions/workflows/ci.yml/badge.svg)
+[![itch.io](https://img.shields.io/badge/itch.io-PA%20Painter-FA5C5C?logo=itchdotio&logoColor=white)](https://dinoboxgamedev.itch.io/papainter)
 
 Procedural paint stroke generator for 3D assets. Turn any mesh into a hand-painted look with full control over stroke direction, density, and layering.
 

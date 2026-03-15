@@ -4,11 +4,9 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
-
 env:
   CARGO_TERM_COLOR: always
+  ITCH_GAME: dinoboxgamedev/papainter
 
 jobs:
   verify:
@@ -88,7 +86,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/pa-painter-gui${{ matrix.ext }}" "$DIR/"
           cp README.md LICENSE CHANGELOG.md "$DIR/"
           tar czf "${DIR}.tar.gz" "$DIR"
-          echo "ASSET=${DIR}.tar.gz" >> $GITHUB_ENV
+          echo "ASSET=${DIR}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -109,9 +107,9 @@ jobs:
           name: ${{ matrix.target }}
           path: ${{ env.ASSET }}
 
-  # Create a universal macOS binary from arm64 + x64
+  # Create a universal macOS binary, then codesign and notarize
   macos-universal:
-    name: macOS Universal
+    name: macOS Universal + Notarize
     needs: build
     runs-on: macos-latest
     steps:
@@ -126,6 +124,40 @@ jobs:
         with:
           name: x86_64-apple-darwin
           path: x64
+
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          # Resolve the signing identity for later steps
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep "Developer ID Application" \
+            | head -1 \
+            | sed 's/.*"\(.*\)".*/\1/')
+          echo "CODESIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
       - name: Create universal binary
         run: |
@@ -142,8 +174,46 @@ jobs:
             tmp-arm64/pa-painter-gui tmp-x64/pa-painter-gui
 
           cp README.md LICENSE CHANGELOG.md "$DIR/"
-          tar czf "${DIR}.tar.gz" "$DIR"
-          echo "ASSET=${DIR}.tar.gz" >> $GITHUB_ENV
+          echo "UNIVERSAL_DIR=$DIR" >> "$GITHUB_ENV"
+
+      - name: Codesign binaries
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "$CODESIGN_IDENTITY" \
+            "$UNIVERSAL_DIR/pa-painter"
+
+          codesign --force --options runtime --timestamp \
+            --sign "$CODESIGN_IDENTITY" \
+            "$UNIVERSAL_DIR/pa-painter-gui"
+
+          # Verify signatures
+          codesign --verify --verbose "$UNIVERSAL_DIR/pa-painter"
+          codesign --verify --verbose "$UNIVERSAL_DIR/pa-painter-gui"
+
+      - name: Notarize binaries
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Create a zip for notarization submission
+          NOTARIZE_ZIP="$RUNNER_TEMP/notarize-payload.zip"
+          ditto -c -k --keepParent "$UNIVERSAL_DIR" "$NOTARIZE_ZIP"
+
+          xcrun notarytool submit "$NOTARIZE_ZIP" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          # Staple cannot be applied to bare binaries (only .app, .pkg, .dmg),
+          # so we skip stapling. Gatekeeper will check the notarization ticket
+          # online when the user first runs the binary.
+
+      - name: Package notarized universal binary
+        run: |
+          tar czf "${UNIVERSAL_DIR}.tar.gz" "$UNIVERSAL_DIR"
+          echo "ASSET=${UNIVERSAL_DIR}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Upload universal artifact
         uses: actions/upload-artifact@v4
@@ -151,18 +221,41 @@ jobs:
           name: universal-apple-darwin
           path: ${{ env.ASSET }}
 
-  release:
-    name: Publish Release
+      - name: Clean up keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+
+  publish:
+    name: Publish to itch.io
     needs: [build, macos-universal]
+    if: ${{ !contains(github.ref, '-') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          prerelease: ${{ contains(github.ref, '-') }}
-          files: artifacts/**/*
+      - name: Install butler
+        run: |
+          curl -L -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          unzip butler.zip
+          chmod +x butler
+          ./butler -V
+
+      - name: Push to itch.io
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+
+          ./butler push artifacts/x86_64-pc-windows-msvc/* \
+            "$ITCH_GAME:windows" --userversion "$VERSION"
+
+          ./butler push artifacts/x86_64-unknown-linux-gnu/* \
+            "$ITCH_GAME:linux" --userversion "$VERSION"
+
+          ./butler push artifacts/aarch64-unknown-linux-gnu/* \
+            "$ITCH_GAME:linux-arm64" --userversion "$VERSION"
+
+          ./butler push artifacts/universal-apple-darwin/* \
+            "$ITCH_GAME:macos" --userversion "$VERSION"
