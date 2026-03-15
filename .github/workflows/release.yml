@@ -278,7 +278,6 @@ jobs:
           - name: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            archive: zip
             ext: .exe
 
           - name: Linux
@@ -350,25 +349,43 @@ jobs:
           tar czf "${DIR}.tar.gz" "$DIR"
           echo "CLI_ASSET=${DIR}.tar.gz" >> "$GITHUB_ENV"
 
-      - name: Package (Windows)
+      - name: Package GUI (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $tag = $env:GITHUB_REF -replace 'refs/tags/',''
-          $dir = "pa-painter-${tag}-${{ matrix.target }}"
+          $dir = "pa-painter-gui-${tag}-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $dir
-          Copy-Item "target/${{ matrix.target }}/release/pa-painter${{ matrix.ext }}" "$dir/"
           Copy-Item "target/${{ matrix.target }}/release/pa-painter-gui${{ matrix.ext }}" "$dir/"
           Copy-Item README.md,LICENSE,CHANGELOG.md "$dir/"
           Compress-Archive -Path "$dir" -DestinationPath "${dir}.zip"
-          echo "ASSET=${dir}.zip" >> $env:GITHUB_ENV
+          echo "GUI_ASSET=${dir}.zip" >> $env:GITHUB_ENV
 
-      - name: Upload artifact (Windows)
+      - name: Package CLI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF -replace 'refs/tags/',''
+          $dir = "pa-painter-cli-${tag}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $dir
+          Copy-Item "target/${{ matrix.target }}/release/pa-painter${{ matrix.ext }}" "$dir/"
+          Copy-Item README.md,LICENSE,CHANGELOG.md "$dir/"
+          Compress-Archive -Path "$dir" -DestinationPath "${dir}.zip"
+          echo "CLI_ASSET=${dir}.zip" >> $env:GITHUB_ENV
+
+      - name: Upload GUI artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v5
         with:
-          name: ${{ matrix.target }}
-          path: ${{ env.ASSET }}
+          name: ${{ matrix.target }}-gui
+          path: ${{ env.GUI_ASSET }}
+
+      - name: Upload CLI artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.target }}-cli
+          path: ${{ env.CLI_ASSET }}
 
       - name: Upload AppImage artifact
         if: runner.os == 'Linux'
@@ -411,7 +428,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
 
-          ./butler push artifacts/x86_64-pc-windows-msvc/* \
+          ./butler push artifacts/x86_64-pc-windows-msvc-gui/* \
             "$ITCH_GAME:windows" --userversion "$VERSION"
 
           ./butler push artifacts/x86_64-unknown-linux-gnu-appimage/* \
@@ -436,7 +453,7 @@ jobs:
           See [CHANGELOG.md](https://github.com/dinobox-dev/PA-Painter/blob/main/CHANGELOG.md) for details.
           NOTES
           gh release create "$TAG" \
-            artifacts/x86_64-pc-windows-msvc/* \
+            artifacts/x86_64-pc-windows-msvc-cli/* \
             artifacts/x86_64-unknown-linux-gnu-cli/* \
             artifacts/aarch64-unknown-linux-gnu-cli/* \
             artifacts/universal-apple-darwin-cli/* \
