@@ -201,14 +201,12 @@ jobs:
           - name: Linux
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            archive: tar.gz
-            ext: ""
+            appimage_arch: x86_64
 
           - name: Linux-arm64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            archive: tar.gz
-            ext: ""
+            appimage_arch: aarch64
 
     steps:
       - uses: actions/checkout@v5
@@ -229,17 +227,45 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
+      - name: Package AppImage (Linux GUI)
+        if: runner.os == 'Linux'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+
+          # Download appimagetool
+          curl -fsSL -o appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage_arch }}.AppImage"
+          chmod +x appimagetool
+
+          # Build AppDir
+          mkdir -p AppDir/usr/bin \
+                   AppDir/usr/share/applications \
+                   AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp "target/${{ matrix.target }}/release/pa-painter-gui" AppDir/usr/bin/
+          cp assets/pa-painter.desktop AppDir/usr/share/applications/
+          cp assets/pa-painter.desktop AppDir/
+          cp assets/icon_default.png   AppDir/usr/share/icons/hicolor/256x256/apps/pa-painter.png
+          cp assets/icon_default.png   AppDir/pa-painter.png
+          ln -s usr/bin/pa-painter-gui AppDir/AppRun
+
+          # Create AppImage (type 3: no FUSE required on end-user machines)
+          APPIMAGE_NAME="pa-painter-gui-${TAG}-${{ matrix.target }}.AppImage"
+          ARCH=${{ matrix.appimage_arch }} ./appimagetool --no-fuse AppDir "$APPIMAGE_NAME"
+          echo "APPIMAGE=$APPIMAGE_NAME" >> "$GITHUB_ENV"
+
+      - name: Package CLI (Linux)
+        if: runner.os == 'Linux'
         run: |
           TAG=${GITHUB_REF#refs/tags/}
           DIR="pa-painter-${TAG}-${{ matrix.target }}"
           mkdir "$DIR"
-          cp "target/${{ matrix.target }}/release/pa-painter${{ matrix.ext }}" "$DIR/"
-          cp "target/${{ matrix.target }}/release/pa-painter-gui${{ matrix.ext }}" "$DIR/"
+          cp "target/${{ matrix.target }}/release/pa-painter" "$DIR/"
           cp README.md LICENSE CHANGELOG.md "$DIR/"
           tar czf "${DIR}.tar.gz" "$DIR"
-          echo "ASSET=${DIR}.tar.gz" >> "$GITHUB_ENV"
+          echo "CLI_ASSET=${DIR}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -254,11 +280,26 @@ jobs:
           Compress-Archive -Path "$dir" -DestinationPath "${dir}.zip"
           echo "ASSET=${dir}.zip" >> $env:GITHUB_ENV
 
-      - name: Upload artifact
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.target }}
           path: ${{ env.ASSET }}
+
+      - name: Upload AppImage artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.target }}-appimage
+          path: ${{ env.APPIMAGE }}
+
+      - name: Upload CLI artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.target }}-cli
+          path: ${{ env.CLI_ASSET }}
 
   publish:
     name: Publish to itch.io
@@ -290,10 +331,10 @@ jobs:
           ./butler push artifacts/x86_64-pc-windows-msvc/* \
             "$ITCH_GAME:windows" --userversion "$VERSION"
 
-          ./butler push artifacts/x86_64-unknown-linux-gnu/* \
+          ./butler push artifacts/x86_64-unknown-linux-gnu-appimage/* \
             "$ITCH_GAME:linux" --userversion "$VERSION"
 
-          ./butler push artifacts/aarch64-unknown-linux-gnu/* \
+          ./butler push artifacts/aarch64-unknown-linux-gnu-appimage/* \
             "$ITCH_GAME:linux-arm64" --userversion "$VERSION"
 
           ./butler push artifacts/universal-apple-darwin/* \
@@ -312,5 +353,9 @@ jobs:
           See [CHANGELOG.md](https://github.com/dinobox-dev/PA-Painter/blob/main/CHANGELOG.md) for details.
           NOTES
           gh release create "$TAG" \
+            artifacts/x86_64-pc-windows-msvc/* \
+            artifacts/x86_64-unknown-linux-gnu-cli/* \
+            artifacts/aarch64-unknown-linux-gnu-cli/* \
+            artifacts/universal-apple-darwin/* \
             --title "PA Painter $TAG" \
             --notes-file release_notes.md

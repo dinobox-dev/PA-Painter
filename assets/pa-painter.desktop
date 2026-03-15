@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=PA Painter
+Comment=Procedural paint stroke generator for 3D assets
+Exec=pa-painter-gui
+Icon=pa-painter
+Type=Application
+Categories=Graphics;3DGraphics;
+Keywords=procedural;texture;paint;stroke;3d;
+StartupWMClass=PA Painter
