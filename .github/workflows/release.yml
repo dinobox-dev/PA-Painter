@@ -136,50 +136,133 @@ jobs:
           cp README.md LICENSE CHANGELOG.md "$DIR/"
           echo "UNIVERSAL_DIR=$DIR" >> "$GITHUB_ENV"
 
-      - name: Codesign binaries
+      - name: Create .app bundle
         run: |
-          codesign --force --options runtime --timestamp \
+          APP="PA Painter.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+          cp "$UNIVERSAL_DIR/pa-painter-gui" "$APP/Contents/MacOS/"
+          cp assets/icon.icns "$APP/Contents/Resources/AppIcon.icns"
+
+          VERSION=${GITHUB_REF#refs/tags/v}
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>PA Painter</string>
+            <key>CFBundleDisplayName</key>
+            <string>PA Painter</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.dinobox.pa-painter</string>
+            <key>CFBundleVersion</key>
+            <string>${VERSION}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${VERSION}</string>
+            <key>CFBundleExecutable</key>
+            <string>pa-painter-gui</string>
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>11.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>LSApplicationCategoryType</key>
+            <string>public.app-category.graphics-design</string>
+            <key>NSSupportsAutomaticGraphicsSwitching</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Codesign .app bundle
+        run: |
+          codesign --force --deep --options runtime --timestamp \
             --sign "$CODESIGN_IDENTITY" \
-            "$UNIVERSAL_DIR/pa-painter"
+            "PA Painter.app"
+          codesign --verify --deep --verbose "PA Painter.app"
 
-          codesign --force --options runtime --timestamp \
+      - name: Create and sign DMG
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          DMG_NAME="pa-painter-gui-${TAG}-universal-apple-darwin.dmg"
+
+          # Stage DMG contents: .app + Applications shortcut
+          mkdir dmg-stage
+          mv "PA Painter.app" dmg-stage/
+          ln -s /Applications dmg-stage/Applications
+
+          hdiutil create -volname "PA Painter" \
+            -srcfolder dmg-stage \
+            -ov -format UDZO \
+            "$DMG_NAME"
+
+          codesign --force --timestamp \
             --sign "$CODESIGN_IDENTITY" \
-            "$UNIVERSAL_DIR/pa-painter-gui"
+            "$DMG_NAME"
 
-          # Verify signatures
-          codesign --verify --verbose "$UNIVERSAL_DIR/pa-painter"
-          codesign --verify --verbose "$UNIVERSAL_DIR/pa-painter-gui"
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
 
-      - name: Notarize binaries
+      - name: Notarize and staple DMG
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # Create a zip for notarization submission
-          NOTARIZE_ZIP="$RUNNER_TEMP/notarize-payload.zip"
-          ditto -c -k --keepParent "$UNIVERSAL_DIR" "$NOTARIZE_ZIP"
+          xcrun notarytool submit "$DMG_NAME" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
 
+          xcrun stapler staple "$DMG_NAME"
+
+      - name: Codesign and notarize CLI binary
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "$CODESIGN_IDENTITY" \
+            "$UNIVERSAL_DIR/pa-painter"
+          codesign --verify --verbose "$UNIVERSAL_DIR/pa-painter"
+
+          NOTARIZE_ZIP="$RUNNER_TEMP/cli-notarize.zip"
+          ditto -c -k --keepParent "$UNIVERSAL_DIR/pa-painter" "$NOTARIZE_ZIP"
           xcrun notarytool submit "$NOTARIZE_ZIP" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
 
-          # Staple cannot be applied to bare binaries (only .app, .pkg, .dmg),
-          # so we skip stapling. Gatekeeper will check the notarization ticket
-          # online when the user first runs the binary.
-
-      - name: Package notarized universal binary
+      - name: Package CLI tar.gz
         run: |
-          tar czf "${UNIVERSAL_DIR}.tar.gz" "$UNIVERSAL_DIR"
-          echo "ASSET=${UNIVERSAL_DIR}.tar.gz" >> "$GITHUB_ENV"
+          TAG=${GITHUB_REF#refs/tags/}
+          CLI_DIR="pa-painter-cli-${TAG}-universal-apple-darwin"
+          mkdir "$CLI_DIR"
+          cp "$UNIVERSAL_DIR/pa-painter" "$CLI_DIR/"
+          cp README.md LICENSE CHANGELOG.md "$CLI_DIR/"
+          tar czf "${CLI_DIR}.tar.gz" "$CLI_DIR"
+          echo "CLI_ASSET=${CLI_DIR}.tar.gz" >> "$GITHUB_ENV"
 
-      - name: Upload universal artifact
+      - name: Upload DMG artifact
         uses: actions/upload-artifact@v5
         with:
-          name: universal-apple-darwin
-          path: ${{ env.ASSET }}
+          name: universal-apple-darwin-dmg
+          path: ${{ env.DMG_NAME }}
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: universal-apple-darwin-cli
+          path: ${{ env.CLI_ASSET }}
 
       - name: Clean up keychain
         if: always()
@@ -260,7 +343,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          DIR="pa-painter-${TAG}-${{ matrix.target }}"
+          DIR="pa-painter-cli-${TAG}-${{ matrix.target }}"
           mkdir "$DIR"
           cp "target/${{ matrix.target }}/release/pa-painter" "$DIR/"
           cp README.md LICENSE CHANGELOG.md "$DIR/"
@@ -337,7 +420,7 @@ jobs:
           ./butler push artifacts/aarch64-unknown-linux-gnu-appimage/* \
             "$ITCH_GAME:linux-arm64" --userversion "$VERSION"
 
-          ./butler push artifacts/universal-apple-darwin/* \
+          ./butler push artifacts/universal-apple-darwin-dmg/* \
             "$ITCH_GAME:macos" --userversion "$VERSION"
 
       - name: Create GitHub Release
@@ -356,6 +439,6 @@ jobs:
             artifacts/x86_64-pc-windows-msvc/* \
             artifacts/x86_64-unknown-linux-gnu-cli/* \
             artifacts/aarch64-unknown-linux-gnu-cli/* \
-            artifacts/universal-apple-darwin/* \
+            artifacts/universal-apple-darwin-cli/* \
             --title "PA Painter $TAG" \
             --notes-file release_notes.md
