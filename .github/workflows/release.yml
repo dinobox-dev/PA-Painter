@@ -339,9 +339,9 @@ jobs:
           cp assets/icon_default.png   AppDir/pa-painter.png
           ln -s usr/bin/pa-painter-gui AppDir/AppRun
 
-          # Create AppImage (type 3: no FUSE required on end-user machines)
+          # Create AppImage
           APPIMAGE_NAME="pa-painter-gui-${TAG}-${{ matrix.target }}.AppImage"
-          ARCH=${{ matrix.appimage_arch }} ./appimagetool --no-fuse AppDir "$APPIMAGE_NAME"
+          ARCH=${{ matrix.appimage_arch }} ./appimagetool AppDir "$APPIMAGE_NAME"
           echo "APPIMAGE=$APPIMAGE_NAME" >> "$GITHUB_ENV"
 
       - name: Package CLI (Linux)
