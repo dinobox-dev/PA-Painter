@@ -181,12 +181,17 @@ jobs:
           </plist>
           PLIST
 
-      - name: Codesign .app bundle
+      - name: Codesign .app bundle and CLI binary
         run: |
           codesign --force --deep --options runtime --timestamp \
             --sign "$CODESIGN_IDENTITY" \
             "PA Painter.app"
           codesign --verify --deep --verbose "PA Painter.app"
+
+          codesign --force --options runtime --timestamp \
+            --sign "$CODESIGN_IDENTITY" \
+            "$UNIVERSAL_DIR/pa-painter"
+          codesign --verify --verbose "$UNIVERSAL_DIR/pa-painter"
 
       - name: Create and sign DMG
         run: |
@@ -209,38 +214,39 @@ jobs:
 
           echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
 
-      - name: Notarize and staple DMG
+      - name: Notarize DMG and CLI in parallel
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          NOTARIZE_ZIP="$RUNNER_TEMP/cli-notarize.zip"
+          ditto -c -k --keepParent "$UNIVERSAL_DIR/pa-painter" "$NOTARIZE_ZIP"
+
+          # Submit both notarizations in parallel
           xcrun notarytool submit "$DMG_NAME" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait
+            --wait &
+          DMG_PID=$!
 
-          xcrun stapler staple "$DMG_NAME"
-
-      - name: Codesign and notarize CLI binary
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          codesign --force --options runtime --timestamp \
-            --sign "$CODESIGN_IDENTITY" \
-            "$UNIVERSAL_DIR/pa-painter"
-          codesign --verify --verbose "$UNIVERSAL_DIR/pa-painter"
-
-          NOTARIZE_ZIP="$RUNNER_TEMP/cli-notarize.zip"
-          ditto -c -k --keepParent "$UNIVERSAL_DIR/pa-painter" "$NOTARIZE_ZIP"
           xcrun notarytool submit "$NOTARIZE_ZIP" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait
+            --wait &
+          CLI_PID=$!
+
+          # Wait for both; collect exit codes so one failure doesn't mask the other
+          DMG_OK=0; wait $DMG_PID || DMG_OK=$?
+          CLI_OK=0; wait $CLI_PID || CLI_OK=$?
+          if [ $DMG_OK -ne 0 ] || [ $CLI_OK -ne 0 ]; then
+            echo "::error::Notarization failed (DMG=$DMG_OK, CLI=$CLI_OK)"
+            exit 1
+          fi
+
+          xcrun stapler staple "$DMG_NAME"
 
       - name: Package CLI tar.gz
         run: |
