@@ -55,6 +55,10 @@ pub struct PainterApp {
     prev_show_direction_field: bool,
     /// Hash of guide state for direction field overlay invalidation.
     prev_direction_field_hash: u64,
+    /// Background update checker.
+    update_checker: update_check::UpdateChecker,
+    /// Whether the user dismissed the update banner.
+    update_dismissed: bool,
 }
 
 impl PainterApp {
@@ -75,6 +79,8 @@ impl PainterApp {
             remerge_worker: generation::RemergeWorker::default(),
             prev_show_direction_field: false,
             prev_direction_field_hash: 0,
+            update_checker: update_check::UpdateChecker::spawn(),
+            update_dismissed: false,
         }
     }
 
@@ -1088,6 +1094,7 @@ impl eframe::App for PainterApp {
 
         // ── UI panels (order matters for egui layout) ──
         self.show_menu_bar(ctx);
+        self.show_update_banner(ctx);
         self.show_status_bar(ctx);
         self.show_sidebars(ctx);
         self.show_central_panel(ctx);
@@ -1441,6 +1448,111 @@ impl PainterApp {
         if self.state.export_worker.is_running() {
             ctx.request_repaint();
         }
+    }
+
+    /// Colored banner below the menu bar when a newer version is available.
+    fn show_update_banner(&mut self, ctx: &egui::Context) {
+        self.update_checker.poll();
+
+        if self.update_dismissed {
+            return;
+        }
+        let Some(info) = self.update_checker.update_available() else {
+            return;
+        };
+
+        let version = info.version.clone();
+        let url = info.url.clone();
+
+        let bg = egui::Color32::from_rgb(56, 152, 220);
+        let bg_hover = egui::Color32::from_rgb(70, 165, 230);
+        let fg = egui::Color32::from_rgb(240, 248, 255);
+        let fg_dim = egui::Color32::from_rgb(200, 225, 245);
+
+        let banner_h = 30.0;
+        let text_size = 13.0;
+        let icon_size = 16.0;
+        let x_size = 18.0;
+        let gap = 5.0;
+
+        egui::TopBottomPanel::top("update_banner")
+            .exact_height(banner_h)
+            .frame(egui::Frame::new().fill(bg))
+            .show(ctx, |ui| {
+                let rect = ui.max_rect();
+                let cy = rect.center().y;
+                let p = ui.painter();
+
+                // ── Left: icon + text + link, all vertically centered on cy ──
+                let mut x = rect.left() + 12.0;
+
+                let icon_galley = p.layout_no_wrap(
+                    egui_phosphor::fill::ARROW_CIRCLE_UP.to_string(),
+                    egui::FontId::proportional(icon_size),
+                    fg,
+                );
+                p.galley(
+                    egui::pos2(x, cy - icon_galley.size().y * 0.5),
+                    icon_galley.clone(),
+                    fg,
+                );
+                x += icon_galley.size().x + gap;
+
+                let label_galley = p.layout_no_wrap(
+                    format!("v{version} available"),
+                    egui::FontId::proportional(text_size),
+                    fg,
+                );
+                p.galley(
+                    egui::pos2(x, cy - label_galley.size().y * 0.5),
+                    label_galley.clone(),
+                    fg,
+                );
+                x += label_galley.size().x + gap + 2.0;
+
+                let dl_galley = p.layout_no_wrap(
+                    "Download".to_string(),
+                    egui::FontId::proportional(text_size),
+                    fg,
+                );
+                let dl_pos = egui::pos2(x, cy - dl_galley.size().y * 0.5);
+                let dl_rect = egui::Rect::from_min_size(dl_pos, dl_galley.size());
+                p.line_segment(
+                    [
+                        egui::pos2(dl_rect.left(), dl_rect.bottom() - 1.0),
+                        egui::pos2(dl_rect.right(), dl_rect.bottom() - 1.0),
+                    ],
+                    egui::Stroke::new(1.0, fg),
+                );
+                p.galley(dl_pos, dl_galley, fg);
+                let dl_resp = ui.interact(dl_rect, ui.id().with("dl_link"), egui::Sense::click());
+                if dl_resp.clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(&url));
+                }
+                dl_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+
+                // ── Right: dismiss × (square, full banner height) ──
+                let h = rect.height();
+                let x_hit = egui::Rect::from_min_size(
+                    egui::pos2(rect.right() - h, rect.top()),
+                    egui::vec2(h, h),
+                );
+                let x_resp = ui.interact(x_hit, ui.id().with("dismiss"), egui::Sense::click());
+                if x_resp.hovered() {
+                    p.rect_filled(x_hit, 0.0, bg_hover);
+                }
+                let x_color = if x_resp.hovered() { fg } else { fg_dim };
+                p.text(
+                    x_hit.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "\u{00D7}",
+                    egui::FontId::proportional(x_size),
+                    x_color,
+                );
+                if x_resp.clicked() {
+                    self.update_dismissed = true;
+                }
+            });
     }
 
     /// Top menu bar (File / Edit / View).

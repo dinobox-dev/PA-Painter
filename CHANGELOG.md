@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] — 2026-03-16
+
+### Added
+
+- In-app update check: on launch, checks for newer releases via GitHub API and shows a sky-blue banner below the menu bar with a download link to itch.io
+
+### CI
+
+- Release workflow now creates a GitHub Release (no binaries) linking to itch.io after butler publish completes
+
 ## [0.2.0] — 2026-03-15
 
 ### Changed
