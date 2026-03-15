@@ -8,6 +8,7 @@ pub mod slot_editor;
 pub mod state;
 pub mod textures;
 pub mod undo;
+pub mod update_check;
 pub mod viewport;
 pub mod widgets;
 
