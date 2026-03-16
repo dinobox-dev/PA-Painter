@@ -327,12 +327,12 @@ jobs:
         run: |
           TAG=${GITHUB_REF#refs/tags/}
 
-          # Download appimagetool and no-FUSE runtime
+          # Download appimagetool and runtime with fuse3/fuse2/extract fallback
           curl -fsSL -o appimagetool \
             "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage_arch }}.AppImage"
           chmod +x appimagetool
           curl -fsSL -o runtime \
-            "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-fuse3-${{ matrix.appimage_arch }}"
+            "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${{ matrix.appimage_arch }}"
 
           # Build AppDir
           mkdir -p AppDir/usr/bin \
