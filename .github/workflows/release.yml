@@ -332,12 +332,15 @@ jobs:
             "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.appimage_arch }}.AppImage"
           chmod +x linuxdeploy
 
+          # Resize icon to 512x512 and rename to match Icon= field in .desktop
+          convert assets/icon_default.png -resize 512x512 pa-painter.png
+
           # Create AppImage with linuxdeploy (analyses ldd, copies .so deps into AppDir)
           APPIMAGE_NAME="pa-painter-gui-${TAG}-${{ matrix.target }}.AppImage"
           OUTPUT="$APPIMAGE_NAME" ./linuxdeploy \
             --executable "target/${{ matrix.target }}/release/pa-painter-gui" \
             --desktop-file assets/pa-painter.desktop \
-            --icon-file assets/icon_512.png \
+            --icon-file pa-painter.png \
             --appdir AppDir \
             --output appimage
           echo "APPIMAGE=$APPIMAGE_NAME" >> "$GITHUB_ENV"
