@@ -195,22 +195,27 @@ jobs:
 
       - name: Create and sign DMG
         run: |
+          brew install create-dmg
+
           TAG=${GITHUB_REF#refs/tags/}
           DMG_NAME="pa-painter-gui-${TAG}-universal-apple-darwin.dmg"
 
-          # Stage DMG contents: .app + Applications shortcut
           mkdir dmg-stage
           mv "PA Painter.app" dmg-stage/
-          ln -s /Applications dmg-stage/Applications
 
-          hdiutil create -volname "PA Painter" \
-            -srcfolder dmg-stage \
-            -ov -format UDZO \
-            "$DMG_NAME"
-
-          codesign --force --timestamp \
-            --sign "$CODESIGN_IDENTITY" \
-            "$DMG_NAME"
+          create-dmg \
+            --volname "PA Painter" \
+            --volicon assets/icon.icns \
+            --background assets/dmg-background.png \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "PA Painter.app" 150 190 \
+            --app-drop-link 450 190 \
+            --codesign "$CODESIGN_IDENTITY" \
+            --no-internet-enable \
+            "$DMG_NAME" \
+            dmg-stage/
 
           echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
 
