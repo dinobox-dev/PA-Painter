@@ -327,10 +327,12 @@ jobs:
         run: |
           TAG=${GITHUB_REF#refs/tags/}
 
-          # Download appimagetool
+          # Download appimagetool and no-FUSE runtime
           curl -fsSL -o appimagetool \
             "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage_arch }}.AppImage"
           chmod +x appimagetool
+          curl -fsSL -o runtime \
+            "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-fuse3-${{ matrix.appimage_arch }}"
 
           # Build AppDir
           mkdir -p AppDir/usr/bin \
@@ -342,11 +344,21 @@ jobs:
           cp assets/pa-painter.desktop AppDir/
           cp assets/icon_default.png   AppDir/usr/share/icons/hicolor/256x256/apps/pa-painter.png
           cp assets/icon_default.png   AppDir/pa-painter.png
-          ln -s usr/bin/pa-painter-gui AppDir/AppRun
+
+          # AppRun script — sets APPDIR so the binary can locate bundled resources
+          cat > AppDir/AppRun << 'APPRUN'
+          #!/bin/bash
+          set -e
+          APPDIR="$(dirname "$(readlink -f "$0")")"
+          export PATH="${APPDIR}/usr/bin:${PATH}"
+          export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${LD_LIBRARY_PATH}"
+          exec "${APPDIR}/usr/bin/pa-painter-gui" "$@"
+          APPRUN
+          chmod +x AppDir/AppRun
 
           # Create AppImage
           APPIMAGE_NAME="pa-painter-gui-${TAG}-${{ matrix.target }}.AppImage"
-          ARCH=${{ matrix.appimage_arch }} ./appimagetool AppDir "$APPIMAGE_NAME"
+          ARCH=${{ matrix.appimage_arch }} ./appimagetool --runtime-file runtime AppDir "$APPIMAGE_NAME"
           echo "APPIMAGE=$APPIMAGE_NAME" >> "$GITHUB_ENV"
 
       - name: Package CLI (Linux)
