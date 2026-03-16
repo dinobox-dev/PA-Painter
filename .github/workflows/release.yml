@@ -434,16 +434,16 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
 
-          ./butler push artifacts/x86_64-pc-windows-msvc-gui/* \
+          ./butler push artifacts/x86_64-pc-windows-msvc-gui/ \
             "$ITCH_GAME:windows" --userversion "$VERSION"
 
-          ./butler push artifacts/x86_64-unknown-linux-gnu-appimage/* \
+          ./butler push artifacts/x86_64-unknown-linux-gnu-appimage/ \
             "$ITCH_GAME:linux" --userversion "$VERSION"
 
-          ./butler push artifacts/aarch64-unknown-linux-gnu-appimage/* \
+          ./butler push artifacts/aarch64-unknown-linux-gnu-appimage/ \
             "$ITCH_GAME:linux-arm64" --userversion "$VERSION"
 
-          ./butler push artifacts/universal-apple-darwin-dmg/* \
+          ./butler push artifacts/universal-apple-darwin-dmg/ \
             "$ITCH_GAME:macos" --userversion "$VERSION"
 
       - name: Create GitHub Release
@@ -454,7 +454,11 @@ jobs:
           cat > release_notes.md <<'NOTES'
           ## Download
 
-          **[Download from itch.io](https://dinoboxgamedev.itch.io/papainter)**
+          **GUI version** is available on itch.io — download it here:
+          👉 **[PA Painter on itch.io](https://dinoboxgamedev.itch.io/papainter)**
+
+          This release includes **CLI binaries only**.
+          For the graphical desktop app (Windows, macOS, Linux), please use the itch.io page above.
 
           See [CHANGELOG.md](https://github.com/dinobox-dev/PA-Painter/blob/main/CHANGELOG.md) for details.
           NOTES
