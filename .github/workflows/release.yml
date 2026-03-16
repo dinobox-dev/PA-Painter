@@ -327,38 +327,19 @@ jobs:
         run: |
           TAG=${GITHUB_REF#refs/tags/}
 
-          # Download appimagetool and runtime with fuse3/fuse2/extract fallback
-          curl -fsSL -o appimagetool \
-            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage_arch }}.AppImage"
-          chmod +x appimagetool
-          curl -fsSL -o runtime \
-            "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${{ matrix.appimage_arch }}"
+          # Download linuxdeploy — bundles shared library dependencies automatically
+          curl -fsSL -o linuxdeploy \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.appimage_arch }}.AppImage"
+          chmod +x linuxdeploy
 
-          # Build AppDir
-          mkdir -p AppDir/usr/bin \
-                   AppDir/usr/share/applications \
-                   AppDir/usr/share/icons/hicolor/256x256/apps
-
-          cp "target/${{ matrix.target }}/release/pa-painter-gui" AppDir/usr/bin/
-          cp assets/pa-painter.desktop AppDir/usr/share/applications/
-          cp assets/pa-painter.desktop AppDir/
-          cp assets/icon_default.png   AppDir/usr/share/icons/hicolor/256x256/apps/pa-painter.png
-          cp assets/icon_default.png   AppDir/pa-painter.png
-
-          # AppRun script — sets APPDIR so the binary can locate bundled resources
-          cat > AppDir/AppRun << 'APPRUN'
-          #!/bin/bash
-          set -e
-          APPDIR="$(dirname "$(readlink -f "$0")")"
-          export PATH="${APPDIR}/usr/bin:${PATH}"
-          export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${LD_LIBRARY_PATH}"
-          exec "${APPDIR}/usr/bin/pa-painter-gui" "$@"
-          APPRUN
-          chmod +x AppDir/AppRun
-
-          # Create AppImage
+          # Create AppImage with linuxdeploy (analyses ldd, copies .so deps into AppDir)
           APPIMAGE_NAME="pa-painter-gui-${TAG}-${{ matrix.target }}.AppImage"
-          ARCH=${{ matrix.appimage_arch }} ./appimagetool --runtime-file runtime AppDir "$APPIMAGE_NAME"
+          OUTPUT="$APPIMAGE_NAME" ./linuxdeploy \
+            --executable "target/${{ matrix.target }}/release/pa-painter-gui" \
+            --desktop-file assets/pa-painter.desktop \
+            --icon-file assets/icon_default.png \
+            --appdir AppDir \
+            --output appimage
           echo "APPIMAGE=$APPIMAGE_NAME" >> "$GITHUB_ENV"
 
       - name: Package CLI (Linux)
