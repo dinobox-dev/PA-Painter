@@ -333,6 +333,7 @@ jobs:
           chmod +x linuxdeploy
 
           # Resize icon to 512x512 and rename to match Icon= field in .desktop
+          sudo apt-get install -y -qq imagemagick > /dev/null
           convert assets/icon_default.png -resize 512x512 pa-painter.png
 
           # Create AppImage with linuxdeploy (analyses ldd, copies .so deps into AppDir)
