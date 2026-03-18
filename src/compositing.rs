@@ -1271,22 +1271,25 @@ pub fn merge_layers(
             global.height[idx] = new_h;
 
             // ── Color ──
+            // Skip color compositing for diffusion-halo pixels (height > 0
+            // from blur but never actually painted). These have alpha = 0
+            // and would otherwise blend as black, creating a dark fringe.
+            let above_pm = layer.color[idx];
+            let above_a = above_pm.a;
+            if above_a <= 0.0 {
+                continue;
+            }
+
             // dry=0 (wet): subtractive mix (pigments blend on wet surface)
             // dry=1: opaque over (paint covers dried surface)
             //
             // Both layer and global colors are premultiplied alpha.
             // Un-premultiply for subtractive mixing, then composite back.
-            let above_pm = layer.color[idx];
-            let above_a = above_pm.a;
-            let above_straight = if above_a > 0.0 {
-                Color::rgb(
-                    above_pm.r / above_a,
-                    above_pm.g / above_a,
-                    above_pm.b / above_a,
-                )
-            } else {
-                above_pm
-            };
+            let above_straight = Color::rgb(
+                above_pm.r / above_a,
+                above_pm.g / above_a,
+                above_pm.b / above_a,
+            );
 
             let prev = global.color[idx];
             let prev_a = prev.a;
