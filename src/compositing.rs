@@ -767,42 +767,25 @@ pub fn composite_all_with_paths(
     global
 }
 
-/// Compute gradient_x / gradient_y from the global height map using 3×3 Sobel.
+/// Compute gradient_x / gradient_y from a height map using 3×3 Sobel.
 ///
-/// Replaces per-stroke gradient compositing.  Because both strokes share
-/// nearly equal height at their competition boundary, the Sobel naturally
-/// produces a smooth gradient there — no winner-take-all seam.
-///
-/// At stroke edges (paint → no-paint), unpainted neighbours are replaced
-/// with the centre value so that the boundary does not produce a hard
-/// gradient ridge.
-pub fn compute_height_gradients(global: &mut GlobalMaps) {
-    let res = global.resolution as usize;
-    let h = &global.height;
-
+/// Plain Sobel with no boundary replacement — the caller is responsible
+/// for smoothing the height map beforehand (e.g. via [`diffuse_height`]).
+fn sobel_3x3(height: &[f32], gradient_x: &mut [f32], gradient_y: &mut [f32], resolution: u32) {
+    let res = resolution as usize;
     for y in 0..res {
         for x in 0..res {
             let idx = y * res + x;
-            let c = h[idx];
-            if c <= 0.0 {
+            if height[idx] <= 0.0 {
                 continue;
             }
 
-            // Clamp-to-edge indices
             let xl = x.saturating_sub(1);
             let xr = (x + 1).min(res - 1);
             let yl = y.saturating_sub(1);
             let yr = (y + 1).min(res - 1);
 
-            // Sample with boundary replacement: unpainted neighbours → centre
-            let s = |sy: usize, sx: usize| {
-                let v = h[sy * res + sx];
-                if v <= 0.0 {
-                    c
-                } else {
-                    v
-                }
-            };
+            let s = |sy: usize, sx: usize| height[sy * res + sx];
 
             let tl = s(yl, xl);
             let tc = s(yl, x);
@@ -813,10 +796,84 @@ pub fn compute_height_gradients(global: &mut GlobalMaps) {
             let bc = s(yr, x);
             let br = s(yr, xr);
 
-            global.gradient_x[idx] = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
-            global.gradient_y[idx] = (bl + 2.0 * bc + br) - (tl + 2.0 * tc + tr);
+            gradient_x[idx] = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+            gradient_y[idx] = (bl + 2.0 * bc + br) - (tl + 2.0 * tc + tr);
         }
     }
+}
+
+/// Diffuse (blur) the height map to simulate paint spreading.
+///
+/// Low-viscosity paint spreads outward, producing soft edges and a smoother
+/// surface. High-viscosity paint stays put, retaining sharp bristle ridges
+/// and defined boundaries.
+///
+/// `spread` controls the blur radius: 0.0 = no diffusion, 1.0 = maximum.
+/// Three passes of separable box blur approximate a Gaussian profile.
+fn diffuse_height(height: &mut [f32], resolution: u32, spread: f32) {
+    if spread <= 0.0 {
+        return;
+    }
+    let radius = (spread * 5.0).ceil() as usize;
+    if radius == 0 {
+        return;
+    }
+    let res = resolution as usize;
+    let mut tmp = vec![0.0f32; res * res];
+
+    // Three passes of separable box blur ≈ Gaussian.
+    // Uses a running sum for O(1) per pixel regardless of radius.
+    for _ in 0..3 {
+        // Horizontal pass: height → tmp
+        for y in 0..res {
+            let row = y * res;
+            let mut sum = 0.0f32;
+            // Seed the window [0, radius]
+            for x in 0..=radius.min(res - 1) {
+                sum += height[row + x];
+            }
+            for x in 0..res {
+                let win_size = (x + radius).min(res - 1) - x.saturating_sub(radius) + 1;
+                tmp[row + x] = sum / win_size as f32;
+                // Slide: add right edge, remove left edge
+                if x + radius + 1 < res {
+                    sum += height[row + x + radius + 1];
+                }
+                if x >= radius {
+                    sum -= height[row + x - radius];
+                }
+            }
+        }
+        // Vertical pass: tmp → height
+        for x in 0..res {
+            let mut sum = 0.0f32;
+            for y in 0..=radius.min(res - 1) {
+                sum += tmp[y * res + x];
+            }
+            for y in 0..res {
+                let win_size = (y + radius).min(res - 1) - y.saturating_sub(radius) + 1;
+                height[y * res + x] = sum / win_size as f32;
+                if y + radius + 1 < res {
+                    sum += tmp[(y + radius + 1) * res + x];
+                }
+                if y >= radius {
+                    sum -= tmp[(y - radius) * res + x];
+                }
+            }
+        }
+    }
+}
+
+/// Compute gradient_x / gradient_y from the global height map using 3×3 Sobel.
+///
+/// Legacy entry point kept for the global pipeline. Delegates to [`sobel_3x3`].
+pub fn compute_height_gradients(global: &mut GlobalMaps) {
+    sobel_3x3(
+        &global.height,
+        &mut global.gradient_x,
+        &mut global.gradient_y,
+        global.resolution,
+    );
 }
 
 /// Composite a single layer's strokes into the global maps.
@@ -1012,6 +1069,19 @@ pub fn render_layer(
         normal_data,
         mask,
         stretch_map,
+    );
+
+    // Diffuse height based on viscosity: low viscosity → more spreading.
+    let spread = 1.0 - layer.params.viscosity;
+    diffuse_height(&mut global.height, resolution, spread);
+
+    // Per-layer Sobel so that per-layer exports get valid gradients.
+    // finalize_layers also runs Sobel on the final merged height.
+    sobel_3x3(
+        &global.height,
+        &mut global.gradient_x,
+        &mut global.gradient_y,
+        resolution,
     );
 
     LayerMaps {
@@ -1680,7 +1750,8 @@ mod tests {
         let mut layer_a = make_layer_with_order(0);
         layer_a.params.brush_width = 20.0;
         layer_a.params.color_variation = 0.0;
-        // Horizontal strokes in the top half
+        layer_a.params.viscosity = 1.0; // no diffusion spreading
+                                        // Horizontal strokes in the top half
         layer_a.guides = vec![Guide {
             guide_type: GuideType::Directional,
             position: Vec2::new(0.5, 0.25),
@@ -1692,7 +1763,8 @@ mod tests {
         let mut layer_b = make_layer_with_order(1);
         layer_b.params.brush_width = 20.0;
         layer_b.params.color_variation = 0.0;
-        // Vertical strokes in the bottom half
+        layer_b.params.viscosity = 1.0; // no diffusion spreading
+                                        // Vertical strokes in the bottom half
         layer_b.guides = vec![Guide {
             guide_type: GuideType::Directional,
             position: Vec2::new(0.5, 0.75),
@@ -1710,10 +1782,14 @@ mod tests {
         let blue = Color::rgb(0.0, 0.0, 1.0);
         let base = vec![LayerBaseColor::solid(red), LayerBaseColor::solid(blue)];
 
+        // Use 128 resolution so that strokes have enough density to
+        // exceed DENSITY_MIN_THRESHOLD.
+        let test_res = 128;
+
         // Render each layer alone
         let solo_a = composite_all(
             &[layer_a.clone()],
-            64,
+            test_res,
             &[LayerBaseColor::solid(red)],
             &settings,
             None,
@@ -1723,7 +1799,7 @@ mod tests {
         );
         let solo_b = composite_all(
             &[layer_b.clone()],
-            64,
+            test_res,
             &[LayerBaseColor::solid(blue)],
             &settings,
             None,
@@ -1735,7 +1811,7 @@ mod tests {
         // Render both together (dry=1.0, opaque stacking)
         let combined = composite_all(
             &[layer_a, layer_b],
-            64,
+            test_res,
             &base,
             &settings,
             None,
@@ -1747,7 +1823,8 @@ mod tests {
         // Where only layer A has paint (and layer B does not), the combined
         // result should match the solo render of layer A.
         let mut checked = 0;
-        for i in 0..(64 * 64) {
+        let size = (test_res * test_res) as usize;
+        for i in 0..size {
             if solo_a.height[i] > 0.0 && solo_b.height[i] <= 0.0 {
                 assert!(
                     (combined.color[i].r - solo_a.color[i].r).abs() < 0.05
