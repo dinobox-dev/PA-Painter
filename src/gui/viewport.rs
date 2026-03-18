@@ -748,6 +748,30 @@ fn draw_playback_bar(ui: &mut egui::Ui, state: &mut AppState) {
                     );
                 });
         });
+
+        // Row 3: Sequential layers toggle + layer gap
+        if state.mesh_preview.layer_count > 1 {
+            ui.horizontal(|ui: &mut egui::Ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+
+                ui.checkbox(
+                    &mut state.mesh_preview.sequential_layers,
+                    "Sequential Layers",
+                );
+
+                if state.mesh_preview.sequential_layers {
+                    ui.separator();
+                    ui.label("Layer Gap");
+                    ui.add(
+                        egui::DragValue::new(&mut state.mesh_preview.layer_gap)
+                            .range(-5.0..=10.0)
+                            .speed(0.05)
+                            .suffix("s")
+                            .fixed_decimals(2),
+                    );
+                }
+            });
+        }
     });
 }
 
@@ -755,12 +779,17 @@ fn draw_playback_bar(ui: &mut egui::Ui, state: &mut AppState) {
 fn playback_max_time(state: &AppState) -> f32 {
     let draw = state.mesh_preview.draw_time;
     let gap = state.mesh_preview.gap;
-    let chunk = state.mesh_preview.chunk_size.max(1) as f32;
-    let num_groups = (state.mesh_preview.stroke_count as f32 / chunk)
-        .ceil()
-        .max(1.0);
-    // Last group starts at (num_groups-1) * (draw+gap), finishes at + draw
-    ((num_groups - 1.0) * (draw + gap) + draw + 0.05).max(0.1)
+    let num_groups = state.mesh_preview.num_groups;
+    // Per-layer stroke animation time
+    let stroke_time = (num_groups - 1.0) * (draw + gap) + draw;
+    // Sequential layers: each layer starts after the previous finishes (+ optional gap)
+    let layer_time = if state.mesh_preview.sequential_layers {
+        let num_layers = state.mesh_preview.layer_count.max(1) as f32;
+        (num_layers - 1.0) * (stroke_time + state.mesh_preview.layer_gap)
+    } else {
+        0.0
+    };
+    (stroke_time + layer_time + 0.05).max(0.1)
 }
 
 // ── UV View tab ─────────────────────────────────────────────────────

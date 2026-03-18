@@ -9,7 +9,7 @@ to create drawing reveal animations in game engines.
 |---------|------|-------|-------------|
 | **R** | `stroke_time_order` | 0–1 | Stroke sequence. 0 = first stroke, 1 = last stroke |
 | **G** | `stroke_time_arc` | 0–1 | Arc-length progress within a stroke. 0 = start, 1 = end |
-| **B** | (reserved) | 0 | Will encode layer order in a future release |
+| **B** | (reserved) | 0 | Reserved for layer order in a future release |
 
 Unpainted pixels have R=G=B=0.
 

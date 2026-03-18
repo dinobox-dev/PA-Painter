@@ -8,9 +8,9 @@ struct Uniforms {
     draw_time: f32,
     num_groups: f32,
     gap: f32,
-    _pad1: f32,
-    _pad2: f32,
-    _pad3: f32,
+    layer_stride: f32,
+    sequential_layers: u32,
+    num_layers: f32,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -18,7 +18,7 @@ struct Uniforms {
 @group(1) @binding(1) var s_color: sampler;
 @group(1) @binding(2) var t_normal: texture_2d<f32>;
 @group(1) @binding(3) var t_overlay: texture_2d<f32>;
-@group(1) @binding(4) var t_time: texture_2d<f32>;
+@group(1) @binding(4) var t_time: texture_2d_array<f32>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -54,21 +54,37 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Drawing mode: reveal strokes over time (seconds-based)
     if u.mode == 1u {
-        let time_sample = textureSample(t_time, s_color, in.uv);
-        let order = time_sample.r;  // normalized 0-1
-        let arc = time_sample.g;
-        // De-normalize order to group index
-        let group_idx = order * max(u.num_groups - 1.0, 1.0);
-        // Ease-out: stroke starts fast, decelerates toward the end
-        let arc_eased = 1.0 - (1.0 - arc) * (1.0 - arc);
-        // pixel_time in seconds: group start + arc progress within stroke
-        let pixel_time = group_idx * (u.draw_time + u.gap) + arc_eased * u.draw_time;
-        // Edge scales with draw_time for visible directional reveal
-        let edge = min(0.03, u.draw_time * 0.3);
-        let reveal = smoothstep(pixel_time - edge, pixel_time, u.time);
-        // Unpainted pixels (order==0 && arc==0) stay hidden until time > 0
-        let painted = step(0.004, order + arc);
-        alpha *= reveal * painted;
+        // Find winning layer: last layer with paint at this pixel (matches merge_layers policy)
+        let num_layers_u = u32(u.num_layers);
+        var winning_layer = 0u;
+        var order = 0.0;
+        var arc_val = 0.0;
+        var is_painted = false;
+        for (var li = 0u; li < num_layers_u; li++) {
+            let s = textureSample(t_time, s_color, in.uv, li);
+            if s.a > 0.5 {
+                winning_layer = li;
+                order = s.r;
+                arc_val = s.g;
+                is_painted = true;
+            }
+        }
+        if is_painted {
+            // De-normalize order to group index
+            let group_idx = order * max(u.num_groups - 1.0, 1.0);
+            // Ease-out: stroke starts fast, decelerates toward the end
+            let arc_eased = 1.0 - (1.0 - arc_val) * (1.0 - arc_val);
+            // Layer offset: sequential layers stagger each layer by stride
+            let layer_offset = select(0.0, f32(winning_layer) * u.layer_stride, u.sequential_layers == 1u);
+            // pixel_time in seconds: layer offset + group start + arc progress within stroke
+            let pixel_time = layer_offset + group_idx * (u.draw_time + u.gap) + arc_eased * u.draw_time;
+            // Edge scales with draw_time for visible directional reveal
+            let edge = min(0.03, u.draw_time * 0.3);
+            let reveal = smoothstep(pixel_time - edge, pixel_time, u.time);
+            alpha *= reveal;
+        } else {
+            alpha = 0.0;
+        }
     }
 
     // Lighting

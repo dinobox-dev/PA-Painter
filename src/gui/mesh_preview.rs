@@ -38,7 +38,12 @@ struct Uniforms {
     num_groups: f32,
     /// Gap between stroke groups (negative = overlap).
     gap: f32,
-    _pad: [f32; 3],
+    /// Stride between layer start times (= per-layer stroke time + layer gap).
+    layer_stride: f32,
+    /// Sequential layers mode: 0 = off, 1 = on.
+    sequential_layers: u32,
+    /// Number of animated layers (for max-time calculation).
+    num_layers: f32,
 }
 
 // ── Camera state (stored in AppState) ──────────────────────────────
@@ -89,6 +94,16 @@ pub struct MeshPreviewState {
     pub pingpong_forward: bool,
     /// Number of unique strokes (set by upload_time_texture).
     pub stroke_count: u32,
+    /// Number of chunk groups for shader (set by upload_time_texture).
+    /// When per-layer data is available, this is the max per-layer group count.
+    pub num_groups: f32,
+    /// Whether layers are drawn sequentially (true) or all at once (false).
+    pub sequential_layers: bool,
+    /// Gap in seconds between layers in sequential mode (added after each layer's strokes finish).
+    /// Negative = overlap between layers.
+    pub layer_gap: f32,
+    /// Number of animated layers (set by upload_time_texture).
+    pub layer_count: u32,
 }
 
 impl Default for MeshPreviewState {
@@ -118,6 +133,10 @@ impl Default for MeshPreviewState {
             playback_mode: super::state::PlaybackMode::Loop,
             pingpong_forward: true,
             stroke_count: 1,
+            num_groups: 1.0,
+            sequential_layers: false,
+            layer_gap: 0.0,
+            layer_count: 1,
         }
     }
 }
@@ -430,7 +449,7 @@ fn create_placeholder_time_texture(device: &wgpu::Device, queue: &wgpu::Queue) -
     let size = wgpu::Extent3d {
         width: 1,
         height: 1,
-        depth_or_array_layers: 1,
+        depth_or_array_layers: 1, // 1-slice array
     };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("mesh_placeholder_time"),
@@ -442,7 +461,7 @@ fn create_placeholder_time_texture(device: &wgpu::Device, queue: &wgpu::Queue) -
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    // R=0, G=0 → unpainted
+    // R=0, G=0, A=0 → unpainted
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &texture,
@@ -536,7 +555,9 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         draw_time: 0.1,
         num_groups: 1.0,
         gap: 0.0,
-        _pad: [0.0; 3],
+        layer_stride: 0.0,
+        sequential_layers: 0,
+        num_layers: 1.0,
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("mesh_uniform_buf"),
@@ -577,7 +598,10 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
     let overlay_texture_view = overlay_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     let time_texture = create_placeholder_time_texture(device, queue);
-    let time_texture_view = time_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let time_texture_view = time_texture.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    });
 
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("mesh_sampler"),
@@ -631,7 +655,7 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -1055,23 +1079,12 @@ pub fn clear_overlay_texture(render_state: &egui_wgpu::RenderState) {
     }
 }
 
-/// Upload stroke time map to GPU. Returns the number of unique strokes.
-///
-/// `chunk_size` groups strokes by modulo so spatially distant strokes start
-/// simultaneously. `draw_order` Random shuffles the group order.
-pub fn upload_time_texture(
-    render_state: &egui_wgpu::RenderState,
-    order: &[f32],
-    arc: &[f32],
-    resolution: u32,
-    draw_order: super::state::DrawOrder,
-    chunk_size: u32,
-) -> u32 {
-    let device = &render_state.device;
-    let queue = &render_state.queue;
-    let n = (resolution * resolution) as usize;
+// ── Time texture array upload ────────────────────────────────────────
 
-    // Collect unique non-zero order values (= individual strokes).
+/// Collect unique non-zero order values and return (stroke_count, num_groups).
+/// Used in the first pass to determine `max_groups` across layers before
+/// building remaps with a shared denom via `build_order_remap`.
+fn count_layer_groups(order: &[f32], chunk_size: u32) -> (u32, usize) {
     let mut unique: Vec<u32> = order
         .iter()
         .filter(|&&v| v > 0.0)
@@ -1079,71 +1092,147 @@ pub fn upload_time_texture(
         .collect();
     unique.sort_unstable();
     unique.dedup();
-    let stroke_count = unique.len() as u32;
+    let count = unique.len();
+    if count <= 1 {
+        return (count as u32, 1);
+    }
+    let chunk = (chunk_size as usize).max(1).min(count);
+    (count as u32, count.div_ceil(chunk))
+}
 
-    // Build order remap: original order key → new normalized order (0–1).
-    // Step 1: Chunk grouping — strokes are assigned to groups via modulo.
-    //   With chunk_size=C and N strokes, num_groups = ceil(N/C).
-    //   Stroke index i → group = i % num_groups.
-    //   Strokes in the same group start simultaneously (same order value).
-    // Step 2: Random mode shuffles group order deterministically.
-    let remap = {
-        let count = unique.len();
-        if count <= 1 {
-            None
-        } else {
-            let chunk = (chunk_size as usize).max(1).min(count);
-            let num_groups = count.div_ceil(chunk);
+/// Build the chunk/random remap table using a shared `denom` across all layers.
+/// This ensures all layers' order values are normalized to the same scale.
+fn build_order_remap(
+    order: &[f32],
+    chunk_size: u32,
+    draw_order: super::state::DrawOrder,
+    global_denom: f32,
+) -> Option<std::collections::HashMap<u32, f32>> {
+    let mut unique: Vec<u32> = order
+        .iter()
+        .filter(|&&v| v > 0.0)
+        .map(|&v| (v * 65535.0) as u32)
+        .collect();
+    unique.sort_unstable();
+    unique.dedup();
+    let count = unique.len();
+    if count == 0 {
+        return None;
+    }
+    if count == 1 {
+        // Single stroke: map to group 0 so it doesn't get scaled by global_denom
+        let mut map = std::collections::HashMap::new();
+        map.insert(unique[0], 0.0);
+        return Some(map);
+    }
+    let chunk = (chunk_size as usize).max(1).min(count);
+    let num_groups = count.div_ceil(chunk);
 
-            // Assign group index per stroke (modulo for max spatial distance)
-            let mut group_of_stroke: Vec<usize> = (0..count).map(|i| i % num_groups).collect();
+    let mut group_of_stroke: Vec<usize> = (0..count).map(|i| i % num_groups).collect();
 
-            // Random mode: shuffle group assignment
-            if draw_order == super::state::DrawOrder::Random && num_groups > 1 {
-                // Create a deterministic permutation of group indices
-                let mut group_perm: Vec<(u32, usize)> = (0..num_groups)
-                    .map(|g| ((g as u32).wrapping_mul(2654435761), g))
-                    .collect();
-                group_perm.sort_unstable_by_key(|&(h, _)| h);
-                // Build reverse mapping: old_group → new_position
-                let mut reverse = vec![0usize; num_groups];
-                for (new_pos, &(_, old_group)) in group_perm.iter().enumerate() {
-                    reverse[old_group] = new_pos;
-                }
-                for g in group_of_stroke.iter_mut() {
-                    *g = reverse[*g];
-                }
-            }
-
-            // Build remap table: original quantized order → normalized group order
-            let mut map = std::collections::HashMap::new();
-            let denom = (num_groups.max(1) - 1).max(1) as f32;
-            for (i, &orig_key) in unique.iter().enumerate() {
-                map.insert(orig_key, group_of_stroke[i] as f32 / denom);
-            }
-            Some(map)
+    if draw_order == super::state::DrawOrder::Random && num_groups > 1 {
+        let mut group_perm: Vec<(u32, usize)> = (0..num_groups)
+            .map(|g| ((g as u32).wrapping_mul(2654435761), g))
+            .collect();
+        group_perm.sort_unstable_by_key(|&(h, _)| h);
+        let mut reverse = vec![0usize; num_groups];
+        for (new_pos, &(_, old_group)) in group_perm.iter().enumerate() {
+            reverse[old_group] = new_pos;
         }
-    };
+        for g in group_of_stroke.iter_mut() {
+            *g = reverse[*g];
+        }
+    }
 
+    let mut map = std::collections::HashMap::new();
+    for (i, &orig_key) in unique.iter().enumerate() {
+        map.insert(orig_key, group_of_stroke[i] as f32 / global_denom);
+    }
+    Some(map)
+}
+
+/// Build one RGBA8 slice for a layer's time data.
+/// R = remapped stroke order, G = arc, A = painted mask (255 if height > 0).
+fn build_layer_slice(
+    lm: &pa_painter::compositing::LayerMaps,
+    remap: &Option<std::collections::HashMap<u32, f32>>,
+    n: usize,
+) -> Vec<u8> {
     let mut pixels = vec![0u8; n * 4];
     for i in 0..n {
-        let o = order[i].clamp(0.0, 1.0);
-        let remapped = if let Some(ref map) = remap {
-            let key = (o * 65535.0) as u32;
-            map.get(&key).copied().unwrap_or(o)
-        } else {
-            o
-        };
-        pixels[i * 4] = (remapped * 255.0) as u8;
-        pixels[i * 4 + 1] = (arc[i].clamp(0.0, 1.0) * 255.0) as u8;
-        // B=0, A=255
-        pixels[i * 4 + 3] = 255;
+        let painted = lm.height[i] > 0.0;
+        if painted {
+            let o = lm.stroke_time_order[i].clamp(0.0, 1.0);
+            let remapped = if let Some(ref map) = remap {
+                let key = (o * 65535.0) as u32;
+                map.get(&key).copied().unwrap_or(o)
+            } else {
+                o
+            };
+            pixels[i * 4] = (remapped * 255.0) as u8;
+            pixels[i * 4 + 1] = (lm.stroke_time_arc[i].clamp(0.0, 1.0) * 255.0) as u8;
+            pixels[i * 4 + 3] = 255; // painted
+        }
+        // else: R=0, G=0, A=0 → unpainted
     }
+    pixels
+}
+
+/// Upload per-layer time data as a 2D texture array.
+///
+/// Each array slice holds one layer's stroke timing:
+///   R = chunk/random-remapped stroke order (0–1 within layer)
+///   G = arc-length progress within stroke (0–1)
+///   A = painted mask (255 = has paint, 0 = empty)
+///
+/// The shader loops over slices to find the winning layer per pixel,
+/// eliminating the need for CPU-side merge policy replication.
+///
+/// Returns `(total_stroke_count, layer_count, max_per_layer_num_groups)`.
+pub fn upload_time_texture(
+    render_state: &egui_wgpu::RenderState,
+    layers: &[&pa_painter::compositing::LayerMaps],
+    resolution: u32,
+    draw_order: super::state::DrawOrder,
+    chunk_size: u32,
+) -> (u32, u32, f32) {
+    let device = &render_state.device;
+    let queue = &render_state.queue;
+    let n = (resolution * resolution) as usize;
+    let num_layers = layers.len().max(1) as u32;
+
+    // Pass 1: count strokes and groups per layer to find global max
+    let mut total_strokes = 0u32;
+    let mut max_groups = 1usize;
+    for lm in layers.iter() {
+        let (count, groups) = count_layer_groups(&lm.stroke_time_order, chunk_size);
+        total_strokes += count;
+        max_groups = max_groups.max(groups);
+    }
+    let global_denom = (max_groups.max(1) - 1).max(1) as f32;
+
+    // Pass 2: build remaps using shared denom so all layers use the same scale
+    let remaps: Vec<_> = layers
+        .iter()
+        .map(|lm| build_order_remap(&lm.stroke_time_order, chunk_size, draw_order, global_denom))
+        .collect();
+
+    // Build pixel data: all slices concatenated (slice 0, slice 1, ...)
+    let all_pixels: Vec<u8> = if layers.is_empty() {
+        // No layers: 1-slice empty array
+        vec![0u8; n * 4]
+    } else {
+        layers
+            .iter()
+            .zip(remaps.iter())
+            .flat_map(|(lm, remap)| build_layer_slice(lm, remap, n))
+            .collect()
+    };
 
     let size = wgpu::Extent3d {
         width: resolution,
         height: resolution,
-        depth_or_array_layers: 1,
+        depth_or_array_layers: num_layers,
     };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("mesh_time_tex"),
@@ -1162,7 +1251,7 @@ pub fn upload_time_texture(
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        &pixels,
+        &all_pixels,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(resolution * 4),
@@ -1171,7 +1260,10 @@ pub fn upload_time_texture(
         size,
     );
 
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    });
 
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
@@ -1187,7 +1279,7 @@ pub fn upload_time_texture(
         res.time_texture = texture;
         res.time_texture_view = view;
     }
-    stroke_count
+    (total_strokes, num_layers, max_groups as f32)
 }
 
 fn rebuild_texture_bind_group(
@@ -1325,14 +1417,23 @@ pub fn show(
         time: state.mesh_preview.time,
         mode: if drawing { 1 } else { 0 },
         draw_time: state.mesh_preview.draw_time,
-        num_groups: {
-            let chunk = state.mesh_preview.chunk_size.max(1) as f32;
-            (state.mesh_preview.stroke_count as f32 / chunk)
-                .ceil()
-                .max(1.0)
-        },
+        num_groups: state.mesh_preview.num_groups,
         gap: state.mesh_preview.gap,
-        _pad: [0.0; 3],
+        layer_stride: if state.mesh_preview.sequential_layers {
+            // stroke_time per layer + user gap between layers
+            let ng = state.mesh_preview.num_groups;
+            let stroke_time = (ng - 1.0) * (state.mesh_preview.draw_time + state.mesh_preview.gap)
+                + state.mesh_preview.draw_time;
+            stroke_time + state.mesh_preview.layer_gap
+        } else {
+            0.0
+        },
+        sequential_layers: if state.mesh_preview.sequential_layers {
+            1
+        } else {
+            0
+        },
+        num_layers: state.mesh_preview.layer_count as f32,
     };
 
     // Offscreen render

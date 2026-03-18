@@ -25,16 +25,19 @@ use pa_painter::types::{
 };
 use pa_painter::uv_mask::UvMask;
 
-/// Count unique non-zero order values in a stroke time map (= number of strokes).
-fn count_unique_strokes(order: &[f32]) -> u32 {
-    let mut unique: Vec<u32> = order
-        .iter()
-        .filter(|&&v| v > 0.0)
-        .map(|&v| (v * 65535.0) as u32)
-        .collect();
-    unique.sort_unstable();
-    unique.dedup();
-    unique.len() as u32
+/// Extract per-layer LayerMaps references (in compositing order).
+/// Prefers `rendered_layers` from GenResult; falls back to `layer_cache` from GenerationManager
+/// (full-res generation moves rendered_layers into layer_cache for reuse).
+fn collect_layer_refs<'a>(
+    rendered_layers: &'a [(u64, std::sync::Arc<pa_painter::compositing::LayerMaps>)],
+    layer_cache: &'a [(u64, std::sync::Arc<pa_painter::compositing::LayerMaps>)],
+) -> Vec<&'a pa_painter::compositing::LayerMaps> {
+    let source = if rendered_layers.is_empty() {
+        layer_cache
+    } else {
+        rendered_layers
+    };
+    source.iter().map(|(_, lm)| lm.as_ref()).collect()
 }
 
 /// Main GUI application.
@@ -263,22 +266,23 @@ impl PainterApp {
             egui::TextureOptions::LINEAR,
         ));
 
-        // Always update stroke_count from the time data
-        self.state.mesh_preview.stroke_count = count_unique_strokes(&result.stroke_time_order);
-
         // Upload color, normal, and time textures to 3D preview
         if let Some(ref rs) = self.render_state {
             if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result() {
                 mesh_preview::upload_color_texture_raw(rs, &result.gpu_color_pixels, r as usize);
                 mesh_preview::upload_normal_texture_raw(rs, &result.gpu_normal_pixels, r as usize);
-                mesh_preview::upload_time_texture(
+                let lh =
+                    collect_layer_refs(&result.rendered_layers, &self.state.generation.layer_cache);
+                let (sc, lc, ng) = mesh_preview::upload_time_texture(
                     rs,
-                    &result.stroke_time_order,
-                    &result.stroke_time_arc,
+                    &lh,
                     result.resolution,
                     self.state.mesh_preview.draw_order,
                     self.state.mesh_preview.chunk_size,
                 );
+                self.state.mesh_preview.stroke_count = sc;
+                self.state.mesh_preview.layer_count = lc;
+                self.state.mesh_preview.num_groups = ng;
             }
         }
 
@@ -531,22 +535,23 @@ impl PainterApp {
             egui::TextureOptions::LINEAR,
         ));
 
-        // Always update stroke_count from the time data
-        self.state.mesh_preview.stroke_count = count_unique_strokes(&result.stroke_time_order);
-
         // Upload to 3D preview
         if let Some(ref rs) = self.render_state {
             if self.state.mesh_preview.gpu_ready && self.state.mesh_preview.show_result() {
                 mesh_preview::upload_color_texture_raw(rs, &result.gpu_color_pixels, r as usize);
                 mesh_preview::upload_normal_texture_raw(rs, &result.gpu_normal_pixels, r as usize);
-                mesh_preview::upload_time_texture(
+                let lh =
+                    collect_layer_refs(&result.rendered_layers, &self.state.generation.layer_cache);
+                let (sc, lc, ng) = mesh_preview::upload_time_texture(
                     rs,
-                    &result.stroke_time_order,
-                    &result.stroke_time_arc,
+                    &lh,
                     r,
                     self.state.mesh_preview.draw_order,
                     self.state.mesh_preview.chunk_size,
                 );
+                self.state.mesh_preview.stroke_count = sc;
+                self.state.mesh_preview.layer_count = lc;
+                self.state.mesh_preview.num_groups = ng;
             }
         }
 
@@ -617,15 +622,18 @@ impl PainterApp {
             if let Some(ref gen) = self.state.generated {
                 mesh_preview::upload_color_texture(rs, &gen.color, gen.resolution as usize);
                 mesh_preview::upload_normal_texture(rs, &gen.normal_map, gen.resolution as usize);
-                let sc = mesh_preview::upload_time_texture(
+                let lh =
+                    collect_layer_refs(&gen.rendered_layers, &self.state.generation.layer_cache);
+                let (sc, lc, ng) = mesh_preview::upload_time_texture(
                     rs,
-                    &gen.stroke_time_order,
-                    &gen.stroke_time_arc,
+                    &lh,
                     gen.resolution,
                     self.state.mesh_preview.draw_order,
                     self.state.mesh_preview.chunk_size,
                 );
                 self.state.mesh_preview.stroke_count = sc;
+                self.state.mesh_preview.layer_count = lc;
+                self.state.mesh_preview.num_groups = ng;
             } else {
                 self.upload_base_only_to_3d();
             }
@@ -1257,15 +1265,20 @@ impl PainterApp {
                                 &gen.gpu_normal_pixels,
                                 gen.resolution as usize,
                             );
-                            let sc = mesh_preview::upload_time_texture(
+                            let lh = collect_layer_refs(
+                                &gen.rendered_layers,
+                                &self.state.generation.layer_cache,
+                            );
+                            let (sc, lc, ng) = mesh_preview::upload_time_texture(
                                 rs,
-                                &gen.stroke_time_order,
-                                &gen.stroke_time_arc,
+                                &lh,
                                 gen.resolution,
                                 self.state.mesh_preview.draw_order,
                                 self.state.mesh_preview.chunk_size,
                             );
                             self.state.mesh_preview.stroke_count = sc;
+                            self.state.mesh_preview.layer_count = lc;
+                            self.state.mesh_preview.num_groups = ng;
                         }
                     }
                 }
@@ -1294,15 +1307,20 @@ impl PainterApp {
                 if let Some(ref rs) = self.render_state {
                     if self.state.mesh_preview.gpu_ready {
                         if let Some(ref gen) = self.state.generated {
-                            let sc = mesh_preview::upload_time_texture(
+                            let lh = collect_layer_refs(
+                                &gen.rendered_layers,
+                                &self.state.generation.layer_cache,
+                            );
+                            let (sc, lc, ng) = mesh_preview::upload_time_texture(
                                 rs,
-                                &gen.stroke_time_order,
-                                &gen.stroke_time_arc,
+                                &lh,
                                 gen.resolution,
                                 cur_order,
                                 self.state.mesh_preview.chunk_size,
                             );
                             self.state.mesh_preview.stroke_count = sc;
+                            self.state.mesh_preview.layer_count = lc;
+                            self.state.mesh_preview.num_groups = ng;
                         }
                     }
                 }
