@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] — 2026-03-18
+
+### Added
+
+- Viscosity-based height diffusion: low-viscosity paint spreads outward producing soft edges and gradual normal transitions; high-viscosity paint retains sharp bristle ridges and defined boundaries
+- Sequential layer animation in Drawing mode
+
+### Changed
+
+- CLI and GUI compositing pipelines unified via `render_layer` → `merge_layers`
+- Sobel gradient computation moved to per-layer with viscosity-aware diffused height, replacing the global pass with its boundary replacement hack
+- Stroke compositing now skips sub-threshold density pixels, preventing barely-visible edge pixels from stamping flat-plane normals and color artifacts at paint boundaries
+
+### Fixed
+
+- Segment junction gaps on wide brushes following curved paths: padding now scales with angular change × brush width instead of a fixed 0.5 px overlap
+- Base color fill in Opaque mode limited to lowest layer per group, preventing higher layers from overriding specific group colors
+
 ## [0.2.1] — 2026-03-16
 
 ### Added
