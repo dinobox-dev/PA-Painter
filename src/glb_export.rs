@@ -969,6 +969,7 @@ mod tests {
             Some(&nd),
             &[],
             None,
+            &[1.0],
         );
 
         let normalized_height = normalize_height_map(&maps.height);

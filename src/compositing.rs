@@ -597,8 +597,8 @@ fn assign_unique_stroke_ids(all_paths: &mut [Vec<StrokePath>]) {
 
 /// Composite all strokes from all layers into global maps.
 ///
-/// Layers are composited in `order` (ascending). Within each layer,
-/// strokes are composited in their path order (top-to-bottom).
+/// Convenience wrapper around [`composite_all_with_paths`] that generates
+/// paths internally (no cache) and uses default dry values (1.0 per layer).
 pub fn composite_all(
     layers: &[PaintLayer],
     resolution: u32,
@@ -608,6 +608,7 @@ pub fn composite_all(
     masks: &[Option<&UvMask>],
     stretch_map: Option<&StretchMap>,
 ) -> GlobalMaps {
+    let default_dry = vec![1.0_f32; layers.len()];
     composite_all_with_paths(
         layers,
         resolution,
@@ -617,15 +618,23 @@ pub fn composite_all(
         normal_data,
         masks,
         stretch_map,
+        &default_dry,
     )
 }
 
-/// Composite all layers, optionally reusing pre-generated paths.
+/// Composite all layers via independent per-layer rendering and merge.
+///
+/// Each layer is rendered into its own [`LayerMaps`] (via [`render_layer`]),
+/// then all layers are combined with [`merge_layers`]. This matches the GUI
+/// pipeline and ensures proper layer isolation: intra-layer strokes mix
+/// wet-on-wet, while inter-layer blending respects `layer_dry`.
 ///
 /// If `cached_paths` is `Some`, it must contain one entry per layer in
 /// `order`-sorted sequence (as returned by [`generate_all_paths`]).
-/// When `None`, paths are generated in parallel via rayon before
-/// sequential compositing.
+/// When `None`, paths are generated in parallel via rayon.
+///
+/// `layer_dry` controls per-layer dryness (parallel to `layers`).
+/// dry=0 → wet surface (subtractive mix), dry=1 → dry surface (opaque over).
 #[allow(clippy::too_many_arguments)]
 pub fn composite_all_with_paths(
     layers: &[PaintLayer],
@@ -636,6 +645,7 @@ pub fn composite_all_with_paths(
     normal_data: Option<&MeshNormalData>,
     masks: &[Option<&UvMask>],
     stretch_map: Option<&StretchMap>,
+    layer_dry: &[f32],
 ) -> GlobalMaps {
     info!(
         "Compositing {} layers at {}×{} (cache={})",
@@ -644,29 +654,10 @@ pub fn composite_all_with_paths(
         resolution,
         cached_paths.is_some()
     );
-    // Initialize with white; per-layer base colors are painted into regions below.
-    let default_base = BaseColorSource::solid(Color::WHITE);
-    let mut global = GlobalMaps::new(
-        resolution,
-        &default_base,
-        settings.normal_mode,
-        settings.background_mode,
-    );
 
     // Sort layers by order (ascending), preserving original index for stroke ID encoding
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
-
-    // Fill per-layer base color into each layer's mask region (in compositing order).
-    if settings.background_mode != BackgroundMode::Transparent {
-        for &(layer_index, _) in &sorted {
-            if let Some(bc) = base_colors.get(layer_index) {
-                let src = bc.as_source();
-                let mask = masks.get(layer_index).and_then(|m| *m);
-                fill_base_color_region(&mut global, &src, mask);
-            }
-        }
-    }
 
     // Phase A: Generate paths (parallel across layers when not cached)
     let mut generated;
@@ -703,27 +694,57 @@ pub fn composite_all_with_paths(
         &generated
     };
 
-    // Phase B: Composite sequentially (preserves deterministic blending order)
-    for (sorted_idx, &(layer_index, layer)) in sorted.iter().enumerate() {
-        let base = base_colors
-            .get(layer_index)
-            .map(|bc| bc.as_source())
-            .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
-        let mask = masks.get(layer_index).and_then(|m| *m);
-        composite_layer(
-            layer,
-            layer_index as u32,
-            &mut global,
-            settings,
-            &base,
-            Some(&all_paths[sorted_idx]),
-            normal_data,
-            mask,
-            stretch_map,
-        );
-    }
+    // Phase B: Render each layer independently into its own LayerMaps
+    let layer_maps: Vec<LayerMaps> = sorted
+        .iter()
+        .enumerate()
+        .map(|(sorted_idx, &(layer_index, layer))| {
+            let base = base_colors
+                .get(layer_index)
+                .map(|bc| bc.as_source())
+                .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
+            let mask = masks.get(layer_index).and_then(|m| *m);
+            render_layer(
+                layer,
+                layer_index as u32,
+                &base,
+                Some(&all_paths[sorted_idx]),
+                normal_data,
+                mask,
+                stretch_map,
+                resolution,
+            )
+        })
+        .collect();
 
-    compute_height_gradients(&mut global);
+    // Phase C: Finalize (fill base colors → merge → gradients)
+    let layer_refs: Vec<&LayerMaps> = layer_maps.iter().collect();
+    let sorted_base_colors: Vec<BaseColorSource<'_>> = sorted
+        .iter()
+        .map(|&(layer_index, _)| {
+            base_colors
+                .get(layer_index)
+                .map(|bc| bc.as_source())
+                .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE))
+        })
+        .collect();
+    let sorted_masks: Vec<Option<&UvMask>> = sorted
+        .iter()
+        .map(|&(layer_index, _)| masks.get(layer_index).and_then(|m| *m))
+        .collect();
+    let sorted_dry: Vec<f32> = sorted
+        .iter()
+        .map(|&(layer_index, _)| layer_dry.get(layer_index).copied().unwrap_or(1.0))
+        .collect();
+
+    let global = finalize_layers(
+        &layer_refs,
+        &sorted_base_colors,
+        &sorted_masks,
+        &sorted_dry,
+        resolution,
+        settings,
+    );
     info!("Compositing complete");
     global
 }
@@ -987,6 +1008,46 @@ pub fn render_layer(
         stroke_time_arc: global.stroke_time_arc,
         resolution,
     }
+}
+
+/// Finalize independently rendered layers into a single [`GlobalMaps`].
+///
+/// This is the shared "Phase C" used by both the CLI (`composite_all_with_paths`)
+/// and the GUI (`generation.rs`). It performs:
+/// 1. [`GlobalMaps`] initialization
+/// 2. Per-layer base color fill via [`fill_base_color_region`]
+/// 3. Layer merge via [`merge_layers`]
+/// 4. Height gradient computation via [`compute_height_gradients`]
+///
+/// All slices (`layer_maps`, `base_colors`, `masks`, `layer_dry`) must be
+/// in compositing order (sorted by layer `order`).
+pub fn finalize_layers(
+    layer_maps: &[&LayerMaps],
+    base_colors: &[BaseColorSource<'_>],
+    masks: &[Option<&UvMask>],
+    layer_dry: &[f32],
+    resolution: u32,
+    settings: &OutputSettings,
+) -> GlobalMaps {
+    let default_base = BaseColorSource::solid(Color::WHITE);
+    let mut global = GlobalMaps::new(
+        resolution,
+        &default_base,
+        settings.normal_mode,
+        settings.background_mode,
+    );
+
+    if settings.background_mode != BackgroundMode::Transparent {
+        for (i, bc) in base_colors.iter().enumerate() {
+            let mask = masks.get(i).and_then(|m| *m);
+            fill_base_color_region(&mut global, bc, mask);
+        }
+    }
+
+    let layer_settings = vec![LayerCompositeSettings::default(); layer_maps.len()];
+    merge_layers(layer_maps, layer_dry, &layer_settings, &mut global);
+    compute_height_gradients(&mut global);
+    global
 }
 
 /// Merge independently rendered [`LayerMaps`] into a [`GlobalMaps`].
@@ -1547,6 +1608,126 @@ mod tests {
 
         assert_eq!(maps1.height, maps2.height);
         assert_eq!(maps1.stroke_id, maps2.stroke_id);
+    }
+
+    // ── Multi-Layer Isolation Tests ──
+
+    /// Verify that multi-layer compositing via composite_all (which internally
+    /// uses render_layer → merge_layers) produces isolated layers: each layer's
+    /// strokes should not subtractively mix with strokes from other layers.
+    #[test]
+    fn multi_layer_strokes_isolated() {
+        use crate::types::{Guide, GuideType};
+
+        let mut layer_a = make_layer_with_order(0);
+        layer_a.params.brush_width = 20.0;
+        layer_a.params.color_variation = 0.0;
+        // Horizontal strokes in the top half
+        layer_a.guides = vec![Guide {
+            guide_type: GuideType::Directional,
+            position: Vec2::new(0.5, 0.25),
+            direction: Vec2::X,
+            influence: 0.5,
+            strength: 1.0,
+        }];
+
+        let mut layer_b = make_layer_with_order(1);
+        layer_b.params.brush_width = 20.0;
+        layer_b.params.color_variation = 0.0;
+        // Vertical strokes in the bottom half
+        layer_b.guides = vec![Guide {
+            guide_type: GuideType::Directional,
+            position: Vec2::new(0.5, 0.75),
+            direction: Vec2::Y,
+            influence: 0.5,
+            strength: 1.0,
+        }];
+
+        // Use transparent background to isolate stroke blending from base color
+        let settings = OutputSettings {
+            background_mode: BackgroundMode::Transparent,
+            ..OutputSettings::default()
+        };
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let blue = Color::rgb(0.0, 0.0, 1.0);
+        let base = vec![LayerBaseColor::solid(red), LayerBaseColor::solid(blue)];
+
+        // Render each layer alone
+        let solo_a = composite_all(
+            &[layer_a.clone()],
+            64,
+            &[LayerBaseColor::solid(red)],
+            &settings,
+            None,
+            &[],
+            None,
+        );
+        let solo_b = composite_all(
+            &[layer_b.clone()],
+            64,
+            &[LayerBaseColor::solid(blue)],
+            &settings,
+            None,
+            &[],
+            None,
+        );
+
+        // Render both together (dry=1.0, opaque stacking)
+        let combined = composite_all(&[layer_a, layer_b], 64, &base, &settings, None, &[], None);
+
+        // Where only layer A has paint (and layer B does not), the combined
+        // result should match the solo render of layer A.
+        let mut checked = 0;
+        for i in 0..(64 * 64) {
+            if solo_a.height[i] > 0.0 && solo_b.height[i] <= 0.0 {
+                assert!(
+                    (combined.color[i].r - solo_a.color[i].r).abs() < 0.05
+                        && (combined.color[i].g - solo_a.color[i].g).abs() < 0.05
+                        && (combined.color[i].b - solo_a.color[i].b).abs() < 0.05,
+                    "pixel {i}: layer A solo color should survive when layer B has no paint",
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "should have pixels unique to layer A");
+    }
+
+    /// Verify that composite_all is deterministic across runs.
+    #[test]
+    fn multi_layer_deterministic() {
+        let mut layer_a = make_layer_with_order(0);
+        layer_a.params.brush_width = 20.0;
+        let mut layer_b = make_layer_with_order(1);
+        layer_b.params.brush_width = 20.0;
+
+        let settings = OutputSettings::default();
+        let base = vec![
+            LayerBaseColor::solid(Color::rgb(1.0, 0.0, 0.0)),
+            LayerBaseColor::solid(Color::rgb(0.0, 0.0, 1.0)),
+        ];
+
+        let maps1 = composite_all(
+            &[layer_a.clone(), layer_b.clone()],
+            64,
+            &base,
+            &settings,
+            None,
+            &[],
+            None,
+        );
+        let maps2 = composite_all(&[layer_a, layer_b], 64, &base, &settings, None, &[], None);
+
+        assert_eq!(maps1.height, maps2.height);
+        assert_eq!(maps1.stroke_id, maps2.stroke_id);
+        for (a, b) in maps1.color.iter().zip(&maps2.color) {
+            assert!(
+                (a.r - b.r).abs() < EPS
+                    && (a.g - b.g).abs() < EPS
+                    && (a.b - b.b).abs() < EPS
+                    && (a.a - b.a).abs() < EPS,
+                "color should be deterministic"
+            );
+        }
     }
 
     // ── Visual Integration Tests ──

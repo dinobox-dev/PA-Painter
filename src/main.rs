@@ -150,6 +150,13 @@ fn main() {
         project.set_cached_paths(paths);
     }
 
+    let layer_dry: Vec<f32> = project
+        .layers
+        .iter()
+        .filter(|l| l.visible)
+        .map(|l| l.dry)
+        .collect();
+
     let global = composite_all_with_paths(
         &layers,
         resolution,
@@ -159,6 +166,7 @@ fn main() {
         normal_data.as_ref(),
         &mask_refs,
         stretch_ref,
+        &layer_dry,
     );
 
     // Export

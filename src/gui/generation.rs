@@ -7,10 +7,7 @@ use eframe::egui;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use pa_painter::asset_io::LoadedMesh;
-use pa_painter::compositing::{
-    compute_height_gradients, fill_base_color_region, merge_layers, render_layer, GlobalMaps,
-    LayerMaps,
-};
+use pa_painter::compositing::{finalize_layers, render_layer, LayerMaps};
 use pa_painter::compositing::{resolve_base_color, resolve_base_normal};
 use pa_painter::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use pa_painter::output::{
@@ -20,8 +17,8 @@ use pa_painter::path_placement::{generate_paths, PathContext};
 use pa_painter::stretch_map::{compute_stretch_map, StretchMap};
 use pa_painter::stroke_color::ColorTextureRef;
 use pa_painter::types::{
-    BackgroundMode, BaseColorSource, Color, Layer, LayerBaseColor, LayerBaseNormal,
-    LayerCompositeSettings, NormalMode, OutputSettings, PaintLayer, StrokePath,
+    BackgroundMode, BaseColorSource, Color, Layer, LayerBaseColor, LayerBaseNormal, NormalMode,
+    OutputSettings, PaintLayer, StrokePath,
 };
 use pa_painter::uv_mask::UvMask;
 
@@ -494,37 +491,34 @@ fn run_pipeline(
         })
         .collect();
 
-    // 4b: Initialize GlobalMaps with base colors and merge layers
-    let default_base = BaseColorSource::solid(Color::WHITE);
-    let mut global = GlobalMaps::new(
-        input.resolution,
-        &default_base,
-        input.settings.normal_mode,
-        input.settings.background_mode,
-    );
-
-    if input.settings.background_mode != BackgroundMode::Transparent {
-        for &(layer_index, _) in &sorted {
-            if let Some(bc) = input.layer_base_colors.get(layer_index) {
-                let src = bc.as_source();
-                let mask = mask_refs.get(layer_index).and_then(|m| *m);
-                fill_base_color_region(&mut global, &src, mask);
-            }
-        }
-    }
-
+    // 4b: Finalize layers (fill base colors → merge → gradients)
     let layer_refs: Vec<&LayerMaps> = result_maps.iter().map(|a| a.as_ref()).collect();
-    // Reorder dry values to match sorted (compositing) order
+    let sorted_base_colors: Vec<BaseColorSource<'_>> = sorted
+        .iter()
+        .map(|&(layer_index, _)| {
+            input
+                .layer_base_colors
+                .get(layer_index)
+                .map(|bc| bc.as_source())
+                .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE))
+        })
+        .collect();
+    let sorted_masks: Vec<Option<&UvMask>> = sorted
+        .iter()
+        .map(|&(layer_index, _)| mask_refs.get(layer_index).and_then(|m| *m))
+        .collect();
     let layer_dry: Vec<f32> = sorted
         .iter()
         .map(|&(layer_index, _)| input.layer_dry.get(layer_index).copied().unwrap_or(1.0))
         .collect();
-    let layer_settings: Vec<LayerCompositeSettings> =
-        vec![LayerCompositeSettings::default(); result_maps.len()];
-    merge_layers(&layer_refs, &layer_dry, &layer_settings, &mut global);
-
-    // ── Compute gradients from global height map (Sobel) ──
-    compute_height_gradients(&mut global);
+    let global = finalize_layers(
+        &layer_refs,
+        &sorted_base_colors,
+        &sorted_masks,
+        &layer_dry,
+        input.resolution,
+        &input.settings,
+    );
 
     // ── Stage 5: Normal map ──
 
@@ -770,43 +764,27 @@ fn run_remerge(
     let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
 
     // Initialize GlobalMaps
-    let default_base = BaseColorSource::solid(Color::WHITE);
-    let mut global = GlobalMaps::new(
-        resolution,
-        &default_base,
-        settings.normal_mode,
-        settings.background_mode,
-    );
-
-    // Fill base colors
+    // Finalize layers (fill base colors → merge → gradients)
     set_progress(progress, 0.1);
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
-    if settings.background_mode != BackgroundMode::Transparent {
-        for (si, layer) in sorted_layers.iter().enumerate() {
-            let bc = resolve_base_color(&layer.base_color, materials);
-            let src = bc.as_source();
-            let mask = mask_refs[si];
-            fill_base_color_region(&mut global, &src, mask);
-        }
-    }
-
-    // Merge
-    set_progress(progress, 0.2);
-    if cancel.load(Ordering::Relaxed) {
-        return None;
-    }
+    let base_color_data: Vec<_> = sorted_layers
+        .iter()
+        .map(|layer| resolve_base_color(&layer.base_color, materials))
+        .collect();
+    let base_colors: Vec<BaseColorSource<'_>> =
+        base_color_data.iter().map(|bc| bc.as_source()).collect();
     let layer_dry: Vec<f32> = sorted_layers.iter().map(|l| l.dry).collect();
-    let layer_settings = vec![LayerCompositeSettings::default(); sorted_layers.len()];
-    merge_layers(&layer_maps, &layer_dry, &layer_settings, &mut global);
-
-    // Sobel
+    let global = finalize_layers(
+        &layer_maps,
+        &base_colors,
+        &mask_refs,
+        &layer_dry,
+        resolution,
+        settings,
+    );
     set_progress(progress, 0.4);
-    if cancel.load(Ordering::Relaxed) {
-        return None;
-    }
-    compute_height_gradients(&mut global);
 
     // Normal map
     set_progress(progress, 0.5);
