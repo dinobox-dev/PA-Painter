@@ -28,6 +28,13 @@ use crate::uv_mask::UvMask;
 /// Below this, opacity ramps smoothly from 0 (via smoothstep).
 const DENSITY_OPACITY_THRESHOLD: f32 = 0.7;
 
+/// Minimum density for a stroke pixel to participate in compositing.
+/// Below this threshold the pixel is too faint to be perceptible
+/// (smoothstep(0, 0.7, 0.04) ≈ 1% opacity) and skipping it prevents
+/// barely-visible edge pixels from stamping their flat-plane object normal
+/// and color onto the canvas.
+const DENSITY_MIN_THRESHOLD: f32 = 0.1;
+
 /// Global compositing buffers in UV space.
 pub struct GlobalMaps {
     /// Height map. 0.0 = no paint. Row-major, size = resolution * resolution.
@@ -438,7 +445,7 @@ pub fn composite_stroke(
                 }
 
                 let h = bilinear_sample(&local_height.data, local_w, local_h, lx_f, ly_f);
-                if h <= 0.0 {
+                if h <= DENSITY_MIN_THRESHOLD {
                     continue;
                 }
 
@@ -1264,7 +1271,7 @@ mod tests {
         for ly in 0..local_height.height {
             for lx in 0..local_height.width {
                 let h = local_height.data[ly * local_height.width + lx];
-                if h <= 0.0 {
+                if h <= DENSITY_MIN_THRESHOLD {
                     continue;
                 }
                 let uv = match transform.local_to_uv(lx, ly) {
