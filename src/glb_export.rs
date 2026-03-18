@@ -715,6 +715,7 @@ mod tests {
                 mesh_nd,
                 &[],
                 None,
+                &[],
             );
 
             let normalized_height = normalize_height_map(&maps.height);
@@ -866,6 +867,7 @@ mod tests {
             Some(&nd),
             &[],
             None,
+            &[],
         );
 
         let normalized_height = normalize_height_map(&maps.height);
@@ -970,6 +972,7 @@ mod tests {
             &[],
             None,
             &[1.0],
+            &["__all__"],
         );
 
         let normalized_height = normalize_height_map(&maps.height);

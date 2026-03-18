@@ -156,6 +156,12 @@ fn main() {
         .filter(|l| l.visible)
         .map(|l| l.dry)
         .collect();
+    let layer_group_names: Vec<&str> = project
+        .layers
+        .iter()
+        .filter(|l| l.visible)
+        .map(|l| l.group_name.as_str())
+        .collect();
 
     let global = composite_all_with_paths(
         &layers,
@@ -167,6 +173,7 @@ fn main() {
         &mask_refs,
         stretch_ref,
         &layer_dry,
+        &layer_group_names,
     );
 
     // Export

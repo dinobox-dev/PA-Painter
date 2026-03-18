@@ -3,6 +3,8 @@
 //! Blends stroke height, color, gradient, and AO contributions from all visible
 //! paint layers into a single [`GlobalMaps`] struct, respecting layer ordering and masks.
 
+use std::collections::HashSet;
+
 use glam::Vec2;
 use log::{debug, info};
 use rayon::prelude::*;
@@ -599,6 +601,7 @@ fn assign_unique_stroke_ids(all_paths: &mut [Vec<StrokePath>]) {
 ///
 /// Convenience wrapper around [`composite_all_with_paths`] that generates
 /// paths internally (no cache) and uses default dry values (1.0 per layer).
+#[allow(clippy::too_many_arguments)]
 pub fn composite_all(
     layers: &[PaintLayer],
     resolution: u32,
@@ -607,6 +610,7 @@ pub fn composite_all(
     normal_data: Option<&MeshNormalData>,
     masks: &[Option<&UvMask>],
     stretch_map: Option<&StretchMap>,
+    group_names: &[&str],
 ) -> GlobalMaps {
     let default_dry = vec![1.0_f32; layers.len()];
     composite_all_with_paths(
@@ -619,6 +623,7 @@ pub fn composite_all(
         masks,
         stretch_map,
         &default_dry,
+        group_names,
     )
 }
 
@@ -646,6 +651,7 @@ pub fn composite_all_with_paths(
     masks: &[Option<&UvMask>],
     stretch_map: Option<&StretchMap>,
     layer_dry: &[f32],
+    group_names: &[&str],
 ) -> GlobalMaps {
     info!(
         "Compositing {} layers at {}×{} (cache={})",
@@ -736,12 +742,17 @@ pub fn composite_all_with_paths(
         .iter()
         .map(|&(layer_index, _)| layer_dry.get(layer_index).copied().unwrap_or(1.0))
         .collect();
+    let sorted_groups: Vec<&str> = sorted
+        .iter()
+        .map(|&(layer_index, _)| group_names.get(layer_index).copied().unwrap_or("__all__"))
+        .collect();
 
     let global = finalize_layers(
         &layer_refs,
         &sorted_base_colors,
         &sorted_masks,
         &sorted_dry,
+        &sorted_groups,
         resolution,
         settings,
     );
@@ -1019,13 +1030,23 @@ pub fn render_layer(
 /// 3. Layer merge via [`merge_layers`]
 /// 4. Height gradient computation via [`compute_height_gradients`]
 ///
-/// All slices (`layer_maps`, `base_colors`, `masks`, `layer_dry`) must be
-/// in compositing order (sorted by layer `order`).
+/// All slices (`layer_maps`, `base_colors`, `masks`, `layer_dry`,
+/// `group_names`) must be in compositing order (sorted by layer `order`).
+///
+/// Base color fill uses a 2-pass strategy so that specific vertex-group
+/// colors always override the `__all__` backdrop within their masked
+/// region, regardless of layer order:
+///   - Pass 1: fill the full canvas with the lowest `__all__` layer's base color.
+///   - Pass 2: fill each specific group's masked region with its lowest layer's
+///     base color, overriding `__all__`.
+///
+/// Pass `&[]` for `group_names` to treat every layer as `__all__`.
 pub fn finalize_layers(
     layer_maps: &[&LayerMaps],
     base_colors: &[BaseColorSource<'_>],
     masks: &[Option<&UvMask>],
     layer_dry: &[f32],
+    group_names: &[&str],
     resolution: u32,
     settings: &OutputSettings,
 ) -> GlobalMaps {
@@ -1037,8 +1058,36 @@ pub fn finalize_layers(
         settings.background_mode,
     );
 
+    debug_assert!(
+        group_names.is_empty() || group_names.len() == layer_maps.len(),
+        "group_names length ({}) must match layer_maps length ({}) or be empty",
+        group_names.len(),
+        layer_maps.len(),
+    );
+
     if settings.background_mode != BackgroundMode::Transparent {
+        let mut filled_groups: HashSet<&str> = HashSet::new();
+
+        // Pass 1: Fill __all__ base color first (full canvas backdrop)
         for (i, bc) in base_colors.iter().enumerate() {
+            let group = group_names.get(i).copied().unwrap_or("__all__");
+            if group != "__all__" || !filled_groups.insert(group) {
+                continue;
+            }
+            debug_assert!(
+                masks.get(i).and_then(|m| *m).is_none(),
+                "__all__ layer at index {} has a mask — convention violated",
+                i,
+            );
+            fill_base_color_region(&mut global, bc, None);
+        }
+
+        // Pass 2: Fill specific group base colors (override __all__ within masked regions)
+        for (i, bc) in base_colors.iter().enumerate() {
+            let group = group_names.get(i).copied().unwrap_or("__all__");
+            if group == "__all__" || !filled_groups.insert(group) {
+                continue;
+            }
             let mask = masks.get(i).and_then(|m| *m);
             fill_base_color_region(&mut global, bc, mask);
         }
@@ -1579,6 +1628,7 @@ mod tests {
             None,
             &[],
             None,
+            &[],
         );
 
         assert_eq!(maps.height.len(), 128 * 128);
@@ -1603,8 +1653,9 @@ mod tests {
             None,
             &[],
             None,
+            &[],
         );
-        let maps2 = composite_all(&[layer], 64, &base, &settings, None, &[], None);
+        let maps2 = composite_all(&[layer], 64, &base, &settings, None, &[], None, &[]);
 
         assert_eq!(maps1.height, maps2.height);
         assert_eq!(maps1.stroke_id, maps2.stroke_id);
@@ -1661,6 +1712,7 @@ mod tests {
             None,
             &[],
             None,
+            &[],
         );
         let solo_b = composite_all(
             &[layer_b.clone()],
@@ -1670,10 +1722,20 @@ mod tests {
             None,
             &[],
             None,
+            &[],
         );
 
         // Render both together (dry=1.0, opaque stacking)
-        let combined = composite_all(&[layer_a, layer_b], 64, &base, &settings, None, &[], None);
+        let combined = composite_all(
+            &[layer_a, layer_b],
+            64,
+            &base,
+            &settings,
+            None,
+            &[],
+            None,
+            &[],
+        );
 
         // Where only layer A has paint (and layer B does not), the combined
         // result should match the solo render of layer A.
@@ -1714,8 +1776,18 @@ mod tests {
             None,
             &[],
             None,
+            &[],
         );
-        let maps2 = composite_all(&[layer_a, layer_b], 64, &base, &settings, None, &[], None);
+        let maps2 = composite_all(
+            &[layer_a, layer_b],
+            64,
+            &base,
+            &settings,
+            None,
+            &[],
+            None,
+            &[],
+        );
 
         assert_eq!(maps1.height, maps2.height);
         assert_eq!(maps1.stroke_id, maps2.stroke_id);
@@ -1749,6 +1821,7 @@ mod tests {
             None,
             &[],
             None,
+            &[],
         );
 
         let out_dir = crate::test_module_output_dir("compositing");
@@ -1865,6 +1938,7 @@ mod tests {
             None,
             &[],
             None,
+            &[],
         );
 
         let color_pixels: Vec<u8> = maps
@@ -1927,5 +2001,144 @@ mod tests {
         let idx = (py as u32 * 16 + px as u32) as usize;
         assert_eq!(global.height[idx], 0.0, "zero height should not overwrite");
         assert_eq!(global.stroke_id[idx], 0, "stroke_id should remain 0");
+    }
+
+    // ── Base color 2-pass tests ──
+
+    /// Verify that specific-group base colors override __all__ within their
+    /// masked region, regardless of layer order.
+    #[test]
+    fn base_color_specific_group_overrides_all() {
+        use crate::uv_mask::UvMask;
+
+        let res = 8u32;
+        let size = (res * res) as usize;
+
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let blue = Color::rgb(0.0, 0.0, 1.0);
+
+        // Mask covering the top-left quadrant (y < 4, x < 4)
+        let mut mask_data = vec![false; size];
+        for py in 0..4 {
+            for px in 0..4 {
+                mask_data[(py * res + px) as usize] = true;
+            }
+        }
+        let mask = UvMask {
+            data: mask_data,
+            resolution: res,
+        };
+
+        // Two empty LayerMaps (no paint — we only test base color fill)
+        let empty_layer = LayerMaps {
+            height: vec![0.0; size],
+            color: vec![Color::new(0.0, 0.0, 0.0, 0.0); size],
+            stroke_id: vec![0; size],
+            object_normal: vec![[0.0; 3]; size],
+            gradient_x: vec![0.0; size],
+            gradient_y: vec![0.0; size],
+            paint_load: vec![0.0; size],
+            stroke_time_order: vec![0.0; size],
+            stroke_time_arc: vec![0.0; size],
+            resolution: res,
+        };
+
+        let settings = OutputSettings {
+            background_mode: BackgroundMode::Opaque,
+            ..OutputSettings::default()
+        };
+
+        // Layer 0: group="arm" (specific), base_color=blue
+        // Layer 1: group="__all__", base_color=red
+        // Even though __all__ comes AFTER arm, arm's blue must win in the masked region.
+        let layer_refs: Vec<&LayerMaps> = vec![&empty_layer, &empty_layer];
+        let base_colors = vec![BaseColorSource::solid(blue), BaseColorSource::solid(red)];
+        let masks: Vec<Option<&UvMask>> = vec![Some(&mask), None];
+        let group_names: Vec<&str> = vec!["arm", "__all__"];
+
+        let global = finalize_layers(
+            &layer_refs,
+            &base_colors,
+            &masks,
+            &[1.0, 1.0],
+            &group_names,
+            res,
+            &settings,
+        );
+
+        // Top-left quadrant (masked "arm" region) should be blue
+        let tl_idx = (res + 1) as usize;
+        assert!(
+            (global.color[tl_idx].r - blue.r).abs() < EPS
+                && (global.color[tl_idx].b - blue.b).abs() < EPS,
+            "masked region should have specific group base color (blue), got {:?}",
+            global.color[tl_idx],
+        );
+
+        // Bottom-right (outside mask) should be red (__all__ backdrop)
+        let br_idx = (6 * res + 6) as usize;
+        assert!(
+            (global.color[br_idx].r - red.r).abs() < EPS
+                && (global.color[br_idx].b - red.b).abs() < EPS,
+            "unmasked region should have __all__ base color (red), got {:?}",
+            global.color[br_idx],
+        );
+    }
+
+    /// Verify that only the lowest (first in sorted order) layer per group
+    /// determines the base color.
+    #[test]
+    fn base_color_lowest_layer_wins_per_group() {
+        let res = 4u32;
+        let size = (res * res) as usize;
+
+        let green = Color::rgb(0.0, 1.0, 0.0);
+        let yellow = Color::rgb(1.0, 1.0, 0.0);
+
+        let empty_layer = LayerMaps {
+            height: vec![0.0; size],
+            color: vec![Color::new(0.0, 0.0, 0.0, 0.0); size],
+            stroke_id: vec![0; size],
+            object_normal: vec![[0.0; 3]; size],
+            gradient_x: vec![0.0; size],
+            gradient_y: vec![0.0; size],
+            paint_load: vec![0.0; size],
+            stroke_time_order: vec![0.0; size],
+            stroke_time_arc: vec![0.0; size],
+            resolution: res,
+        };
+
+        let settings = OutputSettings {
+            background_mode: BackgroundMode::Opaque,
+            ..OutputSettings::default()
+        };
+
+        // Two __all__ layers: first=green, second=yellow
+        // Only green (first/lowest) should be used.
+        let layer_refs: Vec<&LayerMaps> = vec![&empty_layer, &empty_layer];
+        let base_colors = vec![
+            BaseColorSource::solid(green),
+            BaseColorSource::solid(yellow),
+        ];
+        let masks: Vec<Option<&UvMask>> = vec![None, None];
+        let group_names: Vec<&str> = vec!["__all__", "__all__"];
+
+        let global = finalize_layers(
+            &layer_refs,
+            &base_colors,
+            &masks,
+            &[1.0, 1.0],
+            &group_names,
+            res,
+            &settings,
+        );
+
+        let idx = (2 * res + 2) as usize;
+        assert!(
+            (global.color[idx].g - green.g).abs() < EPS
+                && (global.color[idx].r - green.r).abs() < EPS,
+            "should use first __all__ layer's base color (green), got {:?}",
+            global.color[idx],
+        );
     }
 }

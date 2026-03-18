@@ -1161,6 +1161,7 @@ mod tests {
             None,
             &[],
             None,
+            &[],
         );
 
         let dir = std::env::temp_dir()
@@ -1211,6 +1212,7 @@ mod tests {
             None,
             &[],
             None,
+            &[],
         );
 
         let dir = std::env::temp_dir()

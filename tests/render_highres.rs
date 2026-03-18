@@ -43,6 +43,7 @@ fn visual_highres_cpu() {
             None,
             &[],
             None,
+            &[],
         );
         save_maps(&cpu_maps, res, &format!("cpu_{}", res));
 

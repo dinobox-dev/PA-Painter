@@ -511,11 +511,22 @@ fn run_pipeline(
         .iter()
         .map(|&(layer_index, _)| input.layer_dry.get(layer_index).copied().unwrap_or(1.0))
         .collect();
+    let sorted_groups: Vec<&str> = sorted
+        .iter()
+        .map(|&(layer_index, _)| {
+            input
+                .layer_group_names
+                .get(layer_index)
+                .map(|s| s.as_str())
+                .unwrap_or("__all__")
+        })
+        .collect();
     let global = finalize_layers(
         &layer_refs,
         &sorted_base_colors,
         &sorted_masks,
         &layer_dry,
+        &sorted_groups,
         input.resolution,
         &input.settings,
     );
@@ -776,11 +787,16 @@ fn run_remerge(
     let base_colors: Vec<BaseColorSource<'_>> =
         base_color_data.iter().map(|bc| bc.as_source()).collect();
     let layer_dry: Vec<f32> = sorted_layers.iter().map(|l| l.dry).collect();
+    let group_names: Vec<&str> = sorted_layers
+        .iter()
+        .map(|l| l.group_name.as_str())
+        .collect();
     let global = finalize_layers(
         &layer_maps,
         &base_colors,
         &mask_refs,
         &layer_dry,
+        &group_names,
         resolution,
         settings,
     );

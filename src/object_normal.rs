@@ -868,6 +868,7 @@ mod tests {
             Some(&nd),
             &[],
             None,
+            &[],
         );
 
         let out_dir = crate::test_module_output_dir("object_normal");
@@ -1085,6 +1086,7 @@ mod tests {
             Some(&nd),
             &[],
             None,
+            &[],
         );
         let maps_on = composite_all(
             std::slice::from_ref(&layer_on),
@@ -1094,6 +1096,7 @@ mod tests {
             Some(&nd),
             &[],
             None,
+            &[],
         );
 
         let out_dir = crate::test_module_output_dir("object_normal");
