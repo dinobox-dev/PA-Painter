@@ -386,8 +386,20 @@ pub fn composite_stroke(
 
     let stroke_length_px = (total_len * res_f).ceil() as usize;
     let half_lateral_uv = local_h as f32 / 2.0 / res_f;
-    // Half-pixel overlap at segment junctions to avoid gaps
-    let junction_pad = 0.5 / res_f;
+    let base_pad = 0.5 / res_f;
+
+    // Pre-compute per-segment directions for junction padding.
+    let seg_dirs: Vec<Vec2> = (0..points.len() - 1)
+        .map(|i| {
+            let seg = points[i + 1] - points[i];
+            let len = seg.length();
+            if len < 1e-8 {
+                Vec2::ZERO
+            } else {
+                seg / len
+            }
+        })
+        .collect();
 
     for seg_idx in 0..points.len() - 1 {
         let a = points[seg_idx];
@@ -397,15 +409,37 @@ pub fn composite_stroke(
         if seg_len < 1e-8 {
             continue;
         }
-        let seg_dir = seg / seg_len;
+        let seg_dir = seg_dirs[seg_idx];
         let normal = perpendicular(seg_dir);
 
-        // Projection bounds along this segment
-        let proj_lo = if seg_idx == 0 { 0.0 } else { -junction_pad };
-        let proj_hi = seg_len + junction_pad;
+        // Junction padding: base half-pixel plus extra proportional to the
+        // angular change × brush half-width. At a junction, outer-edge pixels
+        // of a wide brush can shift by half_lateral_uv * sin(angle) in the
+        // longitudinal direction; padding by that amount closes the gap.
+        let pad_lo = if seg_idx == 0 {
+            0.0
+        } else {
+            let prev_dir = seg_dirs[seg_idx - 1];
+            let sin_half =
+                (1.0 - seg_dir.dot(prev_dir)).max(0.0).sqrt() * std::f32::consts::FRAC_1_SQRT_2;
+            base_pad + half_lateral_uv * sin_half
+        };
+        let pad_hi = if seg_idx + 1 >= seg_dirs.len() {
+            base_pad
+        } else {
+            let next_dir = seg_dirs[seg_idx + 1];
+            let sin_half =
+                (1.0 - seg_dir.dot(next_dir)).max(0.0).sqrt() * std::f32::consts::FRAC_1_SQRT_2;
+            base_pad + half_lateral_uv * sin_half
+        };
 
-        // Tight bounding box for this segment
-        let ext = Vec2::splat(half_lateral_uv + 1.0 / res_f);
+        // Projection bounds along this segment
+        let proj_lo = if seg_idx == 0 { 0.0 } else { -pad_lo };
+        let proj_hi = seg_len + pad_hi;
+
+        // Tight bounding box for this segment (expanded by max pad)
+        let max_pad = pad_lo.max(pad_hi);
+        let ext = Vec2::splat(half_lateral_uv + max_pad + 1.0 / res_f);
         let seg_min = a.min(b) - ext;
         let seg_max = a.max(b) + ext;
 
