@@ -1,6 +1,6 @@
 [package]
 name = "pa-painter"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 description = "Procedural paint stroke generator for 3D assets — turn any mesh into a hand-painted look. Built for Practical Arcana, works with any UV-mapped 3D mesh."
 license = "MIT"

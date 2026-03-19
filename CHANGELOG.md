@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] — 2026-03-19
+
+### Fixed
+
+- Dark fringe around strokes on layers with viscosity < 1.0: height diffusion spread positive height into unpainted background pixels whose color remained transparent black, causing merge_layers to blend black at partial opacity
+
 ## [0.2.2] — 2026-03-18
 
 ### Added
