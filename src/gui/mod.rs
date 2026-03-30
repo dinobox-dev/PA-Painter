@@ -1963,6 +1963,15 @@ impl PainterApp {
         self.state.cached_mesh_normals = None;
         self.state.path_worker.discard();
         self.state.group_dim_cache.invalidate();
+        // Older projects lack model_transform in editor.json — if it
+        // deserialized as identity, recompute from mesh bounds (camera
+        // is kept from editor.json so saved angles are preserved).
+        let needs_recompute = self.state.mesh_preview.model_transform == glam::Mat4::IDENTITY;
+        if needs_recompute {
+            if let Some(ref mesh) = self.state.loaded_mesh {
+                self.state.mesh_preview.recompute_model_transform(mesh);
+            }
+        }
         self.init_mesh_preview_no_fit();
     }
 
@@ -1972,6 +1981,12 @@ impl PainterApp {
         self.state.cached_mesh_normals = None;
         self.state.path_worker.discard();
         self.state.group_dim_cache.invalidate();
+        let needs_recompute = self.state.mesh_preview.model_transform == glam::Mat4::IDENTITY;
+        if needs_recompute {
+            if let Some(ref mesh) = self.state.loaded_mesh {
+                self.state.mesh_preview.recompute_model_transform(mesh);
+            }
+        }
         self.init_mesh_preview_no_fit();
     }
 

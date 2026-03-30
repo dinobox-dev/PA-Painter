@@ -162,7 +162,8 @@ impl MeshPreviewState {
     /// The camera is then placed at a fixed distance that frames this
     /// normalized geometry, making interaction (zoom, pan) consistent
     /// regardless of the original model size.
-    pub fn fit_to_mesh(&mut self, mesh: &LoadedMesh) {
+    /// Recompute `model_transform` from mesh bounding box without touching camera.
+    pub fn recompute_model_transform(&mut self, mesh: &LoadedMesh) {
         if mesh.positions.is_empty() {
             return;
         }
@@ -179,6 +180,11 @@ impl MeshPreviewState {
         let scale = if extent > 1e-6 { 2.0 / extent } else { 1.0 };
         self.model_transform =
             Mat4::from_scale(Vec3::splat(scale)) * Mat4::from_translation(-mesh_center);
+    }
+
+    /// Recompute `model_transform` AND reset camera to default orbit.
+    pub fn fit_to_mesh(&mut self, mesh: &LoadedMesh) {
+        self.recompute_model_transform(mesh);
 
         // Camera orbits the origin at a fixed distance (works for any model now)
         self.center = Vec3::ZERO;

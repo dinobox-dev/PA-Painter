@@ -248,6 +248,7 @@ pub struct EditorState {
     pub selected_layer: Option<usize>,
 
     // ── 3D Display ──
+    pub model_transform: [[f32; 4]; 4],
     pub result_mode: ResultMode,
     pub show_direction_field: bool,
 
@@ -280,6 +281,7 @@ impl Default for EditorState {
             setup_map_mode: SetupMapMode::default(),
             guide_tool: GuideTool::default(),
             selected_layer: None,
+            model_transform: glam::Mat4::IDENTITY.to_cols_array_2d(),
             result_mode: ResultMode::default(),
             show_direction_field: false,
             playback_speed: 1.0,
@@ -651,6 +653,7 @@ impl AppState {
             setup_map_mode: self.setup_map_mode,
             guide_tool: self.guide_tool,
             selected_layer: self.selected_layer,
+            model_transform: mp.model_transform.to_cols_array_2d(),
             result_mode: mp.result_mode,
             show_direction_field: mp.show_direction_field,
             playback_speed: mp.speed,
@@ -673,6 +676,7 @@ impl AppState {
         mp.light_yaw = es.light_yaw;
         mp.light_pitch = es.light_pitch;
         mp.orbit_target = es.orbit_target;
+        mp.model_transform = glam::Mat4::from_cols_array_2d(&es.model_transform);
         mp.result_mode = es.result_mode;
         mp.show_direction_field = es.show_direction_field;
         mp.speed = es.playback_speed;
