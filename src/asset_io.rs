@@ -336,8 +336,10 @@ fn build_mesh_from_obj(models: &[tobj::Model]) -> Result<LoadedMesh, MeshError> 
         }
 
         // Extract UVs (u, v pairs)
+        // OBJ uses bottom-left UV origin (V=0 at bottom), but our pipeline
+        // assumes glTF convention (V=0 at top), so flip V.
         for chunk in mesh.texcoords.chunks_exact(2) {
-            uvs.push(Vec2::new(chunk[0], chunk[1]));
+            uvs.push(Vec2::new(chunk[0], 1.0 - chunk[1]));
         }
 
         // Handle face arities

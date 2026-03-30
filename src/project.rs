@@ -148,7 +148,7 @@ impl Default for Project {
     fn default() -> Self {
         Self {
             manifest: Manifest {
-                version: "1".to_string(),
+                version: "2".to_string(),
                 app_name: "PA Painter".to_string(),
                 created_at: utc_now_iso8601(),
                 modified_at: utc_now_iso8601(),
@@ -363,7 +363,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
     let mut archive = ZipArchive::new(file)?;
 
     // manifest.json (required)
-    let manifest: Manifest =
+    let mut manifest: Manifest =
         read_json_entry(&mut archive, "manifest.json").map_err(|e| match e {
             ProjectError::Zip(_) => {
                 ProjectError::InvalidFormat("missing manifest.json".to_string())
@@ -434,6 +434,23 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
                 layer.base_normal = TextureSource::File(None);
             }
         }
+    }
+
+    // ── Migration: v1 → v2 ──
+    // v1 OBJ projects stored guide positions in un-flipped OBJ UV space
+    // (V=0 at bottom). v2 flips OBJ UVs on load so V=0 is at the top
+    // (glTF convention). Migrate guide Y coordinates to match.
+    let is_obj =
+        mesh_format.eq_ignore_ascii_case("obj") || data.mesh_ref.format.eq_ignore_ascii_case("obj");
+    if manifest.version == "1" && is_obj {
+        info!("Migrating v1 OBJ project: flipping guide Y coordinates");
+        for layer in &mut layers {
+            for guide in &mut layer.guides {
+                guide.position.y = 1.0 - guide.position.y;
+                guide.direction.y = -guide.direction.y;
+            }
+        }
+        manifest.version = "2".to_string();
     }
 
     // editor.json — opaque editor UI state
@@ -555,7 +572,7 @@ mod tests {
 
     fn make_manifest() -> Manifest {
         Manifest {
-            version: "1".to_string(),
+            version: "2".to_string(),
             app_name: "PA Painter".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             modified_at: "2026-01-01T00:00:00Z".to_string(),
@@ -664,7 +681,7 @@ mod tests {
         save_project(&project, &path, None).unwrap();
         let result = load_project(&path).unwrap();
 
-        assert_eq!(result.project.manifest.version, "1");
+        assert_eq!(result.project.manifest.version, "2");
         assert_eq!(result.project.manifest.app_name, "PA Painter");
         assert_eq!(result.project.layers.len(), 0);
     }
@@ -712,6 +729,61 @@ mod tests {
         }
     }
 
+    // ── Migration Tests ──
+
+    #[test]
+    fn migrate_v1_obj_flips_guide_y() {
+        let mut project = make_empty_project();
+        project.manifest.version = "1".to_string();
+        project.mesh_ref.format = "obj".to_string();
+        project.layers = vec![make_test_layer("head", 0, 3)];
+
+        let originals: Vec<(f32, f32)> = project.layers[0]
+            .guides
+            .iter()
+            .map(|g| (g.position.y, g.direction.y))
+            .collect();
+
+        let path = temp_pap_path("migrate_v1.papr");
+        save_project(&project, &path, None).unwrap();
+        let result = load_project(&path).unwrap();
+
+        assert_eq!(result.project.manifest.version, "2");
+        for ((orig_pos_y, orig_dir_y), guide) in
+            originals.iter().zip(result.project.layers[0].guides.iter())
+        {
+            assert!((guide.position.y - (1.0 - orig_pos_y)).abs() < 1e-6);
+            assert!((guide.direction.y - (-orig_dir_y)).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn no_migration_v1_glb() {
+        let mut project = make_empty_project();
+        project.manifest.version = "1".to_string();
+        project.mesh_ref.format = "glb".to_string();
+        project.layers = vec![make_test_layer("body", 0, 2)];
+
+        let original_ys: Vec<f32> = project.layers[0]
+            .guides
+            .iter()
+            .map(|g| g.position.y)
+            .collect();
+
+        let path = temp_pap_path("no_migrate_glb.papr");
+        save_project(&project, &path, None).unwrap();
+        let result = load_project(&path).unwrap();
+
+        // v1 GLB should NOT migrate — version stays "1"
+        assert_eq!(result.project.manifest.version, "1");
+        for (orig_y, guide) in original_ys
+            .iter()
+            .zip(result.project.layers[0].guides.iter())
+        {
+            assert!((guide.position.y - orig_y).abs() < 1e-6);
+        }
+    }
+
     // ── File Format Tests ──
 
     #[test]
@@ -743,7 +815,7 @@ mod tests {
 
         assert!(buf.contains('\n'), "JSON should be pretty-printed");
         let parsed: serde_json::Value = serde_json::from_str(&buf).unwrap();
-        assert_eq!(parsed["version"], "1");
+        assert_eq!(parsed["version"], "2");
         assert_eq!(parsed["app_name"], "PA Painter");
     }
 
