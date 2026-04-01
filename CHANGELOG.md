@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Dark/light/system theme toggle in View menu
+- JPG/JPEG texture support for OBJ import and manual texture picker
+
+### Changed
+
+- Menu bar: platform-aware shortcut display, right-aligned shortcut text, unified dropdown widths
+
+## [0.2.4] — 2026-03-31
+
+### Fixed
+
+- 3D preview losing camera transform on project reload
+- OBJ UV V-axis flipped to match glTF convention; existing v1 projects auto-migrated
+
 ## [0.2.3] — 2026-03-19
 
 ### Fixed
