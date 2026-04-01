@@ -1105,7 +1105,10 @@ impl eframe::App for PainterApp {
         // is invisible to the change tracker.
         let pre_frame = self.state.take_snapshot();
         // Project-replacing actions explicitly set dirty=false; skip auto-dirty for those frames.
-        let project_replacing = self.state.pending_open || self.state.pending_new;
+        let project_replacing = self.state.pending_open
+            || self.state.pending_new
+            || self.state.pending_open_example
+            || self.pending_open_recent.is_some();
 
         self.dispatch_deferred(ctx);
         self.sync_gpu_textures();
