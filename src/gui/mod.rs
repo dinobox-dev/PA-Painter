@@ -3,6 +3,7 @@ pub mod generation;
 pub mod guide_editor;
 pub mod mesh_preview;
 pub mod preview;
+pub mod recent_files;
 pub mod sidebar;
 pub mod slot_editor;
 pub mod state;
@@ -62,6 +63,12 @@ pub struct PainterApp {
     update_checker: update_check::UpdateChecker,
     /// Whether the user dismissed the update banner.
     update_dismissed: bool,
+    /// Recent project entries.
+    recent_files: Vec<recent_files::RecentEntry>,
+    /// Path to open from recent files list (deferred to next frame).
+    pending_open_recent: Option<std::path::PathBuf>,
+    /// Alert message shown as a modal dialog (dismissed with OK).
+    alert_message: Option<String>,
 }
 
 impl PainterApp {
@@ -84,6 +91,9 @@ impl PainterApp {
             prev_direction_field_hash: 0,
             update_checker: update_check::UpdateChecker::spawn(),
             update_dismissed: false,
+            recent_files: recent_files::load(),
+            pending_open_recent: None,
+            alert_message: None,
         }
     }
 
@@ -1239,6 +1249,19 @@ impl PainterApp {
                 self.do_open_project(ctx);
             }
         }
+        if let Some(path) = self.pending_open_recent.take() {
+            if self.state.dirty {
+                // Stash path back and show unsaved dialog
+                self.pending_open_recent = Some(path);
+                self.state.unsaved_confirm = Some(UnsavedAction::Open);
+            } else if path.exists() {
+                dialogs::open_project_at_path(&mut self.state, &path);
+                self.after_project_loaded();
+            } else {
+                self.alert_message = Some(format!("File not found:\n{}", path.display()));
+                self.recent_files = recent_files::remove(&path);
+            }
+        }
         if self.state.pending_open_example {
             self.state.pending_open_example = false;
             if self.state.dirty {
@@ -1250,6 +1273,9 @@ impl PainterApp {
         if self.state.pending_save {
             self.state.pending_save = false;
             dialogs::save_project_action(&mut self.state);
+            if let Some(ref path) = self.state.project_path {
+                self.recent_files = recent_files::push(path);
+            }
         }
         if self.state.pending_export {
             self.state.pending_export = false;
@@ -1655,6 +1681,26 @@ impl PainterApp {
                         ui.close();
                         self.state.pending_open_example = true;
                     }
+                    if !self.recent_files.is_empty() {
+                        ui.menu_button("Recent Projects", |ui| {
+                            ui.set_min_width(250.0);
+                            let mut open_path = None;
+                            for entry in &self.recent_files {
+                                let label = format!("{}  ({})", entry.name(), entry.time_ago());
+                                if ui
+                                    .button(label)
+                                    .on_hover_text(entry.path.display().to_string())
+                                    .clicked()
+                                {
+                                    open_path = Some(entry.path.clone());
+                                    ui.close();
+                                }
+                            }
+                            if let Some(path) = open_path {
+                                self.pending_open_recent = Some(path);
+                            }
+                        });
+                    }
                     if Self::menu_item(
                         ui,
                         "Save",
@@ -1818,31 +1864,188 @@ impl PainterApp {
             if has_project {
                 viewport::show(ui, &mut self.state, render_state.as_ref());
             } else {
-                ui.vertical_centered(|ui: &mut egui::Ui| {
-                    ui.add_space(ui.available_height() * 0.3);
-                    ui.heading("PA Painter");
-                    ui.add_space(16.0);
-                    ui.label("Generate painterly texture maps from 3D meshes.");
-                    ui.add_space(24.0);
+                // Welcome screen: fixed-width centered container
+                let panel_w = 460.0_f32.min(ui.available_width() - 32.0);
+                let content_h = 60.0 // heading + description + spacing
+                    + 56.0 + 24.0   // buttons + gap
+                    + if self.recent_files.is_empty() {
+                        0.0
+                    } else {
+                        24.0 + 23.0 + self.recent_files.len() as f32 * 22.0
+                    };
+                let top_space = ((ui.available_height() - content_h) / 2.5).max(16.0);
+                ui.add_space(top_space);
+
+                let margin = (ui.available_width() - panel_w).max(0.0) / 2.0;
+                let container = egui::Rect::from_min_size(
+                    ui.cursor().min + egui::Vec2::new(margin, 0.0),
+                    egui::Vec2::new(panel_w, ui.available_height()),
+                );
+                let mut ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(container)
+                        .layout(egui::Layout::top_down(egui::Align::Center)),
+                );
+
+                ui.heading("PA Painter");
+                ui.add_space(8.0);
+                ui.label("Generate painterly texture maps from 3D meshes.");
+                ui.add_space(24.0);
+
+                let btn_h = 56.0;
+                let half_w = (panel_w - ui.spacing().item_spacing.x) / 2.0;
+                let btn_size = egui::Vec2::new(half_w, btn_h);
+
+                ui.horizontal(|ui| {
                     if ui
-                        .add(
-                            egui::Button::new("Open Project...")
-                                .min_size(egui::Vec2::new(200.0, 36.0)),
-                        )
+                        .add(egui::Button::new("Open Project...").min_size(btn_size))
                         .clicked()
                     {
                         self.state.pending_open = true;
                     }
-                    ui.add_space(8.0);
                     if ui
-                        .add(
-                            egui::Button::new("New Project").min_size(egui::Vec2::new(200.0, 36.0)),
-                        )
+                        .add(egui::Button::new("New Project").min_size(btn_size))
                         .clicked()
                     {
                         self.state.pending_new = true;
                     }
                 });
+
+                if !self.recent_files.is_empty() {
+                    ui.add_space(24.0);
+
+                    let mut open_path = None;
+                    let weak = ui.visuals().weak_text_color();
+                    let text_color = ui.visuals().text_color();
+                    let name_font = egui::FontId::proportional(13.0);
+                    let small_font = egui::FontId::proportional(11.0);
+
+                    let col_name = panel_w * 0.25;
+                    let col_opened = panel_w * 0.25;
+                    let col_loc = panel_w - col_name - col_opened;
+                    let row_h = 22.0;
+                    let cols = [col_name, col_loc, col_opened];
+
+                    let paint_cell = |ui: &egui::Ui,
+                                      rect: egui::Rect,
+                                      text: &str,
+                                      font: egui::FontId,
+                                      color: egui::Color32| {
+                        widgets::paint_truncated_text(
+                            ui.painter(),
+                            text,
+                            font,
+                            color,
+                            rect.left(),
+                            rect,
+                            rect.width(),
+                        );
+                    };
+
+                    // Header
+                    let (header_rect, _) = ui
+                        .allocate_exact_size(egui::Vec2::new(panel_w, row_h), egui::Sense::hover());
+                    let mut hx = header_rect.min.x;
+                    for (&w, &label) in cols.iter().zip(["Name", "Location", "Opened"].iter()) {
+                        let cell = egui::Rect::from_min_size(
+                            egui::Pos2::new(hx, header_rect.min.y),
+                            egui::Vec2::new(w, row_h),
+                        );
+                        paint_cell(&ui, cell, label, small_font.clone(), weak);
+                        hx += w;
+                    }
+
+                    // Separator
+                    let (sep_rect, _) =
+                        ui.allocate_exact_size(egui::Vec2::new(panel_w, 1.0), egui::Sense::hover());
+                    ui.painter().line_segment(
+                        [sep_rect.left_center(), sep_rect.right_center()],
+                        ui.visuals().widgets.noninteractive.bg_stroke,
+                    );
+
+                    // Rows (scrollable)
+                    let mut remove_path = None;
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(true)
+                        .show(&mut ui, |ui| {
+                            for entry in &self.recent_files {
+                                let (row_rect, row_resp) = ui.allocate_exact_size(
+                                    egui::Vec2::new(panel_w, row_h),
+                                    egui::Sense::click(),
+                                );
+
+                                let row_hovered = row_resp.hovered();
+                                let pointer_pos = ui.ctx().input(|i| i.pointer.hover_pos());
+
+                                let x_size = row_h;
+                                let x_rect = egui::Rect::from_min_size(
+                                    egui::Pos2::new(row_rect.max.x - x_size, row_rect.min.y),
+                                    egui::Vec2::splat(x_size),
+                                );
+                                let x_hovered =
+                                    row_hovered && pointer_pos.is_some_and(|p| x_rect.contains(p));
+                                let x_clicked = row_resp.clicked() && x_hovered;
+
+                                if row_hovered {
+                                    ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+                                if row_hovered && !x_hovered {
+                                    ui.painter().rect_filled(
+                                        row_rect,
+                                        2.0,
+                                        ui.visuals().widgets.hovered.bg_fill,
+                                    );
+                                }
+                                if row_hovered {
+                                    if x_hovered {
+                                        ui.painter().rect_filled(
+                                            x_rect.shrink(2.0),
+                                            3.0,
+                                            ui.visuals().widgets.active.bg_fill,
+                                        );
+                                    }
+                                    ui.painter().text(
+                                        x_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        "\u{00d7}",
+                                        egui::FontId::proportional(15.0),
+                                        if x_hovered { text_color } else { weak },
+                                    );
+                                }
+
+                                let texts = [entry.name(), entry.dir_display(), entry.time_ago()];
+                                let fonts =
+                                    [name_font.clone(), small_font.clone(), small_font.clone()];
+                                let colors = [text_color, weak, weak];
+                                let mut x = row_rect.min.x;
+                                for i in 0..3 {
+                                    let w = if row_hovered && i == 2 {
+                                        (cols[i] - x_size).max(0.0)
+                                    } else {
+                                        cols[i]
+                                    };
+                                    let cell = egui::Rect::from_min_size(
+                                        egui::Pos2::new(x, row_rect.min.y),
+                                        egui::Vec2::new(w, row_h),
+                                    );
+                                    paint_cell(ui, cell, &texts[i], fonts[i].clone(), colors[i]);
+                                    x += cols[i];
+                                }
+
+                                if x_clicked {
+                                    remove_path = Some(entry.path.clone());
+                                } else if row_resp.clicked() && !x_hovered {
+                                    open_path = Some(entry.path.clone());
+                                }
+                            }
+                            if let Some(path) = remove_path {
+                                self.recent_files = recent_files::remove(&path);
+                            }
+                        });
+                    if let Some(path) = open_path {
+                        self.pending_open_recent = Some(path);
+                    }
+                }
             }
         });
     }
@@ -1892,6 +2095,31 @@ impl PainterApp {
         }
 
         Self::show_export_settings_window(ctx, &mut self.state);
+
+        // Alert dialog (modal)
+        let mut dismiss_alert = false;
+        if let Some(ref msg) = self.alert_message {
+            if ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+            }) {
+                dismiss_alert = true;
+            }
+            egui::Window::new("Alert")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(msg);
+                    ui.add_space(8.0);
+                    if ui.button("OK").clicked() {
+                        dismiss_alert = true;
+                    }
+                });
+        }
+        if dismiss_alert {
+            self.alert_message = None;
+        }
 
         // Unsaved Changes Confirmation Window (modal)
         let mut unsaved_action = None;
@@ -1953,7 +2181,20 @@ impl PainterApp {
             Some(true) => {
                 let action = self.state.unsaved_confirm.take();
                 match action {
-                    Some(UnsavedAction::Open) => self.do_open_project(ctx),
+                    Some(UnsavedAction::Open) => {
+                        if let Some(path) = self.pending_open_recent.take() {
+                            if path.exists() {
+                                dialogs::open_project_at_path(&mut self.state, &path);
+                                self.after_project_loaded();
+                            } else {
+                                self.alert_message =
+                                    Some(format!("File not found:\n{}", path.display()));
+                                self.recent_files = recent_files::remove(&path);
+                            }
+                        } else {
+                            self.do_open_project(ctx);
+                        }
+                    }
                     Some(UnsavedAction::OpenExample) => self.do_open_example(),
                     Some(UnsavedAction::New) => self.do_new_project(ctx),
                     Some(UnsavedAction::Quit) => {
@@ -1965,6 +2206,7 @@ impl PainterApp {
             }
             Some(false) => {
                 self.state.unsaved_confirm = None;
+                self.pending_open_recent = None;
             }
             None => {}
         }
@@ -2045,40 +2287,39 @@ impl PainterApp {
             self.state.export_settings_draft = None;
             self.state.export_overwrite_confirm = None;
             self.state.unsaved_confirm = None;
+            self.pending_open_recent = None;
         }
+    }
+
+    /// Post-load housekeeping shared by all project open paths.
+    fn after_project_loaded(&mut self) {
+        if let Some(ref path) = self.state.project_path {
+            self.recent_files = recent_files::push(path);
+        }
+        self.state.cached_mesh_normals = None;
+        self.state.path_worker.discard();
+        self.state.group_dim_cache.invalidate();
+        // Older projects lack model_transform in editor.json — if it
+        // deserialized as identity, recompute from mesh bounds.
+        let needs_recompute = self.state.mesh_preview.model_transform == glam::Mat4::IDENTITY;
+        if needs_recompute {
+            if let Some(ref mesh) = self.state.loaded_mesh {
+                self.state.mesh_preview.recompute_model_transform(mesh);
+            }
+        }
+        self.init_mesh_preview_no_fit();
     }
 
     /// Execute Open Project (file dialog + load).
     fn do_open_project(&mut self, ctx: &egui::Context) {
         dialogs::open_project(&mut self.state, ctx);
-        self.state.cached_mesh_normals = None;
-        self.state.path_worker.discard();
-        self.state.group_dim_cache.invalidate();
-        // Older projects lack model_transform in editor.json — if it
-        // deserialized as identity, recompute from mesh bounds (camera
-        // is kept from editor.json so saved angles are preserved).
-        let needs_recompute = self.state.mesh_preview.model_transform == glam::Mat4::IDENTITY;
-        if needs_recompute {
-            if let Some(ref mesh) = self.state.loaded_mesh {
-                self.state.mesh_preview.recompute_model_transform(mesh);
-            }
-        }
-        self.init_mesh_preview_no_fit();
+        self.after_project_loaded();
     }
 
     /// Execute Open Example (embedded demo project).
     fn do_open_example(&mut self) {
         dialogs::open_example(&mut self.state);
-        self.state.cached_mesh_normals = None;
-        self.state.path_worker.discard();
-        self.state.group_dim_cache.invalidate();
-        let needs_recompute = self.state.mesh_preview.model_transform == glam::Mat4::IDENTITY;
-        if needs_recompute {
-            if let Some(ref mesh) = self.state.loaded_mesh {
-                self.state.mesh_preview.recompute_model_transform(mesh);
-            }
-        }
-        self.init_mesh_preview_no_fit();
+        self.after_project_loaded();
     }
 
     /// Execute New Project (file dialog + mesh load).

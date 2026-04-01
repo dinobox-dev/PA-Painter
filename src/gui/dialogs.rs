@@ -158,6 +158,11 @@ pub fn open_example(state: &mut AppState) -> bool {
 
 // ── Project Operations ─────────────────────────────────────────────
 
+/// Open a project from a specific path (e.g. recent files).
+pub fn open_project_at_path(state: &mut AppState, path: &std::path::Path) -> bool {
+    load_project_from_path(state, path)
+}
+
 /// Open a file dialog and load a .papr project.
 /// Returns true if a project was successfully loaded.
 pub fn open_project(state: &mut AppState, _ctx: &eframe::egui::Context) -> bool {
@@ -171,7 +176,11 @@ pub fn open_project(state: &mut AppState, _ctx: &eframe::egui::Context) -> bool 
         return false;
     };
 
-    match load_project(&path) {
+    load_project_from_path(state, &path)
+}
+
+fn load_project_from_path(state: &mut AppState, path: &std::path::Path) -> bool {
+    match load_project(path) {
         Ok(result) => {
             state.status_message = format!("Loaded: {}", path.display());
 
@@ -188,7 +197,7 @@ pub fn open_project(state: &mut AppState, _ctx: &eframe::egui::Context) -> bool 
             }
 
             state.project = result.project;
-            state.project_path = Some(path);
+            state.project_path = Some(path.to_path_buf());
             state.dirty = false;
             state.generation_snapshot = None;
             state.generation.discard();

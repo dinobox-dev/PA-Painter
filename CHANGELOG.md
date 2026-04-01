@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - JPG/JPEG texture support for OBJ import and manual texture picker
 - Duplicate layer button and ⌘D shortcut
 - Delete key binding for selected layer or guide
+- Recent projects list in File menu and welcome screen with name, path, and relative time
+- Alert dialog for file-not-found errors (auto-removes missing entries from recent list)
 
 ### Changed
 
@@ -20,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Settings section disabled until a mesh is loaded
 - Reordered sidebar settings: Resolution → Background → Normal Mode → Strength
 - Renamed "Normal Strength" label to "Strength" to reduce sidebar width
-- Fixed left sidebar flicker on startup by matching min_width to default_width
+- Welcome screen: horizontal Open/New buttons with recent projects table below
+- Enabled eframe persistence: theme, sidebar widths, and window size saved across sessions
+- Fixed left sidebar flicker on startup (min_width = default_width)
 
 ## [0.2.4] — 2026-03-31
 
