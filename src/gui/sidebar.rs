@@ -244,82 +244,85 @@ pub fn show_top(ui: &mut egui::Ui, state: &mut AppState) {
     ui.separator();
 
     // ── Project Settings ──
+    let has_project = state.loaded_mesh.is_some();
     section_header(ui, "Settings");
     let old_settings = state.project.settings.clone();
-    ui.indent("settings_content", |ui: &mut egui::Ui| {
-        let combo_w = 110.0;
+    ui.add_enabled_ui(has_project, |ui: &mut egui::Ui| {
+        ui.indent("settings_content", |ui: &mut egui::Ui| {
+            let combo_w = 110.0;
 
-        // Resolution preset
-        let current_res = state.project.settings.resolution_preset;
-        egui::ComboBox::from_label("Resolution")
-            .width(combo_w)
-            .selected_text(format!("{}px", current_res.resolution()))
-            .show_ui(ui, |ui: &mut egui::Ui| {
-                for &preset in &[
-                    ResolutionPreset::Preview,
-                    ResolutionPreset::Standard,
-                    ResolutionPreset::High,
-                    ResolutionPreset::Ultra,
-                ] {
+            // Resolution preset
+            let current_res = state.project.settings.resolution_preset;
+            egui::ComboBox::from_label("Resolution")
+                .width(combo_w)
+                .selected_text(format!("{}px", current_res.resolution()))
+                .show_ui(ui, |ui: &mut egui::Ui| {
+                    for &preset in &[
+                        ResolutionPreset::Preview,
+                        ResolutionPreset::Standard,
+                        ResolutionPreset::High,
+                        ResolutionPreset::Ultra,
+                    ] {
+                        ui.selectable_value(
+                            &mut state.project.settings.resolution_preset,
+                            preset,
+                            format!("{}px", preset.resolution()),
+                        );
+                    }
+                });
+
+            // Background mode
+            egui::ComboBox::from_label("Background")
+                .width(combo_w)
+                .selected_text(match state.project.settings.background_mode {
+                    BackgroundMode::Opaque => "Opaque",
+                    BackgroundMode::Transparent => "Transparent",
+                })
+                .show_ui(ui, |ui: &mut egui::Ui| {
                     ui.selectable_value(
-                        &mut state.project.settings.resolution_preset,
-                        preset,
-                        format!("{}px", preset.resolution()),
+                        &mut state.project.settings.background_mode,
+                        BackgroundMode::Opaque,
+                        "Opaque",
                     );
-                }
-            });
+                    ui.selectable_value(
+                        &mut state.project.settings.background_mode,
+                        BackgroundMode::Transparent,
+                        "Transparent",
+                    );
+                });
 
-        // Normal mode
-        egui::ComboBox::from_label("Normal Mode")
-            .width(combo_w)
-            .selected_text(match state.project.settings.normal_mode {
-                NormalMode::SurfacePaint => "SurfacePaint",
-                NormalMode::DepictedForm => "DepictedForm",
-            })
-            .show_ui(ui, |ui: &mut egui::Ui| {
-                ui.selectable_value(
-                    &mut state.project.settings.normal_mode,
-                    NormalMode::SurfacePaint,
-                    "SurfacePaint",
-                );
-                ui.selectable_value(
-                    &mut state.project.settings.normal_mode,
-                    NormalMode::DepictedForm,
-                    "DepictedForm",
-                );
-            });
+            // Normal mode
+            egui::ComboBox::from_label("Normal Mode")
+                .width(combo_w)
+                .selected_text(match state.project.settings.normal_mode {
+                    NormalMode::SurfacePaint => "SurfacePaint",
+                    NormalMode::DepictedForm => "DepictedForm",
+                })
+                .show_ui(ui, |ui: &mut egui::Ui| {
+                    ui.selectable_value(
+                        &mut state.project.settings.normal_mode,
+                        NormalMode::SurfacePaint,
+                        "SurfacePaint",
+                    );
+                    ui.selectable_value(
+                        &mut state.project.settings.normal_mode,
+                        NormalMode::DepictedForm,
+                        "DepictedForm",
+                    );
+                });
 
-        // Background mode
-        egui::ComboBox::from_label("Background")
-            .width(combo_w)
-            .selected_text(match state.project.settings.background_mode {
-                BackgroundMode::Opaque => "Opaque",
-                BackgroundMode::Transparent => "Transparent",
-            })
-            .show_ui(ui, |ui: &mut egui::Ui| {
-                ui.selectable_value(
-                    &mut state.project.settings.background_mode,
-                    BackgroundMode::Opaque,
-                    "Opaque",
-                );
-                ui.selectable_value(
-                    &mut state.project.settings.background_mode,
-                    BackgroundMode::Transparent,
-                    "Transparent",
-                );
-            });
-
-        // Normal strength
-        slider_row(
-            ui,
-            "normal_strength",
-            &mut state.project.settings.normal_strength,
-            0.0..=1.0,
-            "Normal Strength",
-            None,
-            2,
-        );
-    });
+            // Normal strength
+            slider_row(
+                ui,
+                "normal_strength",
+                &mut state.project.settings.normal_strength,
+                0.0..=1.0,
+                "Strength",
+                None,
+                2,
+            );
+        });
+    }); // add_enabled_ui
 
     // Type A remerge: normal_mode, background_mode, normal_strength changed
     // Resolution changes require full re-render (different global hash).

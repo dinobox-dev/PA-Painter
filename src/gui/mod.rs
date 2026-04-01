@@ -1761,7 +1761,7 @@ impl PainterApp {
     fn show_sidebars(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("left_panel")
             .default_width(260.0)
-            .min_width(220.0)
+            .min_width(260.0)
             .max_width(400.0)
             .show(ctx, |ui: &mut egui::Ui| {
                 egui::TopBottomPanel::bottom("left_bottom")

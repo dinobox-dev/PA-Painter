@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Menu bar: platform-aware shortcut display, right-aligned shortcut text, unified dropdown widths
+- Settings section disabled until a mesh is loaded
+- Reordered sidebar settings: Resolution → Background → Normal Mode → Strength
+- Renamed "Normal Strength" label to "Strength" to reduce sidebar width
+- Fixed left sidebar flicker on startup by matching min_width to default_width
 
 ## [0.2.4] — 2026-03-31
 
