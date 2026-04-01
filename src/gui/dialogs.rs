@@ -232,15 +232,19 @@ fn load_project_from_path(state: &mut AppState, path: &std::path::Path) -> bool 
 /// Opens a file dialog for mesh selection, loads the mesh into a pending popup.
 /// State is NOT modified until the user confirms (OK) — Cancel discards everything.
 pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
-    state.modal_dialog_active = true;
-    let path = rfd::FileDialog::new()
-        .add_filter("3D Mesh", &["glb", "gltf", "obj"])
-        .set_title("Select mesh for new project")
-        .pick_file();
-    state.modal_dialog_active = false;
-
-    let Some(mesh_path) = path else {
-        return;
+    let mesh_path = if let Some(path) = state.pending_drop_mesh.take() {
+        path
+    } else {
+        state.modal_dialog_active = true;
+        let path = rfd::FileDialog::new()
+            .add_filter("3D Mesh", &["glb", "gltf", "obj"])
+            .set_title("Select mesh for new project")
+            .pick_file();
+        state.modal_dialog_active = false;
+        let Some(p) = path else {
+            return;
+        };
+        p
     };
 
     // Load mesh into temporary — do NOT apply to state yet.

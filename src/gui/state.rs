@@ -461,6 +461,8 @@ pub struct AppState {
     pub pending_export: bool,
     pub pending_reload_mesh: bool,
     pub pending_replace_mesh: bool,
+    /// Mesh path from drag-and-drop (skips file dialog in new_project).
+    pub pending_drop_mesh: Option<std::path::PathBuf>,
     /// Re-merge cached LayerMaps without re-rendering (visibility/order/dry change).
     pub pending_remerge: bool,
 
@@ -550,6 +552,7 @@ impl AppState {
             pending_export: false,
             pending_reload_mesh: false,
             pending_replace_mesh: false,
+            pending_drop_mesh: None,
             pending_remerge: false,
             reload_summary: None,
             mesh_load_popup: None,

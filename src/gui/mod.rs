@@ -1099,6 +1099,7 @@ impl eframe::App for PainterApp {
         }
         self.init_lazy(ctx);
         self.handle_keyboard(ctx);
+        self.handle_file_drop(ctx);
 
         // Capture pre-frame snapshot AFTER undo/redo so the restore itself
         // is invisible to the change tracker.
@@ -1118,6 +1119,23 @@ impl eframe::App for PainterApp {
         self.show_central_panel(ctx);
         self.show_mesh_load_popup(ctx);
         self.show_auxiliary_windows(ctx);
+
+        // Drag-and-drop overlay
+        if !ctx.input(|i| i.raw.hovered_files.is_empty()) {
+            let screen = ctx.content_rect();
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("drop_overlay"),
+            ));
+            painter.rect_filled(screen, 0.0, egui::Color32::from_black_alpha(120));
+            painter.text(
+                screen.center(),
+                egui::Align2::CENTER_CENTER,
+                "Drop to open",
+                egui::FontId::proportional(24.0),
+                egui::Color32::WHITE,
+            );
+        }
 
         self.auto_preview_tick(ctx, project_replacing);
 
@@ -1235,6 +1253,33 @@ impl PainterApp {
     }
 
     /// Process pending_* flags set by UI widgets in the previous frame.
+    /// Handle files dropped onto the window.
+    fn handle_file_drop(&mut self, ctx: &egui::Context) {
+        let dropped: Vec<_> = ctx.input(|i| i.raw.dropped_files.clone());
+        for file in dropped {
+            let Some(path) = file.path else { continue };
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_lowercase())
+                .unwrap_or_default();
+            match ext.as_str() {
+                "papr" => {
+                    self.pending_open_recent = Some(path);
+                }
+                "obj" | "glb" | "gltf" => {
+                    self.state.pending_new = true;
+                    // Store the mesh path so new_project can skip the file dialog
+                    self.state.pending_drop_mesh = Some(path);
+                }
+                _ => {
+                    self.alert_message = Some(format!("Unsupported file type: .{ext}"));
+                }
+            }
+            break; // handle only the first file
+        }
+    }
+
     fn dispatch_deferred(&mut self, ctx: &egui::Context) {
         // On macOS, rfd dialogs pump the event loop, re-entering update().
         // Skip all deferred actions while a native dialog is open.
@@ -1910,6 +1955,12 @@ impl PainterApp {
                         self.state.pending_new = true;
                     }
                 });
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("or drag and drop .papr / .obj / .glb files")
+                        .size(12.0)
+                        .color(ui.visuals().weak_text_color()),
+                );
 
                 if !self.recent_files.is_empty() {
                     ui.add_space(24.0);

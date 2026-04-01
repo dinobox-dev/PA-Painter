@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Delete key binding for selected layer or guide
 - Recent projects list in File menu and welcome screen with name, path, and relative time
 - Alert dialog for file-not-found errors (auto-removes missing entries from recent list)
+- Drag and drop support for .papr, .obj, .glb, .gltf files with drop overlay
 
 ### Changed
 
