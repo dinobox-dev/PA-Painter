@@ -1574,63 +1574,92 @@ impl PainterApp {
     }
 
     /// Top menu bar (File / Edit / View).
+    /// Menu item with optional right-aligned shortcut.
+    fn menu_item(
+        ui: &mut egui::Ui,
+        label: &str,
+        shortcut: Option<egui::KeyboardShortcut>,
+        enabled: bool,
+    ) -> bool {
+        let mut btn = egui::Button::new(label);
+        if let Some(sc) = shortcut {
+            btn = btn.shortcut_text(ui.ctx().format_shortcut(&sc));
+        }
+        ui.add_enabled(enabled, btn).clicked()
+    }
+
     fn show_menu_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui: &mut egui::Ui| {
             egui::MenuBar::new().ui(ui, |ui: &mut egui::Ui| {
                 ui.menu_button("File", |ui: &mut egui::Ui| {
-                    if ui.button("New Project...").clicked() {
+                    use egui::{Key, KeyboardShortcut, Modifiers};
+                    ui.set_min_width(200.0);
+                    if Self::menu_item(ui, "New Project...", None, true) {
                         ui.close();
                         self.state.pending_new = true;
                     }
-                    if ui.button("Open Project...").clicked() {
+                    if Self::menu_item(ui, "Open Project...", None, true) {
                         ui.close();
                         self.state.pending_open = true;
                     }
-                    if ui.button("Open Example").clicked() {
+                    if Self::menu_item(ui, "Open Example", None, true) {
                         ui.close();
                         self.state.pending_open_example = true;
                     }
-                    if ui.button("Save  ⌘S").clicked() {
+                    if Self::menu_item(
+                        ui,
+                        "Save",
+                        Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::S)),
+                        true,
+                    ) {
                         ui.close();
                         self.state.pending_save = true;
                     }
                     ui.separator();
                     let can_export =
                         self.state.generated.is_some() && !self.state.export_worker.is_running();
-                    if ui
-                        .add_enabled(can_export, egui::Button::new("Export..."))
-                        .clicked()
-                    {
+                    if Self::menu_item(ui, "Export...", None, can_export) {
                         ui.close();
                         self.state.pending_export = true;
                     }
                     ui.separator();
                     let can_gen = !self.state.generation.is_running();
-                    if ui
-                        .add_enabled(can_gen, egui::Button::new("Force Full-Res  ⌘G"))
-                        .clicked()
-                    {
+                    if Self::menu_item(
+                        ui,
+                        "Force Full-Res",
+                        Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::G)),
+                        can_gen,
+                    ) {
                         ui.close();
                         self.start_generation();
                     }
                 });
                 ui.menu_button("Edit", |ui: &mut egui::Ui| {
+                    use egui::{Key, KeyboardShortcut, Modifiers};
+                    ui.set_min_width(200.0);
                     let can_undo = self.state.undo.can_undo();
                     let can_redo = self.state.undo.can_redo();
-                    if ui
-                        .add_enabled(can_undo, egui::Button::new("Undo  ⌘Z"))
-                        .clicked()
-                    {
+                    if Self::menu_item(
+                        ui,
+                        "Undo",
+                        Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)),
+                        can_undo,
+                    ) {
                         ui.close();
                         let current = self.state.take_snapshot();
                         if let Some(snap) = self.state.undo.undo(current) {
                             self.state.apply_snapshot(snap);
                         }
                     }
-                    if ui
-                        .add_enabled(can_redo, egui::Button::new("Redo  ⌘⇧Z"))
-                        .clicked()
-                    {
+                    if Self::menu_item(
+                        ui,
+                        "Redo",
+                        Some(KeyboardShortcut::new(
+                            Modifiers::COMMAND | Modifiers::SHIFT,
+                            Key::Z,
+                        )),
+                        can_redo,
+                    ) {
                         ui.close();
                         let current = self.state.take_snapshot();
                         if let Some(snap) = self.state.undo.redo(current) {
@@ -1639,11 +1668,24 @@ impl PainterApp {
                     }
                 });
                 ui.menu_button("View", |ui: &mut egui::Ui| {
-                    ui.checkbox(&mut self.state.viewport.show_wireframe, "UV Wireframe");
-                    let mut paths_on = self.state.viewport.path_overlay_idx.is_some();
-                    if ui.checkbox(&mut paths_on, "Path Overlay").changed() {
-                        self.state.viewport.path_overlay_idx =
-                            if paths_on { Some(0) } else { None };
+                    ui.set_min_width(200.0);
+                    ui.label("Theme");
+                    ui.separator();
+                    let mut pref = ui.ctx().options(|o| o.theme_preference);
+                    let old = pref;
+                    for (value, label) in [
+                        (egui::ThemePreference::System, "System"),
+                        (egui::ThemePreference::Dark, "Dark"),
+                        (egui::ThemePreference::Light, "Light"),
+                    ] {
+                        let mut checked = pref == value;
+                        if ui.checkbox(&mut checked, label).clicked() && checked {
+                            pref = value;
+                        }
+                    }
+                    if pref != old {
+                        ui.ctx().set_theme(pref);
+                        ui.close();
                     }
                 });
             });
