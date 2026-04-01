@@ -833,7 +833,7 @@ pub fn load_texture(path: &Path) -> Result<LoadedTexture, TextureError> {
         .map(|s| s.to_lowercase())
         .as_deref()
     {
-        Some("png") | Some("tga") => load_png_tga(path),
+        Some("png") | Some("tga") | Some("jpg") | Some("jpeg") => load_png_tga(path),
         Some("exr") => load_exr(path),
         Some(ext) => Err(TextureError::UnsupportedFormat(ext.to_string())),
         None => Err(TextureError::UnsupportedFormat("no extension".to_string())),

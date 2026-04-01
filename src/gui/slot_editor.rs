@@ -1337,7 +1337,7 @@ fn alpha_to_seed(s: &str) -> Option<u32> {
 
 fn pick_and_load_texture() -> Option<EmbeddedTexture> {
     let path = rfd::FileDialog::new()
-        .add_filter("Image", &["png", "tga", "exr"])
+        .add_filter("Image", &["png", "tga", "exr", "jpg", "jpeg"])
         .pick_file()?;
 
     match asset_io::load_texture(&path) {
