@@ -1173,6 +1173,55 @@ impl PainterApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Backtick)) {
             self.state.viewport_tab = self.state.viewport_tab.next();
         }
+
+        // Duplicate selected layer
+        if !ctx.wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::D))
+        {
+            if let Some(idx) = self.state.selected_layer {
+                let mut cloned = self.state.project.layers[idx].clone();
+                cloned.name = format!("{} copy", cloned.name);
+                cloned.seed = self.state.project.layers.len() as u32;
+                self.state.project.layers.insert(idx, cloned);
+                self.state.selected_layer = Some(idx);
+                self.state.selected_guide = None;
+                let n = self.state.project.layers.len() as i32;
+                for (i, layer) in self.state.project.layers.iter_mut().enumerate() {
+                    layer.order = n - 1 - i as i32;
+                }
+                self.state.pending_remerge = true;
+            }
+        }
+
+        // Delete selected layer or guide (skip if a text field has focus)
+        if !ctx.wants_keyboard_input()
+            && ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                    || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
+            })
+        {
+            if let Some(gi) = self.state.selected_guide {
+                if let Some(li) = self.state.selected_layer {
+                    if gi < self.state.project.layers[li].guides.len() {
+                        self.state.project.layers[li].guides.remove(gi);
+                        self.state.selected_guide = None;
+                    }
+                }
+            } else if let Some(idx) = self.state.selected_layer {
+                self.state.project.layers.remove(idx);
+                self.state.selected_guide = None;
+                if self.state.project.layers.is_empty() {
+                    self.state.selected_layer = None;
+                } else {
+                    self.state.selected_layer = Some(idx.min(self.state.project.layers.len() - 1));
+                }
+                // Re-sync order fields
+                let n = self.state.project.layers.len() as i32;
+                for (i, layer) in self.state.project.layers.iter_mut().enumerate() {
+                    layer.order = n - 1 - i as i32;
+                }
+                self.state.pending_remerge = true;
+            }
+        }
     }
 
     /// Process pending_* flags set by UI widgets in the previous frame.

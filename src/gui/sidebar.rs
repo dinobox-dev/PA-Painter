@@ -396,13 +396,16 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().indent = SECTION_INDENT;
 
     ui.indent("layers_rows", |ui: &mut egui::Ui| {
-        use egui_phosphor::fill::{ARROW_DOWN, ARROW_UP, EYE, EYE_SLASH, TRASH_SIMPLE};
+        use egui_phosphor::fill::{
+            ARROW_DOWN, ARROW_UP, COPY_SIMPLE, EYE, EYE_SLASH, TRASH_SIMPLE,
+        };
 
         // Layer rows
         if state.project.layers.is_empty() {
             ui.label("No layers.");
         } else {
             let mut delete_idx: Option<usize> = None;
+            let mut duplicate_idx: Option<usize> = None;
             let mut swap: Option<(usize, usize)> = None;
             let row_w = ui.available_width();
             let row_h = LAYER_ICON_SIZE + 2.0;
@@ -500,6 +503,22 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
                         swap = Some((i, i - 1));
                     }
 
+                    // Duplicate
+                    actions_right -= icon_gap + LAYER_ICON_SIZE;
+                    let dup_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(actions_right, rect.min.y),
+                        egui::Vec2::new(LAYER_ICON_SIZE, row_h),
+                    );
+                    let dup_id = ui.id().with(("layer_dup", i));
+                    let dup_resp = ui.interact(dup_rect, dup_id, egui::Sense::click());
+                    paint_icon(p, ui, dup_rect, COPY_SIMPLE, 13.0, true, dup_resp.hovered());
+                    let dup_sc =
+                        egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::D);
+                    let dup_tip = format!("Duplicate layer  {}", ui.ctx().format_shortcut(&dup_sc));
+                    if dup_resp.on_hover_text(dup_tip).clicked() {
+                        duplicate_idx = Some(i);
+                    }
+
                     // Delete
                     actions_right -= icon_gap + LAYER_ICON_SIZE;
                     let del_rect = egui::Rect::from_min_size(
@@ -517,7 +536,10 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
                         true,
                         del_resp.hovered(),
                     );
-                    if del_resp.on_hover_text("Delete layer").clicked() {
+                    let del_sc =
+                        egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Delete);
+                    let del_tip = format!("Delete layer  {}", ui.ctx().format_shortcut(&del_sc));
+                    if del_resp.on_hover_text(del_tip).clicked() {
                         delete_idx = Some(i);
                     }
                 }
@@ -569,6 +591,15 @@ pub fn show_layer_rows(ui: &mut egui::Ui, state: &mut AppState) {
 
             // Apply deferred actions
             let mut structure_changed = false;
+            if let Some(idx) = duplicate_idx {
+                let mut cloned = state.project.layers[idx].clone();
+                cloned.name = format!("{} copy", cloned.name);
+                cloned.seed = state.project.layers.len() as u32;
+                state.project.layers.insert(idx, cloned);
+                state.selected_layer = Some(idx);
+                state.selected_guide = None;
+                structure_changed = true;
+            }
             if let Some(idx) = delete_idx {
                 state.project.layers.remove(idx);
                 state.selected_guide = None;

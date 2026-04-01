@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Dark/light/system theme toggle in View menu
 - JPG/JPEG texture support for OBJ import and manual texture picker
+- Duplicate layer button and ⌘D shortcut
+- Delete key binding for selected layer or guide
 
 ### Changed
 
