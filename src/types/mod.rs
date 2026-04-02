@@ -1113,7 +1113,7 @@ impl ResolutionPreset {
     }
 }
 
-/// Per-layer compositing settings for [`merge_layers()`](crate::compositing::merge_layers).
+/// Per-layer compositing settings for [`merge_layers()`](crate::pipeline::compositing::merge_layers).
 ///
 /// Controls how a layer blends with accumulated layers below it.
 #[derive(Debug, Clone, Serialize, Deserialize)]

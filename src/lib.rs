@@ -7,11 +7,11 @@
 //!
 //! ## Pipeline stages
 //!
-//! 1. **Direction field** ([`direction_field`]) — compute stroke flow from user-placed guides
-//! 2. **Path placement** ([`path_placement`]) — lay out stroke paths along the flow via Poisson-disk sampling
-//! 3. **Stroke height** ([`stroke_height`]) — map pressure curves and brush profiles into height values
-//! 4. **Compositing** ([`compositing`]) — blend multiple paint layers into unified output maps
-//! 5. **Output** ([`output`]) — generate final color, normal, height, and AO maps (PNG / EXR)
+//! 1. **Direction field** ([`pipeline::direction_field`]) — compute stroke flow from user-placed guides
+//! 2. **Path placement** ([`pipeline::path_placement`]) — lay out stroke paths along the flow via Poisson-disk sampling
+//! 3. **Stroke height** ([`pipeline::stroke_height`]) — map pressure curves and brush profiles into height values
+//! 4. **Compositing** ([`pipeline::compositing`]) — blend multiple paint layers into unified output maps
+//! 5. **Output** ([`pipeline::output`]) — generate final color, normal, height, and AO maps (PNG / EXR)
 //!
 //! ## Quick start
 //!
@@ -29,10 +29,10 @@
 //! | Module | Role |
 //! |--------|------|
 //! | [`types`] | Core data structures: `Color`, `PaintValues`, `StrokeParams`, `Layer` |
-//! | [`project`] | `.papr` project file I/O and data model |
-//! | [`asset_io`] | Mesh (OBJ / glTF) and texture loading |
-//! | [`pressure`] | Pressure curve evaluation (presets + custom Bézier) |
-//! | [`glb_export`] | GLB export with baked textures for 3D preview |
+//! | [`io::project`] | `.papr` project file I/O and data model |
+//! | [`mesh::asset_io`] | Mesh (OBJ / glTF) and texture loading |
+//! | [`util::pressure`] | Pressure curve evaluation (presets + custom Bézier) |
+//! | [`io::glb_export`] | GLB export with baked textures for 3D preview |
 //! | [`error`] | Unified `PainterError` type aggregating all sub-errors |
 
 #[cfg(test)]
