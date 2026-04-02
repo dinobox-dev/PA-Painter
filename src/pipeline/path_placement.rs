@@ -116,7 +116,7 @@ fn generate_seeds_poisson_in(
         if is_cancelled(cancel) {
             return Vec::new();
         }
-        let active_idx = (rng.next_f32() * active.len() as f32) as usize % active.len();
+        let active_idx = rng.next_usize_below(active.len());
         let center = points[active[active_idx]];
         let center_min = local_min_dist(center, base_min_dist, stretch_map);
 

@@ -32,6 +32,11 @@ impl SeededRng {
         self.rng.gen_range(min..=max)
     }
 
+    /// Random usize in [0, n). Uses gen_range to avoid float-cast bias.
+    pub fn next_usize_below(&mut self, n: usize) -> usize {
+        self.rng.gen_range(0..n)
+    }
+
     /// Random point in circle of given radius.
     pub fn random_in_circle(&mut self, radius: f32) -> Vec2 {
         let angle = self.next_f32() * std::f32::consts::TAU;
