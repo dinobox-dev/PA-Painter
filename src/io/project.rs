@@ -116,10 +116,11 @@ struct ProjectData {
 }
 
 /// Snapshot of the state that was used to generate the cached paths.
-/// Compared against the current state to detect staleness.
+/// Stores per-layer path_hash() values so that only path-affecting
+/// field changes invalidate the cache.
 #[derive(Debug)]
 struct PathCacheKey {
-    layers: Vec<Layer>,
+    hashes: Vec<u64>,
 }
 
 /// Full project state (in-memory representation).
@@ -208,7 +209,8 @@ impl Project {
     pub fn cached_paths_if_valid(&self) -> Option<&[Vec<StrokePath>]> {
         let key = self.path_cache_key.as_ref()?;
         let paths = self.cached_paths.as_ref()?;
-        if key.layers == self.layers {
+        let current: Vec<u64> = self.layers.iter().map(|l| l.path_hash()).collect();
+        if key.hashes == current {
             Some(paths.as_slice())
         } else {
             None
@@ -219,7 +221,7 @@ impl Project {
     /// current project state that produced them.
     pub fn set_cached_paths(&mut self, paths: Vec<Vec<StrokePath>>) {
         self.path_cache_key = Some(PathCacheKey {
-            layers: self.layers.clone(),
+            hashes: self.layers.iter().map(|l| l.path_hash()).collect(),
         });
         self.cached_paths = Some(paths);
     }
