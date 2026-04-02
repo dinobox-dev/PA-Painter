@@ -182,7 +182,7 @@ fn subdivide_and_displace(
 }
 
 fn sample_map_bilinear(map: &[f32], resolution: u32, uv: Vec2) -> f32 {
-    crate::math::sample_bilinear_f32(map, resolution, resolution, uv)
+    crate::util::math::sample_bilinear_f32(map, resolution, resolution, uv)
 }
 
 // ── Texture Encoding ────────────────────────────────────────────────────────

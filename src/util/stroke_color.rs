@@ -1,8 +1,8 @@
 //! Stroke colorization — samples base color textures, applies HSV variation, and
 //! handles bilinear interpolation for per-stroke color assignment.
 
-use crate::rng::SeededRng;
 use crate::types::{Color, HsvColor, StrokePath};
+use crate::util::rng::SeededRng;
 use glam::Vec2;
 
 // ── Color Texture Reference ──
@@ -88,7 +88,7 @@ pub fn hsv_to_rgb(hsv: HsvColor) -> Color {
 ///
 /// Returns the interpolated color.
 pub fn sample_bilinear(texture: &[Color], tex_width: u32, tex_height: u32, uv: Vec2) -> Color {
-    crate::math::sample_bilinear_color(texture, tex_width, tex_height, uv)
+    crate::util::math::sample_bilinear_color(texture, tex_width, tex_height, uv)
 }
 
 // ── Per-Stroke Color with Variation ──

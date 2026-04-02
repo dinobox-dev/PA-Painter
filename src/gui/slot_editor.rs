@@ -3,11 +3,11 @@ use std::sync::Arc;
 use eframe::egui;
 
 use pa_painter::asset_io;
-use pa_painter::pressure::{evaluate_pressure, preset_to_custom};
 use pa_painter::types::{
     CurveKnot, EmbeddedTexture, PaintPreset, PaintValues, PresetLibrary, PressureCurve,
     TextureSource,
 };
+use pa_painter::util::pressure::{evaluate_pressure, preset_to_custom};
 
 use super::preview::StrokePreviewCache;
 

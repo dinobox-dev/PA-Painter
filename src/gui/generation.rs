@@ -15,11 +15,11 @@ use pa_painter::output::{
 };
 use pa_painter::path_placement::{generate_paths, PathContext};
 use pa_painter::stretch_map::{compute_stretch_map, StretchMap};
-use pa_painter::stroke_color::ColorTextureRef;
 use pa_painter::types::{
     BackgroundMode, BaseColorSource, Color, Layer, LayerBaseColor, LayerBaseNormal, NormalMode,
     OutputSettings, PaintLayer, StrokePath,
 };
+use pa_painter::util::stroke_color::ColorTextureRef;
 use pa_painter::uv_mask::UvMask;
 
 /// All data needed for a generation run. Fully owned, Send + 'static.

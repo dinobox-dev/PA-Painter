@@ -61,8 +61,6 @@ pub mod path_placement;
 pub mod stroke_height;
 
 // ── Data & types ──
-pub mod brush_profile;
-pub mod pressure;
 pub mod project;
 pub mod types;
 
@@ -72,10 +70,10 @@ pub mod glb_export;
 
 // ── Pipeline support ──
 pub mod object_normal;
-pub mod stroke_color;
 
-// ── Utilities ──
-pub mod math;
-pub mod rng;
+// ── Mesh support ──
 pub mod stretch_map;
 pub mod uv_mask;
+
+// ── Utilities ──
+pub mod util;

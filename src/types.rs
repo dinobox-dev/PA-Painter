@@ -768,7 +768,7 @@ impl PresetLibrary {
 
     /// Built-in default presets.
     pub fn built_in() -> PresetLibrary {
-        use crate::pressure::preset_to_custom;
+        use crate::util::pressure::preset_to_custom;
 
         let default_layout = StrokeParams::default();
 

@@ -9,19 +9,19 @@ use glam::Vec2;
 use log::{debug, info};
 use rayon::prelude::*;
 
-use crate::brush_profile::{generate_brush_profile, jitter_brush_profile};
-use crate::math::{lerp, perpendicular, smoothstep};
 use crate::object_normal::{try_sample_object_normal, MeshNormalData};
 use crate::path_placement::{generate_paths, PathContext};
-use crate::rng::SeededRng;
 use crate::stretch_map::StretchMap;
-use crate::stroke_color::ColorTextureRef;
-use crate::stroke_color::{compute_stroke_color, sample_bilinear};
 use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
 use crate::types::{
     BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal,
     LayerCompositeSettings, NormalMode, OutputSettings, PaintLayer, StrokePath, TextureSource,
 };
+use crate::util::brush_profile::{generate_brush_profile, jitter_brush_profile};
+use crate::util::math::{lerp, perpendicular, smoothstep};
+use crate::util::rng::SeededRng;
+use crate::util::stroke_color::ColorTextureRef;
+use crate::util::stroke_color::{compute_stroke_color, sample_bilinear};
 use crate::uv_mask::UvMask;
 
 /// Density threshold at which a stroke pixel becomes fully opaque.
@@ -1329,9 +1329,9 @@ pub fn merge_layers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::math::lerp_color;
     use crate::test_util::make_layer_with_order;
     use crate::types::{BaseColorSource, LayerBaseColor, NormalMode};
+    use crate::util::math::lerp_color;
 
     const EPS: f32 = 1e-4;
 

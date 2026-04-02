@@ -5,9 +5,9 @@
 
 use log::trace;
 
-use crate::math::{interpolate_array, lerp, smoothstep};
-use crate::pressure::evaluate_pressure;
 use crate::types::StrokeParams;
+use crate::util::math::{interpolate_array, lerp, smoothstep};
+use crate::util::pressure::evaluate_pressure;
 use noise::{NoiseFn, Perlin};
 
 // ── Constants ──
@@ -151,8 +151,8 @@ pub fn generate_stroke_height(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::brush_profile::generate_brush_profile;
     use crate::types::{PressureCurve, PressurePreset};
+    use crate::util::brush_profile::generate_brush_profile;
 
     fn params(bw: f32, load: f32, wiggle: f32, preset: PressurePreset) -> StrokeParams {
         StrokeParams {

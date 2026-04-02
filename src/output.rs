@@ -11,12 +11,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::asset_io::linear_to_srgb;
 use crate::compositing::{GlobalMaps, LayerMaps};
-use crate::math::smoothstep;
 use crate::object_normal::MeshNormalData;
-use crate::stroke_color::hsv_to_rgb;
 use crate::types::{
     BackgroundMode, Color, HsvColor, NormalMode, NormalYConvention, OutputSettings,
 };
+use crate::util::math::smoothstep;
+use crate::util::stroke_color::hsv_to_rgb;
 use crate::uv_mask::UvMask;
 
 // ── Error Type ──
