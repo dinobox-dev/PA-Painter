@@ -4,6 +4,7 @@
 //! paint layers into a single [`GlobalMaps`] struct, respecting layer ordering and masks.
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use glam::Vec2;
 use log::{debug, info};
@@ -226,11 +227,16 @@ pub fn resolve_base_color(
             }
         }
         TextureSource::File(None) => {
-            let cb = checkerboard_warning_texture();
-            let colors = pixels_to_colors(&cb.pixels);
+            static CHECKERBOARD: OnceLock<(crate::types::EmbeddedTexture, Vec<Color>)> =
+                OnceLock::new();
+            let (cb, colors) = CHECKERBOARD.get_or_init(|| {
+                let cb = checkerboard_warning_texture();
+                let colors = pixels_to_colors(&cb.pixels);
+                (cb, colors)
+            });
             LayerBaseColor {
                 solid_color: Color::rgb(1.0, 0.0, 1.0),
-                texture: Some(colors),
+                texture: Some(colors.clone()),
                 tex_width: cb.width,
                 tex_height: cb.height,
             }
