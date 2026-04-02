@@ -34,38 +34,20 @@ The project ships as **one library crate** with **two binaries** (CLI and GUI).
 
 ### Library (`src/`)
 
-| Area | Modules |
-|------|---------|
-| Pipeline Stage 1 | `direction_field` |
-| Pipeline Stage 2 | `path_placement` |
-| Pipeline Stage 3 | `stroke_height`, `brush_profile` |
-| Pipeline Stage 4 | `compositing`, `stroke_color`, `object_normal` |
-| Pipeline Stage 5 | `output`, `glb_export` |
-| Data model | `types`, `project`, `pressure` |
-| I/O | `asset_io` (OBJ / glTF / PNG / EXR) |
-| Utilities | `math`, `rng`, `stretch_map`, `uv_mask`, `error` |
+| Directory | Role |
+|-----------|------|
+| `pipeline/` | The 5-stage stroke generation pipeline (stateless, pure functions) |
+| `mesh/` | Mesh processing, UV operations, and asset loading (OBJ / glTF / textures) |
+| `io/` | `.papr` project file I/O and GLB export |
+| `types/` | Core data structures (`Color`, `PaintValues`, `Layer`, etc.) |
+| `util/` | Math, RNG, pressure curves, brush profiles, colour helpers |
 
-Every pipeline module is **stateless** — pure functions with no side effects,
-testable without a GUI or GPU.
+For the full module listing, see `cargo doc` or the rustdoc header in `src/lib.rs`.
 
 ### GUI (`src/gui/`)
 
-egui/eframe application in `src/main_gui.rs`, with sub-modules:
-
-| Module | Responsibility |
-|--------|----------------|
-| `mod` / `state` | App shell, central `AppState`, deferred-action pattern |
-| `viewport` | UV and Guide viewports (pan/zoom, overlays) |
-| `sidebar` | Left panel: mesh, colour, settings, layer list |
-| `slot_editor` | Right panel: layer inspector, pressure-curve editor |
-| `guide_editor` | Interactive guide placement and manipulation |
-| `preview` | Stroke / path / preset thumbnail caches |
-| `generation` | Background worker thread for full pipeline runs |
-| `mesh_preview` | wgpu-based 3D preview |
-| `dialogs` | File dialogs via rfd |
-| `undo` | Snapshot-based undo with auto-coalescing |
-| `textures` | Buffer → `TextureHandle` helpers |
-| `widgets` | Custom egui widgets (icon buttons, sliders) |
+egui/eframe application in `src/main_gui.rs`. For the full list of sub-modules
+and their responsibilities, see `src/gui/mod.rs`.
 
 ### CLI (`src/main.rs`)
 
@@ -87,25 +69,21 @@ Loads a `.papr` project, runs the pipeline, and exports maps. No GUI dependency.
 
 ## Project File Format (`.papr`)
 
-A ZIP archive (Deflate) containing JSON metadata, embedded assets, and cached
-output maps. Current version: **1**.
+A ZIP archive (Deflate) containing JSON metadata and embedded assets.
+Current version: **2**.
 
 ```
 ├── manifest.json                  # version, app name, timestamps
 ├── project.json                   # unified: mesh_ref, layers, presets, settings, export_settings
 ├── assets/
 │   ├── mesh.{glb,obj}             # embedded mesh binary (Stored, uncompressed)
-│   ├── layer_0_color.png          # per-layer File-mode colour texture
-│   ├── layer_0_normal.png         # per-layer File-mode normal texture
+│   ├── mesh.mtl                   # OBJ material file (OBJ meshes only)
+│   ├── mesh_textures/*            # OBJ material textures (OBJ meshes only)
+│   ├── layer_{n}_color.png        # per-layer File-mode colour texture
+│   ├── layer_{n}_normal.png       # per-layer File-mode normal texture
 │   └── …
-├── output/                        # cached generation results (optional)
-│   ├── color.png                  # sRGB RGBA
-│   ├── normal.png                 # linear RGB
-│   ├── height.png                 # 16-bit grayscale
-│   ├── stroke_time_order.png      # 16-bit grayscale
-│   ├── stroke_time_arc.png        # 16-bit grayscale
-│   └── snapshot.json              # generation-time state hash for staleness detection
-├── thumbnails/
-│   └── preview.png                # 256×256 preview thumbnail
 └── editor.json                    # opaque editor UI state (camera, viewport, playback)
 ```
+
+Output maps (colour, height, normal, stroke-time) are exported to a separate
+directory — they are not stored inside the `.papr` archive.
