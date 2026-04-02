@@ -900,7 +900,7 @@ fn diffuse_height(height: &mut [f32], resolution: u32, spread: f32) {
 
 /// Compute gradient_x / gradient_y from the global height map using 3×3 Sobel.
 ///
-/// Legacy entry point kept for the global pipeline. Delegates to [`sobel_3x3`].
+/// Legacy entry point kept for the global pipeline. Delegates to `sobel_3x3`.
 pub fn compute_height_gradients(global: &mut GlobalMaps) {
     sobel_3x3(
         &global.height,

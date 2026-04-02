@@ -73,7 +73,7 @@ pub fn normalize_height_map(height: &[f32]) -> Vec<f32> {
 /// Generate a tangent-space normal map from pre-computed gradients.
 ///
 /// Gradients are computed via Sobel on the (optionally diffused) height map,
-/// either per-layer in [`render_layer`] or globally in [`finalize_layers`].
+/// either per-layer in [`compositing::render_layer`](super::compositing::render_layer) or globally in [`compositing::finalize_layers`](super::compositing::finalize_layers).
 ///
 /// Returns Vec<[f32; 3]> of normal vectors encoded as (R, G, B) where
 /// flat = (0.5, 0.5, 1.0). Row-major, resolution x resolution.
