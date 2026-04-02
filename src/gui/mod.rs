@@ -1,5 +1,5 @@
-pub mod dialogs;
-mod dialogs_modal;
+mod dialogs;
+pub mod file_actions;
 mod frame_update;
 pub mod generation;
 mod gpu_sync;
@@ -215,7 +215,7 @@ impl PainterApp {
 
     /// Execute Open Project: show file dialog, then start background load.
     fn do_open_project(&mut self, _ctx: &egui::Context) {
-        if let Some(path) = dialogs::pick_project_path(&mut self.state) {
+        if let Some(path) = file_actions::pick_project_path(&mut self.state) {
             self.state.status_message = format!("Opening {}…", path.display());
             self.state
                 .project_load_worker
@@ -225,6 +225,6 @@ impl PainterApp {
 
     /// Execute New Project (file dialog + mesh load).
     fn do_new_project(&mut self, ctx: &egui::Context) {
-        dialogs::new_project(&mut self.state, ctx);
+        file_actions::new_project(&mut self.state, ctx);
     }
 }

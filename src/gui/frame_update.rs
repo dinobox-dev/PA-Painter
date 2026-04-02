@@ -2,7 +2,7 @@
 
 use eframe::egui;
 
-use super::dialogs;
+use super::file_actions;
 use super::preview;
 use super::recent_files;
 use super::state::{ProjectLoadSource, UnsavedAction};
@@ -176,14 +176,14 @@ impl PainterApp {
         }
         if self.state.pending_save {
             self.state.pending_save = false;
-            dialogs::save_project_action(&mut self.state);
+            file_actions::save_project_action(&mut self.state);
             if let Some(ref path) = self.state.project_path {
                 self.recent_files = recent_files::push(path);
             }
         }
         if self.state.pending_save_as {
             self.state.pending_save_as = false;
-            dialogs::save_project_as_action(&mut self.state);
+            file_actions::save_project_as_action(&mut self.state);
             if let Some(ref path) = self.state.project_path {
                 self.recent_files = recent_files::push(path);
             }
@@ -194,9 +194,9 @@ impl PainterApp {
             let do_maps = es.export_maps;
             let do_model = es.export_model;
             match (do_maps, do_model) {
-                (true, true) => dialogs::export_both(&mut self.state),
-                (true, false) => dialogs::export_maps(&mut self.state),
-                (false, true) => dialogs::export_glb(&mut self.state),
+                (true, true) => file_actions::export_both(&mut self.state),
+                (true, false) => file_actions::export_maps(&mut self.state),
+                (false, true) => file_actions::export_glb(&mut self.state),
                 (false, false) => {
                     self.state.status_message =
                         "Nothing selected — enable Texture Maps or 3D Model in export settings"
@@ -214,7 +214,7 @@ impl PainterApp {
         }
         if self.state.pending_reload_mesh {
             self.state.pending_reload_mesh = false;
-            dialogs::reload_mesh(&mut self.state);
+            file_actions::reload_mesh(&mut self.state);
             self.state.cached_mesh_normals = None;
             self.state.path_worker.discard();
             self.state.group_dim_cache.invalidate();
@@ -222,7 +222,7 @@ impl PainterApp {
         }
         if self.state.pending_replace_mesh {
             self.state.pending_replace_mesh = false;
-            dialogs::replace_mesh(&mut self.state);
+            file_actions::replace_mesh(&mut self.state);
         }
         if self.state.pending_remerge {
             self.state.pending_remerge = false;
@@ -356,7 +356,7 @@ impl PainterApp {
                         }
                         ProjectLoadSource::Example => None,
                     };
-                    dialogs::apply_load_result(&mut self.state, load_result, project_path);
+                    file_actions::apply_load_result(&mut self.state, load_result, project_path);
                     self.after_project_loaded();
                 }
                 Err(msg) => {
