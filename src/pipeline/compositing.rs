@@ -490,7 +490,6 @@ pub fn composite_stroke(
                     normal_data,
                     stroke_normal,
                 ) {
-                    let uv = Vec2::new((gx as f32 + 0.5) / res_f, (gy as f32 + 0.5) / res_f);
                     if let Some(pixel_n) = try_sample_object_normal(nd, uv) {
                         let sn_vec = glam::Vec3::new(sn[0], sn[1], sn[2]);
                         if sn_vec.dot(pixel_n) < threshold {
