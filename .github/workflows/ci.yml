@@ -36,4 +36,4 @@ jobs:
         run: cargo test --lib
 
       - name: Doc
-        run: cargo doc --no-deps
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
