@@ -9,10 +9,10 @@ use glam::Vec2;
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 
-use crate::compositing::{GlobalMaps, LayerMaps};
 use crate::mesh::asset_io::linear_to_srgb;
 use crate::mesh::object_normal::MeshNormalData;
 use crate::mesh::uv_mask::UvMask;
+use crate::pipeline::compositing::{GlobalMaps, LayerMaps};
 use crate::types::{
     BackgroundMode, Color, HsvColor, NormalMode, NormalYConvention, OutputSettings,
 };
@@ -812,8 +812,8 @@ pub fn export_all(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compositing::composite_all;
     use crate::mesh::asset_io::{linear_to_srgb, load_texture};
+    use crate::pipeline::compositing::composite_all;
     use crate::test_util::make_layer_with_order;
     use crate::types::{Color, LayerBaseColor, NormalYConvention, OutputSettings};
 

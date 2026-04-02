@@ -10,12 +10,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use glam::Vec2;
 use log::{debug, info, warn};
 
-use crate::direction_field::DirectionField;
 #[cfg(test)]
 use crate::mesh::object_normal::sample_object_normal;
 use crate::mesh::object_normal::MeshNormalData;
 use crate::mesh::stretch_map::StretchMap;
 use crate::mesh::uv_mask::UvMask;
+use crate::pipeline::direction_field::DirectionField;
 use crate::types::{PaintLayer, StrokeParams, StrokePath, BASE_RESOLUTION};
 use crate::util::math::rotate_vec2;
 use crate::util::rng::SeededRng;

@@ -824,8 +824,8 @@ mod tests {
 
     #[test]
     fn visual_depicted_form_normal_map() {
-        use crate::compositing::composite_all;
-        use crate::output::{
+        use crate::pipeline::compositing::composite_all;
+        use crate::pipeline::output::{
             export_normal_png, generate_normal_map, generate_normal_map_depicted_form,
         };
         use crate::types::{
@@ -1035,8 +1035,8 @@ mod tests {
     /// "normal_break_on_lambert.png"  — strokes stop at hard-edge face boundaries.
     #[test]
     fn visual_normal_break_comparison() {
-        use crate::compositing::composite_all;
-        use crate::output::{
+        use crate::pipeline::compositing::composite_all;
+        use crate::pipeline::output::{
             export_normal_png, generate_normal_map_depicted_form, normalize_height_map,
         };
         use crate::types::{

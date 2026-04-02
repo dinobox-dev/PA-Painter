@@ -11,9 +11,15 @@ use super::PainterApp;
 /// Prefers `rendered_layers` from GenResult; falls back to `layer_cache` from GenerationManager
 /// (full-res generation moves rendered_layers into layer_cache for reuse).
 pub(super) fn collect_layer_refs<'a>(
-    rendered_layers: &'a [(u64, std::sync::Arc<pa_painter::compositing::LayerMaps>)],
-    layer_cache: &'a [(u64, std::sync::Arc<pa_painter::compositing::LayerMaps>)],
-) -> Vec<&'a pa_painter::compositing::LayerMaps> {
+    rendered_layers: &'a [(
+        u64,
+        std::sync::Arc<pa_painter::pipeline::compositing::LayerMaps>,
+    )],
+    layer_cache: &'a [(
+        u64,
+        std::sync::Arc<pa_painter::pipeline::compositing::LayerMaps>,
+    )],
+) -> Vec<&'a pa_painter::pipeline::compositing::LayerMaps> {
     let source = if rendered_layers.is_empty() {
         layer_cache
     } else {
@@ -105,11 +111,15 @@ impl PainterApp {
             .collect();
         let layer_base_colors: Vec<_> = visible_layers
             .iter()
-            .map(|l| pa_painter::compositing::resolve_base_color(&l.base_color, materials))
+            .map(|l| {
+                pa_painter::pipeline::compositing::resolve_base_color(&l.base_color, materials)
+            })
             .collect();
         let layer_base_normals: Vec<_> = visible_layers
             .iter()
-            .map(|l| pa_painter::compositing::resolve_base_normal(&l.base_normal, materials))
+            .map(|l| {
+                pa_painter::pipeline::compositing::resolve_base_normal(&l.base_normal, materials)
+            })
             .collect();
 
         // Group names for visible layers — parallel to `layers` vec

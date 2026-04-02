@@ -54,11 +54,7 @@ pub mod error;
 pub mod test_util;
 
 // ── Pipeline stages ──
-pub mod compositing;
-pub mod direction_field;
-pub mod output;
-pub mod path_placement;
-pub mod stroke_height;
+pub mod pipeline;
 
 // ── Data & types ──
 pub mod types;

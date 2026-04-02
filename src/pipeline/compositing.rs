@@ -12,8 +12,8 @@ use rayon::prelude::*;
 use crate::mesh::object_normal::{try_sample_object_normal, MeshNormalData};
 use crate::mesh::stretch_map::StretchMap;
 use crate::mesh::uv_mask::UvMask;
-use crate::path_placement::{generate_paths, PathContext};
-use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
+use crate::pipeline::path_placement::{generate_paths, PathContext};
+use crate::pipeline::stroke_height::{generate_stroke_height, StrokeHeightResult};
 use crate::types::{
     BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal,
     LayerCompositeSettings, NormalMode, OutputSettings, PaintLayer, StrokePath, TextureSource,

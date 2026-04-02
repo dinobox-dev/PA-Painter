@@ -3,14 +3,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use pa_painter::compositing::LayerMaps;
 use pa_painter::io::glb_export;
 use pa_painter::io::project::{save_project, utc_now_iso8601, Project};
 use pa_painter::mesh::asset_io::{
     collect_obj_aux_files, extract_uv_edges, load_mesh, LoadedMesh, MeshMaterialInfo,
 };
 use pa_painter::mesh::object_normal::MeshNormalData;
-use pa_painter::output::{
+use pa_painter::pipeline::compositing::LayerMaps;
+use pa_painter::pipeline::output::{
     export_color_exr, export_color_png, export_height_exr, export_height_png, export_layer_maps,
     export_manifest, export_normal_png, export_stroke_id_png, export_stroke_time_exr,
     export_stroke_time_png, normalize_height_map, ExportFormat, LayerExportOptions,

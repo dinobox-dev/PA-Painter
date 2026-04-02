@@ -2,7 +2,7 @@
 
 use crate::io::project::ProjectError;
 use crate::mesh::asset_io::{MeshError, TextureError};
-use crate::output::OutputError;
+use crate::pipeline::output::OutputError;
 
 /// Unified error type for the painter pipeline.
 #[derive(Debug, thiserror::Error)]

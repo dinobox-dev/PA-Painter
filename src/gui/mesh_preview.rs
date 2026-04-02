@@ -1160,7 +1160,7 @@ fn build_order_remap(
 /// Build one RGBA8 slice for a layer's time data.
 /// R = remapped stroke order, G = arc, A = painted mask (255 if height > 0).
 fn build_layer_slice(
-    lm: &pa_painter::compositing::LayerMaps,
+    lm: &pa_painter::pipeline::compositing::LayerMaps,
     remap: &Option<std::collections::HashMap<u32, f32>>,
     n: usize,
 ) -> Vec<u8> {
@@ -1197,7 +1197,7 @@ fn build_layer_slice(
 /// Returns `(total_stroke_count, layer_count, max_per_layer_num_groups)`.
 pub fn upload_time_texture(
     render_state: &egui_wgpu::RenderState,
-    layers: &[&pa_painter::compositing::LayerMaps],
+    layers: &[&pa_painter::pipeline::compositing::LayerMaps],
     resolution: u32,
     draw_order: super::state::DrawOrder,
     chunk_size: u32,

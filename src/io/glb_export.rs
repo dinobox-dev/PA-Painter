@@ -31,7 +31,9 @@ pub struct GlbExportParams<'a> {
 }
 
 /// Export a 3D preview GLB with paint textures baked onto a subdivided mesh.
-pub fn export_preview_glb(params: &GlbExportParams) -> Result<(), crate::output::OutputError> {
+pub fn export_preview_glb(
+    params: &GlbExportParams,
+) -> Result<(), crate::pipeline::output::OutputError> {
     info!("Exporting preview GLB: {}", params.path.display());
 
     let GlbExportParams {
@@ -190,7 +192,7 @@ fn sample_map_bilinear(map: &[f32], resolution: u32, uv: Vec2) -> f32 {
 fn encode_color_png(
     color_map: &[Color],
     resolution: u32,
-) -> Result<Vec<u8>, crate::output::OutputError> {
+) -> Result<Vec<u8>, crate::pipeline::output::OutputError> {
     let pixels: Vec<u8> = color_map
         .iter()
         .flat_map(|c| {
@@ -219,8 +221,8 @@ fn encode_normal_png(
     normal_map: &[[f32; 3]],
     resolution: u32,
     convention: NormalYConvention,
-) -> Result<Vec<u8>, crate::output::OutputError> {
-    let pixels = crate::output::normals_to_pixels(normal_map, convention);
+) -> Result<Vec<u8>, crate::pipeline::output::OutputError> {
+    let pixels = crate::pipeline::output::normals_to_pixels(normal_map, convention);
 
     let mut buf = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(std::io::Cursor::new(&mut buf));
@@ -658,9 +660,9 @@ mod tests {
 
     #[test]
     fn visual_sphere_preview() {
-        use crate::compositing::composite_all;
         use crate::mesh::object_normal::compute_mesh_normal_data;
-        use crate::output::{
+        use crate::pipeline::compositing::composite_all;
+        use crate::pipeline::output::{
             generate_normal_map, generate_normal_map_depicted_form, normalize_height_map,
         };
         use crate::types::{
@@ -753,7 +755,7 @@ mod tests {
 
             // Dump normal map PNG for comparison
             let normal_png_path = out_dir.join(format!("{label}_normal.png"));
-            crate::output::export_normal_png(
+            crate::pipeline::output::export_normal_png(
                 &normals,
                 res,
                 &normal_png_path,
@@ -763,7 +765,7 @@ mod tests {
 
             // Dump color map PNG
             let color_png_path = out_dir.join(format!("{label}_color.png"));
-            crate::output::export_color_png(&maps.color, res, &color_png_path, false)
+            crate::pipeline::output::export_color_png(&maps.color, res, &color_png_path, false)
                 .expect("save color PNG");
 
             assert!(path.exists());
@@ -823,9 +825,9 @@ mod tests {
     #[test]
     #[ignore]
     fn visual_transparent_sphere() {
-        use crate::compositing::composite_all;
         use crate::mesh::object_normal::compute_mesh_normal_data;
-        use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
+        use crate::pipeline::compositing::composite_all;
+        use crate::pipeline::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::types::{
             BackgroundMode, Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings,
             PaintLayer, StrokeParams,
@@ -898,7 +900,7 @@ mod tests {
 
         // Also dump the color map PNG with alpha
         let color_png_path = out_dir.join("sphere_transparent_color.png");
-        crate::output::export_color_png(&maps.color, res, &color_png_path, true)
+        crate::pipeline::output::export_color_png(&maps.color, res, &color_png_path, true)
             .expect("save transparent color PNG");
 
         assert!(path.exists());
@@ -913,10 +915,10 @@ mod tests {
     #[test]
     #[ignore] // high-res benchmark
     fn visual_sphere_overscan_poisson() {
-        use crate::compositing::composite_all_with_paths;
         use crate::mesh::object_normal::compute_mesh_normal_data;
-        use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
-        use crate::path_placement::{generate_paths, PathContext};
+        use crate::pipeline::compositing::composite_all_with_paths;
+        use crate::pipeline::output::{generate_normal_map_depicted_form, normalize_height_map};
+        use crate::pipeline::path_placement::{generate_paths, PathContext};
         use crate::types::{
             BackgroundMode, Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings,
             PaintLayer, StrokeParams,
@@ -1003,12 +1005,17 @@ mod tests {
         .expect("overscan GLB export");
 
         let color_path = out_dir.join("sphere_overscan_poisson_color.png");
-        crate::output::export_color_png(&maps.color, res, &color_path, true)
+        crate::pipeline::output::export_color_png(&maps.color, res, &color_path, true)
             .expect("save color PNG");
 
         let normal_path = out_dir.join("sphere_overscan_poisson_normal.png");
-        crate::output::export_normal_png(&normals, res, &normal_path, NormalYConvention::OpenGL)
-            .expect("save normal PNG");
+        crate::pipeline::output::export_normal_png(
+            &normals,
+            res,
+            &normal_path,
+            NormalYConvention::OpenGL,
+        )
+        .expect("save normal PNG");
 
         assert!(glb_path.exists());
         let (doc, _, _) = gltf::import(&glb_path).expect("gltf should parse overscan GLB");

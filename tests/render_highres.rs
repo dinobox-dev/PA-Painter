@@ -1,4 +1,4 @@
-use pa_painter::compositing;
+use pa_painter::pipeline::compositing;
 use pa_painter::types::*;
 
 fn make_layer() -> PaintLayer {

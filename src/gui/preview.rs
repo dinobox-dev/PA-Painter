@@ -6,8 +6,8 @@ use eframe::egui;
 
 use pa_painter::mesh::asset_io::LoadedMesh;
 use pa_painter::mesh::object_normal::{compute_mesh_normal_data, MeshNormalData};
-use pa_painter::path_placement;
-use pa_painter::stroke_height;
+use pa_painter::pipeline::path_placement;
+use pa_painter::pipeline::stroke_height;
 use pa_painter::types::{Guide, Layer, PaintValues, StrokeParams};
 use pa_painter::util::brush_profile;
 

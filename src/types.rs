@@ -1162,7 +1162,7 @@ pub struct ExportSettings {
     pub export_maps: bool,
     /// Image format for texture maps.
     #[serde(default)]
-    pub format: crate::output::ExportFormat,
+    pub format: crate::pipeline::output::ExportFormat,
     /// Include color map.
     #[serde(default = "default_true")]
     pub include_color: bool,
@@ -1207,7 +1207,7 @@ impl Default for ExportSettings {
     fn default() -> Self {
         Self {
             export_maps: true,
-            format: crate::output::ExportFormat::Png,
+            format: crate::pipeline::output::ExportFormat::Png,
             include_color: true,
             include_normal: true,
             include_height: true,

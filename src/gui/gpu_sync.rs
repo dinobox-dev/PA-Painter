@@ -7,11 +7,11 @@ use super::pipeline::collect_layer_refs;
 use super::state;
 use super::PainterApp;
 
-use pa_painter::compositing::{
+use pa_painter::mesh::uv_mask::UvMask;
+use pa_painter::pipeline::compositing::{
     fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
 };
-use pa_painter::mesh::uv_mask::UvMask;
-use pa_painter::output::blend_normals_udn;
+use pa_painter::pipeline::output::blend_normals_udn;
 use pa_painter::types::{BaseColorSource, Color};
 
 impl PainterApp {
@@ -65,7 +65,7 @@ impl PainterApp {
 
         let resolution = 512u32;
         let arrow_spacing = 32u32;
-        let pixels = pa_painter::direction_field::render_direction_field_overlay(
+        let pixels = pa_painter::pipeline::direction_field::render_direction_field_overlay(
             &all_guides,
             resolution,
             arrow_spacing,

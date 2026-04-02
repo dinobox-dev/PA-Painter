@@ -4,15 +4,15 @@ use std::process;
 use clap::Parser;
 use log::{error, info};
 
-use pa_painter::compositing::{
-    composite_all_with_paths, generate_all_paths, render_layer, resolve_base_color,
-};
 use pa_painter::io::project::load_project;
 use pa_painter::mesh::asset_io::load_mesh;
 use pa_painter::mesh::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use pa_painter::mesh::stretch_map::{compute_stretch_map, StretchMap};
 use pa_painter::mesh::uv_mask::UvMask;
-use pa_painter::output::{
+use pa_painter::pipeline::compositing::{
+    composite_all_with_paths, generate_all_paths, render_layer, resolve_base_color,
+};
+use pa_painter::pipeline::output::{
     export_all, export_layer_maps, export_manifest, ExportFormat, LayerExportOptions,
     LayerManifestEntry,
 };
