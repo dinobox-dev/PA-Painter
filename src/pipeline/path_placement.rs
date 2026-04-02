@@ -589,14 +589,20 @@ mod tests {
     // ── Streamline Tracing Tests ──
 
     #[test]
-    fn streamline_straight_horizontal() {
-        let layer = make_layer();
+    fn streamline_follows_guide_direction() {
         let params = StrokeParams {
             angle_variation: 0.0,
             ..StrokeParams::default()
         };
 
-        let field = DirectionField::new(&layer.guides, 512);
+        // Horizontal guide → path stays near y=0.5
+        let h_guides = vec![Guide {
+            position: Vec2::new(0.5, 0.5),
+            direction: Vec2::X,
+            influence: 1.5,
+            ..Guide::default()
+        }];
+        let field = DirectionField::new(&h_guides, 512);
         let mut rng = SeededRng::new(42);
         let path = trace_streamline(
             Vec2::new(0.5, 0.5),
@@ -609,33 +615,25 @@ mod tests {
             (Vec2::ZERO, Vec2::ONE),
             None,
             None,
-        );
-
-        let path = path.expect("path should exist");
+        )
+        .expect("horizontal path should exist");
         for p in &path {
             assert!(
                 (p.y - 0.5).abs() < 0.01,
-                "point ({:.4}, {:.4}) deviates from y=0.5",
+                "horizontal: ({:.4}, {:.4}) deviates from y=0.5",
                 p.x,
                 p.y
             );
         }
-    }
 
-    #[test]
-    fn streamline_straight_vertical() {
-        let guides = vec![Guide {
+        // Vertical guide → path stays near x=0.5
+        let v_guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::Y,
             influence: 1.5,
             ..Guide::default()
         }];
-        let params = StrokeParams {
-            angle_variation: 0.0,
-            ..StrokeParams::default()
-        };
-
-        let field = DirectionField::new(&guides, 512);
+        let field = DirectionField::new(&v_guides, 512);
         let mut rng = SeededRng::new(42);
         let path = trace_streamline(
             Vec2::new(0.5, 0.5),
@@ -648,13 +646,12 @@ mod tests {
             (Vec2::ZERO, Vec2::ONE),
             None,
             None,
-        );
-
-        let path = path.expect("path should exist");
+        )
+        .expect("vertical path should exist");
         for p in &path {
             assert!(
                 (p.x - 0.5).abs() < 0.01,
-                "point ({:.4}, {:.4}) deviates from x=0.5",
+                "vertical: ({:.4}, {:.4}) deviates from x=0.5",
                 p.x,
                 p.y
             );
@@ -785,30 +782,26 @@ mod tests {
     // ── Path Quality Filter Tests ──
 
     #[test]
-    fn filter_no_overlap_keeps_all() {
+    fn filter_overlapping_paths_cases() {
         let brush_width_uv = 30.0 / 512.0;
+
+        // Non-overlapping: keep all
         let mut paths = vec![
             vec![Vec2::new(0.1, 0.1), Vec2::new(0.2, 0.1)],
             vec![Vec2::new(0.1, 0.9), Vec2::new(0.2, 0.9)],
         ];
         filter_overlapping_paths(&mut paths, brush_width_uv, 0.7, 0.3);
-        assert_eq!(paths.len(), 2);
-    }
+        assert_eq!(paths.len(), 2, "non-overlapping paths should be kept");
 
-    #[test]
-    fn filter_identical_paths_removes_duplicate() {
-        let brush_width_uv = 30.0 / 512.0;
+        // Identical: remove duplicate
         let p: Vec<Vec2> = (0..20)
             .map(|i| Vec2::new(0.1 + i as f32 * 0.01, 0.5))
             .collect();
         let mut paths = vec![p.clone(), p];
         filter_overlapping_paths(&mut paths, brush_width_uv, 0.7, 0.3);
         assert_eq!(paths.len(), 1, "duplicate path should be removed");
-    }
 
-    #[test]
-    fn filter_partial_overlap_keeps_both() {
-        let brush_width_uv = 30.0 / 512.0;
+        // Partial overlap: keep both
         let offset = brush_width_uv * 0.5;
         let p1: Vec<Vec2> = (0..20)
             .map(|i| Vec2::new(0.1 + i as f32 * 0.01, 0.5))
@@ -841,6 +834,18 @@ mod tests {
             for (pa, pb) in a.points.iter().zip(b.points.iter()) {
                 assert_eq!(pa.x, pb.x);
                 assert_eq!(pa.y, pb.y);
+            }
+        }
+
+        // Verify all path points stay within UV [0,1] bounds
+        for path in &paths1 {
+            for point in &path.points {
+                assert!(
+                    point.x >= 0.0 && point.x <= 1.0 && point.y >= 0.0 && point.y <= 1.0,
+                    "path point ({:.4}, {:.4}) is outside UV [0,1] bounds",
+                    point.x,
+                    point.y
+                );
             }
         }
     }
@@ -923,23 +928,6 @@ mod tests {
             "Coverage {:.1}% is below 90%",
             coverage * 100.0
         );
-    }
-
-    #[test]
-    fn paths_stay_within_uv() {
-        let layer = make_layer();
-        let paths = generate_paths(&layer, 0, &PathContext::default());
-
-        for path in &paths {
-            for point in &path.points {
-                assert!(
-                    point.x >= 0.0 && point.x <= 1.0 && point.y >= 0.0 && point.y <= 1.0,
-                    "path point ({:.4}, {:.4}) is outside UV [0,1] bounds",
-                    point.x,
-                    point.y
-                );
-            }
-        }
     }
 
     #[test]
@@ -1356,56 +1344,6 @@ mod tests {
     }
 
     #[test]
-    fn stroke_length_one_rng_call() {
-        let layer = make_layer();
-        let params = StrokeParams {
-            angle_variation: 0.0,
-            ..StrokeParams::default()
-        };
-
-        let field = DirectionField::new(&layer.guides, 512);
-
-        let mut rng1 = SeededRng::new(99);
-        let mut rng2 = SeededRng::new(99);
-        let path1 = trace_streamline(
-            Vec2::new(0.5, 0.5),
-            &field,
-            &params,
-            512,
-            &mut rng1,
-            None,
-            None,
-            (Vec2::ZERO, Vec2::ONE),
-            None,
-            None,
-        );
-        let path2 = trace_streamline(
-            Vec2::new(0.5, 0.5),
-            &field,
-            &params,
-            512,
-            &mut rng2,
-            None,
-            None,
-            (Vec2::ZERO, Vec2::ONE),
-            None,
-            None,
-        );
-
-        match (path1, path2) {
-            (Some(p1), Some(p2)) => {
-                assert_eq!(p1.len(), p2.len(), "deterministic paths should match");
-                for (a, b) in p1.iter().zip(p2.iter()) {
-                    assert_eq!(a.x, b.x);
-                    assert_eq!(a.y, b.y);
-                }
-            }
-            (None, None) => {}
-            _ => panic!("determinism broken: one path exists, the other doesn't"),
-        }
-    }
-
-    #[test]
     fn max_stroke_length_scaling() {
         let layer = make_layer();
         let field = DirectionField::new(&layer.guides, 512);
@@ -1450,75 +1388,6 @@ mod tests {
     }
 
     // ── Color Boundary Break Tests ──
-
-    #[test]
-    fn threshold_none_same_as_no_texture() {
-        // With threshold=None, providing a color texture should not change paths.
-        let guides = vec![Guide {
-            position: Vec2::new(0.5, 0.5),
-            direction: Vec2::X,
-            influence: 1.5,
-            ..Guide::default()
-        }];
-        let params = StrokeParams {
-            angle_variation: 0.0,
-            color_break_threshold: None,
-            ..StrokeParams::default()
-        };
-        let field = DirectionField::new(&guides, 512);
-
-        // 2×2 split texture: left=red, right=blue
-        let tex_data = vec![
-            crate::types::Color::rgb(1.0, 0.0, 0.0),
-            crate::types::Color::rgb(0.0, 0.0, 1.0),
-            crate::types::Color::rgb(1.0, 0.0, 0.0),
-            crate::types::Color::rgb(0.0, 0.0, 1.0),
-        ];
-        let tex_ref = ColorTextureRef {
-            data: &tex_data,
-            width: 2,
-            height: 2,
-        };
-
-        let mut rng1 = SeededRng::new(42);
-        let mut rng2 = SeededRng::new(42);
-        let path_no_tex = trace_streamline(
-            Vec2::new(0.1, 0.5),
-            &field,
-            &params,
-            512,
-            &mut rng1,
-            None,
-            None,
-            (Vec2::ZERO, Vec2::ONE),
-            None,
-            None,
-        );
-        let path_with_tex = trace_streamline(
-            Vec2::new(0.1, 0.5),
-            &field,
-            &params,
-            512,
-            &mut rng2,
-            Some(&tex_ref),
-            None,
-            (Vec2::ZERO, Vec2::ONE),
-            None,
-            None,
-        );
-
-        match (path_no_tex, path_with_tex) {
-            (Some(a), Some(b)) => {
-                assert_eq!(
-                    a.len(),
-                    b.len(),
-                    "threshold=None should not affect path length"
-                );
-            }
-            (None, None) => {}
-            _ => panic!("threshold=None should not affect path existence"),
-        }
-    }
 
     #[test]
     fn color_boundary_breaks_path() {
@@ -1669,70 +1538,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn color_boundary_deterministic() {
-        let guides = vec![Guide {
-            position: Vec2::new(0.5, 0.5),
-            direction: Vec2::X,
-            influence: 1.5,
-            ..Guide::default()
-        }];
-        let params = StrokeParams {
-            angle_variation: 0.0,
-            color_break_threshold: Some(0.15),
-            ..StrokeParams::default()
-        };
-        let field = DirectionField::new(&guides, 512);
-        let tex_data = vec![
-            crate::types::Color::rgb(1.0, 0.0, 0.0),
-            crate::types::Color::rgb(0.0, 0.0, 1.0),
-        ];
-        let tex_ref = ColorTextureRef {
-            data: &tex_data,
-            width: 2,
-            height: 1,
-        };
-
-        let mut rng1 = SeededRng::new(42);
-        let mut rng2 = SeededRng::new(42);
-        let p1 = trace_streamline(
-            Vec2::new(0.2, 0.5),
-            &field,
-            &params,
-            512,
-            &mut rng1,
-            Some(&tex_ref),
-            None,
-            (Vec2::ZERO, Vec2::ONE),
-            None,
-            None,
-        );
-        let p2 = trace_streamline(
-            Vec2::new(0.2, 0.5),
-            &field,
-            &params,
-            512,
-            &mut rng2,
-            Some(&tex_ref),
-            None,
-            (Vec2::ZERO, Vec2::ONE),
-            None,
-            None,
-        );
-
-        match (p1, p2) {
-            (Some(a), Some(b)) => {
-                assert_eq!(a.len(), b.len());
-                for (pa, pb) in a.iter().zip(b.iter()) {
-                    assert_eq!(pa.x, pb.x);
-                    assert_eq!(pa.y, pb.y);
-                }
-            }
-            (None, None) => {}
-            _ => panic!("determinism broken with color boundary"),
-        }
-    }
-
     // ── Normal Boundary Break Tests ──
 
     /// Build a simple MeshNormalData with two halves: left = +Z, right = +X.
@@ -1827,115 +1632,122 @@ mod tests {
     }
 
     #[test]
-    fn normal_boundary_deterministic() {
+    fn threshold_none_ignores_features() {
+        // With threshold=None, neither color texture nor normal data should affect paths.
         let guides = vec![Guide {
             position: Vec2::new(0.5, 0.5),
             direction: Vec2::X,
             influence: 1.5,
             ..Guide::default()
         }];
-        let params = StrokeParams {
-            angle_variation: 0.0,
-            normal_break_threshold: Some(0.5),
-            ..StrokeParams::default()
-        };
         let field = DirectionField::new(&guides, 512);
-        let nd = make_two_face_normal_data(64);
 
-        let mut rng1 = SeededRng::new(42);
-        let mut rng2 = SeededRng::new(42);
-        let p1 = trace_streamline(
-            Vec2::new(0.2, 0.5),
-            &field,
-            &params,
-            512,
-            &mut rng1,
-            None,
-            Some(&nd),
-            (Vec2::ZERO, Vec2::ONE),
-            None,
-            None,
-        );
-        let p2 = trace_streamline(
-            Vec2::new(0.2, 0.5),
-            &field,
-            &params,
-            512,
-            &mut rng2,
-            None,
-            Some(&nd),
-            (Vec2::ZERO, Vec2::ONE),
-            None,
-            None,
-        );
+        // Color texture case
+        {
+            let params = StrokeParams {
+                angle_variation: 0.0,
+                color_break_threshold: None,
+                ..StrokeParams::default()
+            };
+            let tex_data = vec![
+                crate::types::Color::rgb(1.0, 0.0, 0.0),
+                crate::types::Color::rgb(0.0, 0.0, 1.0),
+                crate::types::Color::rgb(1.0, 0.0, 0.0),
+                crate::types::Color::rgb(0.0, 0.0, 1.0),
+            ];
+            let tex_ref = ColorTextureRef {
+                data: &tex_data,
+                width: 2,
+                height: 2,
+            };
 
-        match (p1, p2) {
-            (Some(a), Some(b)) => {
-                assert_eq!(a.len(), b.len());
-                for (pa, pb) in a.iter().zip(b.iter()) {
-                    assert_eq!(pa.x, pb.x);
-                    assert_eq!(pa.y, pb.y);
+            let mut rng1 = SeededRng::new(42);
+            let mut rng2 = SeededRng::new(42);
+            let path_no_tex = trace_streamline(
+                Vec2::new(0.1, 0.5),
+                &field,
+                &params,
+                512,
+                &mut rng1,
+                None,
+                None,
+                (Vec2::ZERO, Vec2::ONE),
+                None,
+                None,
+            );
+            let path_with_tex = trace_streamline(
+                Vec2::new(0.1, 0.5),
+                &field,
+                &params,
+                512,
+                &mut rng2,
+                Some(&tex_ref),
+                None,
+                (Vec2::ZERO, Vec2::ONE),
+                None,
+                None,
+            );
+
+            match (path_no_tex, path_with_tex) {
+                (Some(a), Some(b)) => {
+                    assert_eq!(
+                        a.len(),
+                        b.len(),
+                        "color: threshold=None should not affect path length"
+                    );
                 }
+                (None, None) => {}
+                _ => panic!("color: threshold=None should not affect path existence"),
             }
-            (None, None) => {}
-            _ => panic!("determinism broken with normal boundary"),
         }
-    }
 
-    #[test]
-    fn threshold_none_ignores_normal() {
-        // With threshold=None, normal data should not affect paths.
-        let guides = vec![Guide {
-            position: Vec2::new(0.5, 0.5),
-            direction: Vec2::X,
-            influence: 1.5,
-            ..Guide::default()
-        }];
-        let params = StrokeParams {
-            angle_variation: 0.0,
-            normal_break_threshold: None,
-            ..StrokeParams::default()
-        };
-        let field = DirectionField::new(&guides, 512);
-        let nd = make_two_face_normal_data(64);
+        // Normal data case
+        {
+            let params = StrokeParams {
+                angle_variation: 0.0,
+                normal_break_threshold: None,
+                ..StrokeParams::default()
+            };
+            let nd = make_two_face_normal_data(64);
 
-        let mut rng1 = SeededRng::new(42);
-        let mut rng2 = SeededRng::new(42);
-        let path_no_nd = trace_streamline(
-            Vec2::new(0.1, 0.5),
-            &field,
-            &params,
-            512,
-            &mut rng1,
-            None,
-            None,
-            (Vec2::ZERO, Vec2::ONE),
-            None,
-            None,
-        );
-        let path_with_nd = trace_streamline(
-            Vec2::new(0.1, 0.5),
-            &field,
-            &params,
-            512,
-            &mut rng2,
-            None,
-            Some(&nd),
-            (Vec2::ZERO, Vec2::ONE),
-            None,
-            None,
-        );
+            let mut rng1 = SeededRng::new(42);
+            let mut rng2 = SeededRng::new(42);
+            let path_no_nd = trace_streamline(
+                Vec2::new(0.1, 0.5),
+                &field,
+                &params,
+                512,
+                &mut rng1,
+                None,
+                None,
+                (Vec2::ZERO, Vec2::ONE),
+                None,
+                None,
+            );
+            let path_with_nd = trace_streamline(
+                Vec2::new(0.1, 0.5),
+                &field,
+                &params,
+                512,
+                &mut rng2,
+                None,
+                Some(&nd),
+                (Vec2::ZERO, Vec2::ONE),
+                None,
+                None,
+            );
 
-        match (path_no_nd, path_with_nd) {
-            (Some(a), Some(b)) => {
-                assert_eq!(
-                    a.len(),
-                    b.len(),
-                    "threshold=None should not affect path length"
-                );
+            match (path_no_nd, path_with_nd) {
+                (Some(a), Some(b)) => {
+                    assert_eq!(
+                        a.len(),
+                        b.len(),
+                        "normal: threshold=None should not affect path length"
+                    );
+                }
+                (None, None) => {}
+                _ => panic!("normal: threshold=None should not affect path existence"),
             }
-            (None, None) => {}
-            _ => panic!("threshold=None should not affect path existence"),
         }
     }
 

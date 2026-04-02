@@ -1519,36 +1519,38 @@ mod tests {
     // ── Color Blending Tests ──
 
     #[test]
-    fn color_full_cover() {
-        let mut global = GlobalMaps::new(
-            16,
-            &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)),
-            NormalMode::SurfacePaint,
-            BackgroundMode::Opaque,
-        );
+    fn color_high_density_covers_base() {
         let uv = Vec2::new(0.5, 0.5);
 
-        let height_map = make_simple_height(1, 1, 0.8);
-        let transform = make_simple_transform(1, 1, uv);
-        composite_stroke_scatter(
-            &height_map,
-            &transform,
-            Color::rgb(0.0, 0.0, 1.0),
-            1,
-            None,
-            &mut global,
-        );
+        for &(height, min_blue) in &[(0.8, 0.9), (0.9, 0.95)] {
+            let mut global = GlobalMaps::new(
+                16,
+                &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)),
+                NormalMode::SurfacePaint,
+                BackgroundMode::Opaque,
+            );
+            let height_map = make_simple_height(1, 1, height);
+            let transform = make_simple_transform(1, 1, uv);
+            composite_stroke_scatter(
+                &height_map,
+                &transform,
+                Color::rgb(0.0, 0.0, 1.0),
+                1,
+                None,
+                &mut global,
+            );
 
-        let (px, py) = LocalFrameTransform::uv_to_pixel(uv, 16);
-        let idx = (py as u32 * 16 + px as u32) as usize;
-        let c = global.color[idx];
-        assert!(
-            c.b > 0.9,
-            "full cover: blue should dominate, got ({:.3}, {:.3}, {:.3})",
-            c.r,
-            c.g,
-            c.b
-        );
+            let (px, py) = LocalFrameTransform::uv_to_pixel(uv, 16);
+            let idx = (py as u32 * 16 + px as u32) as usize;
+            let c = global.color[idx];
+            assert!(
+                c.b > min_blue,
+                "h={height}: blue should dominate, got ({:.3}, {:.3}, {:.3})",
+                c.r,
+                c.g,
+                c.b
+            );
+        }
     }
 
     #[test]
@@ -1609,39 +1611,6 @@ mod tests {
         let idx = (py as u32 * 16 + px as u32) as usize;
         let c = global.color[idx];
         assert!(c.r > 0.1 && c.b > 0.1, "partial: should be a blend");
-    }
-
-    #[test]
-    fn color_high_density_full_opacity() {
-        let mut global = GlobalMaps::new(
-            16,
-            &BaseColorSource::solid(Color::rgb(1.0, 0.0, 0.0)),
-            NormalMode::SurfacePaint,
-            BackgroundMode::Opaque,
-        );
-        let uv = Vec2::new(0.5, 0.5);
-
-        let height_map = make_simple_height(1, 1, 0.9);
-        let transform = make_simple_transform(1, 1, uv);
-        composite_stroke_scatter(
-            &height_map,
-            &transform,
-            Color::rgb(0.0, 0.0, 1.0),
-            1,
-            None,
-            &mut global,
-        );
-
-        let (px, py) = LocalFrameTransform::uv_to_pixel(uv, 16);
-        let idx = (py as u32 * 16 + px as u32) as usize;
-        let c = global.color[idx];
-        assert!(
-            c.b > 0.95,
-            "high density: should be fully covered, got ({:.3}, {:.3}, {:.3})",
-            c.r,
-            c.g,
-            c.b
-        );
     }
 
     // ── Stroke ID Tracking Test ──
@@ -1728,31 +1697,6 @@ mod tests {
     // ── Full Pipeline Integration Test ──
 
     #[test]
-    fn composite_all_produces_output() {
-        let mut layer = make_layer_with_order(0);
-        layer.params.brush_width = 10.0;
-
-        let settings = OutputSettings::default();
-
-        let maps = composite_all(
-            &[layer],
-            128,
-            &[LayerBaseColor::solid(Color::rgb(0.8, 0.6, 0.4))],
-            &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
-
-        assert_eq!(maps.height.len(), 128 * 128);
-        assert_eq!(maps.color.len(), 128 * 128);
-
-        let painted = maps.height.iter().filter(|&&h| h > 0.0).count();
-        assert!(painted > 0, "should have painted some pixels");
-    }
-
-    #[test]
     fn composite_all_deterministic() {
         let layer = make_layer_with_order(0);
         let settings = OutputSettings::default();
@@ -1770,6 +1714,10 @@ mod tests {
             &[],
         );
         let maps2 = composite_all(&[layer], 64, &base, &settings, None, &[], None, &[]);
+
+        // Verify non-trivial output (subsumes composite_all_produces_output)
+        let painted = maps1.height.iter().filter(|&&h| h > 0.0).count();
+        assert!(painted > 0, "should have painted some pixels");
 
         assert_eq!(maps1.height, maps2.height);
         assert_eq!(maps1.stroke_id, maps2.stroke_id);
@@ -1873,54 +1821,6 @@ mod tests {
             }
         }
         assert!(checked > 0, "should have pixels unique to layer A");
-    }
-
-    /// Verify that composite_all is deterministic across runs.
-    #[test]
-    fn multi_layer_deterministic() {
-        let mut layer_a = make_layer_with_order(0);
-        layer_a.params.brush_width = 20.0;
-        let mut layer_b = make_layer_with_order(1);
-        layer_b.params.brush_width = 20.0;
-
-        let settings = OutputSettings::default();
-        let base = vec![
-            LayerBaseColor::solid(Color::rgb(1.0, 0.0, 0.0)),
-            LayerBaseColor::solid(Color::rgb(0.0, 0.0, 1.0)),
-        ];
-
-        let maps1 = composite_all(
-            &[layer_a.clone(), layer_b.clone()],
-            64,
-            &base,
-            &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
-        let maps2 = composite_all(
-            &[layer_a, layer_b],
-            64,
-            &base,
-            &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
-
-        assert_eq!(maps1.height, maps2.height);
-        assert_eq!(maps1.stroke_id, maps2.stroke_id);
-        for (a, b) in maps1.color.iter().zip(&maps2.color) {
-            assert!(
-                (a.r - b.r).abs() < EPS
-                    && (a.g - b.g).abs() < EPS
-                    && (a.b - b.b).abs() < EPS
-                    && (a.a - b.a).abs() < EPS,
-                "color should be deterministic"
-            );
-        }
     }
 
     // ── Visual Integration Tests ──
@@ -2081,23 +1981,6 @@ mod tests {
     }
 
     #[test]
-    fn zero_height_preserves_base() {
-        let solid = Color::rgb(0.3, 0.7, 0.1);
-        let maps = GlobalMaps::new(
-            16,
-            &BaseColorSource::solid(solid),
-            NormalMode::SurfacePaint,
-            BackgroundMode::Opaque,
-        );
-
-        for c in &maps.color {
-            assert!((c.r - 0.3).abs() < EPS);
-            assert!((c.g - 0.7).abs() < EPS);
-            assert!((c.b - 0.1).abs() < EPS);
-        }
-    }
-
-    #[test]
     fn skip_unpainted_pixels() {
         let mut global = GlobalMaps::new(
             16,
@@ -2122,6 +2005,14 @@ mod tests {
         let idx = (py as u32 * 16 + px as u32) as usize;
         assert_eq!(global.height[idx], 0.0, "zero height should not overwrite");
         assert_eq!(global.stroke_id[idx], 0, "stroke_id should remain 0");
+        let c = global.color[idx];
+        assert!(
+            (c.r - 1.0).abs() < EPS && c.g.abs() < EPS && c.b.abs() < EPS,
+            "zero height should preserve base color, got ({:.3}, {:.3}, {:.3})",
+            c.r,
+            c.g,
+            c.b
+        );
     }
 
     // ── Base color 2-pass tests ──
