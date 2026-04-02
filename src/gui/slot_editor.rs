@@ -346,7 +346,7 @@ fn show_preset_combo_sized(
         .unwrap_or_else(|| "Custom".to_string());
 
     // Separate built-in and user presets (clone user presets to avoid borrow conflict)
-    let builtin_presets = built_in.presets;
+    let builtin_presets = &built_in.presets;
     let user_presets: Vec<PaintPreset> = state.project.presets.presets.clone();
 
     let mut selected_values: Option<PaintValues> = None;
@@ -462,7 +462,7 @@ fn show_preset_combo_sized(
 
                     // Built-in presets
                     ui.label(egui::RichText::new("Built-in").weak().size(11.0));
-                    for preset in &builtin_presets {
+                    for preset in builtin_presets {
                         let thumb_id = thumbs.get_or_create(ui.ctx(), &preset.values, layer_seed);
                         let selected = current_name == preset.name;
                         let row_w = ui.available_width() - scrollbar_margin;

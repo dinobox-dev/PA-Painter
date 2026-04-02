@@ -634,7 +634,7 @@ mod tests {
             manifest: make_manifest(),
             mesh_ref: make_mesh_ref(),
             layers: vec![],
-            presets: PresetLibrary::built_in(),
+            presets: PresetLibrary::built_in().clone(),
             settings: OutputSettings::default(),
             export_settings: ExportSettings::default(),
             mesh_bytes: None,
@@ -653,7 +653,7 @@ mod tests {
                 make_test_layer("armor", 1, 5),
                 make_test_layer("cloth", 2, 2),
             ],
-            presets: PresetLibrary::built_in(),
+            presets: PresetLibrary::built_in().clone(),
             settings: OutputSettings {
                 resolution_preset: ResolutionPreset::High,
                 normal_strength: 1.5,
@@ -984,7 +984,7 @@ mod tests {
     #[test]
     fn presets_round_trip() {
         let mut project = make_empty_project();
-        project.presets = PresetLibrary::built_in();
+        project.presets = PresetLibrary::built_in().clone();
 
         let path = temp_pap_path("presets_rt.papr");
         save_project(&project, &path, None).unwrap();

@@ -576,13 +576,9 @@ pub struct PaintValues {
 
 impl Default for PaintValues {
     fn default() -> Self {
-        // Match built-in "heavy_load" preset so new layers start with a known preset.
-        PresetLibrary::built_in()
-            .presets
-            .into_iter()
-            .find(|p| p.name == "heavy_load")
-            .expect("built-in 'heavy_load' preset must exist")
-            .values
+        // The first built-in preset (heavy_load) is the default for new layers.
+        // built_in() is cached via OnceLock so this is allocation-free after the first call.
+        PresetLibrary::built_in().presets[0].values.clone()
     }
 }
 
