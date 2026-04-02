@@ -15,7 +15,7 @@ pub mod widgets;
 
 use eframe::egui;
 use eframe::egui_wgpu;
-use state::{AppState, GuideTool, UnsavedAction};
+use state::{AppState, GuideTool, ProjectLoadSource, UnsavedAction};
 
 use pa_painter::compositing::{
     fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
@@ -1108,7 +1108,8 @@ impl eframe::App for PainterApp {
         let project_replacing = self.state.pending_open
             || self.state.pending_new
             || self.state.pending_open_example
-            || self.pending_open_recent.is_some();
+            || self.pending_open_recent.is_some()
+            || self.state.project_load_worker.is_active();
 
         self.dispatch_deferred(ctx);
         self.sync_gpu_textures();
@@ -1136,6 +1137,23 @@ impl eframe::App for PainterApp {
                 egui::Align2::CENTER_CENTER,
                 "Drop to open",
                 egui::FontId::proportional(24.0),
+                egui::Color32::WHITE,
+            );
+        }
+
+        // Project loading overlay
+        if self.state.project_load_worker.is_active() {
+            let screen = ctx.content_rect();
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("project_load_overlay"),
+            ));
+            painter.rect_filled(screen, 0.0, egui::Color32::from_black_alpha(120));
+            painter.text(
+                screen.center(),
+                egui::Align2::CENTER_CENTER,
+                "Loading...",
+                egui::FontId::proportional(20.0),
                 egui::Color32::WHITE,
             );
         }
@@ -1303,8 +1321,10 @@ impl PainterApp {
                 self.pending_open_recent = Some(path);
                 self.state.unsaved_confirm = Some(UnsavedAction::Open);
             } else if path.exists() {
-                dialogs::open_project_at_path(&mut self.state, &path);
-                self.after_project_loaded();
+                self.state.status_message = format!("Opening {}…", path.display());
+                self.state
+                    .project_load_worker
+                    .start(ProjectLoadSource::Recent(path));
             } else {
                 self.alert_message = Some(format!("File not found:\n{}", path.display()));
                 self.recent_files = recent_files::remove(&path);
@@ -1315,7 +1335,10 @@ impl PainterApp {
             if self.state.dirty {
                 self.state.unsaved_confirm = Some(UnsavedAction::OpenExample);
             } else {
-                self.do_open_example();
+                self.state.status_message = "Opening example project…".to_string();
+                self.state
+                    .project_load_worker
+                    .start(ProjectLoadSource::Example);
             }
         }
         if self.state.pending_save {
@@ -1587,6 +1610,28 @@ impl PainterApp {
             }
         }
         if self.state.export_worker.is_running() {
+            ctx.request_repaint();
+        }
+
+        // Project load worker
+        if let Some(result) = self.state.project_load_worker.poll() {
+            match result {
+                Ok((load_result, source)) => {
+                    let project_path = match &source {
+                        ProjectLoadSource::Open(p) | ProjectLoadSource::Recent(p) => {
+                            Some(p.clone())
+                        }
+                        ProjectLoadSource::Example => None,
+                    };
+                    dialogs::apply_load_result(&mut self.state, load_result, project_path);
+                    self.after_project_loaded();
+                }
+                Err(msg) => {
+                    self.state.status_message = msg;
+                }
+            }
+        }
+        if self.state.project_load_worker.is_active() {
             ctx.request_repaint();
         }
     }
@@ -2238,8 +2283,10 @@ impl PainterApp {
                     Some(UnsavedAction::Open) => {
                         if let Some(path) = self.pending_open_recent.take() {
                             if path.exists() {
-                                dialogs::open_project_at_path(&mut self.state, &path);
-                                self.after_project_loaded();
+                                self.state.status_message = format!("Opening {}…", path.display());
+                                self.state
+                                    .project_load_worker
+                                    .start(ProjectLoadSource::Recent(path));
                             } else {
                                 self.alert_message =
                                     Some(format!("File not found:\n{}", path.display()));
@@ -2249,7 +2296,12 @@ impl PainterApp {
                             self.do_open_project(ctx);
                         }
                     }
-                    Some(UnsavedAction::OpenExample) => self.do_open_example(),
+                    Some(UnsavedAction::OpenExample) => {
+                        self.state.status_message = "Opening example project…".to_string();
+                        self.state
+                            .project_load_worker
+                            .start(ProjectLoadSource::Example);
+                    }
                     Some(UnsavedAction::New) => self.do_new_project(ctx),
                     Some(UnsavedAction::Quit) => {
                         self.state.dirty = false;
@@ -2364,16 +2416,14 @@ impl PainterApp {
         self.init_mesh_preview_no_fit();
     }
 
-    /// Execute Open Project (file dialog + load).
-    fn do_open_project(&mut self, ctx: &egui::Context) {
-        dialogs::open_project(&mut self.state, ctx);
-        self.after_project_loaded();
-    }
-
-    /// Execute Open Example (embedded demo project).
-    fn do_open_example(&mut self) {
-        dialogs::open_example(&mut self.state);
-        self.after_project_loaded();
+    /// Execute Open Project: show file dialog, then start background load.
+    fn do_open_project(&mut self, _ctx: &egui::Context) {
+        if let Some(path) = dialogs::pick_project_path(&mut self.state) {
+            self.state.status_message = format!("Opening {}…", path.display());
+            self.state
+                .project_load_worker
+                .start(ProjectLoadSource::Open(path));
+        }
     }
 
     /// Execute New Project (file dialog + mesh load).

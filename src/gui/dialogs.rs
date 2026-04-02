@@ -15,7 +15,7 @@ use pa_painter::output::{
     export_stroke_time_png, normalize_height_map, ExportFormat, LayerExportOptions,
     LayerManifestEntry,
 };
-use pa_painter::project::{load_project, save_project, utc_now_iso8601, Project};
+use pa_painter::project::{save_project, utc_now_iso8601, Project};
 use pa_painter::types::{
     BackgroundMode, Color, EmbeddedTexture, ExportSettings, Layer, NormalMode, PaintValues,
     TextureSource,
@@ -96,136 +96,65 @@ fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool {
     changed
 }
 
-// ── Embedded Example ───────────────────────────────────────────────
-
-const EXAMPLE_PAPR: &[u8] = include_bytes!("../../examples/PAPainterLogo.papr");
-
-/// Load the embedded example project.
-/// Returns true if successfully loaded.
-pub fn open_example(state: &mut AppState) -> bool {
-    // Write to a temp file so load_project can read it as a normal .papr
-    let tmp = std::env::temp_dir().join("pa_painter_example.papr");
-    if let Err(e) = std::fs::write(&tmp, EXAMPLE_PAPR) {
-        state.status_message = format!("Failed to write example: {e}");
-        return false;
-    }
-
-    match load_project(&tmp) {
-        Ok(result) => {
-            state.status_message = "Loaded example project".to_string();
-
-            if let Some(mesh) = result.mesh {
-                apply_loaded_mesh(state, mesh);
-            }
-
-            let editor_state_json = result.editor_state_json.clone();
-
-            if !result.project.layers.is_empty() {
-                state.selected_layer = Some(0);
-            }
-
-            state.project = result.project;
-            state.project_path = None; // no save path — force Save As
-            state.dirty = false;
-            state.generation_snapshot = None;
-            state.generation.discard();
-            state.textures.color = None;
-            state.textures.height = None;
-            state.textures.normal = None;
-            state.textures.stroke_id = None;
-            state.path_overlay.clear();
-            state.undo.clear();
-
-            if let Some(json) = editor_state_json {
-                if let Ok(es) = serde_json::from_str::<super::state::EditorState>(&json) {
-                    state.apply_editor_state(es);
-                }
-            }
-
-            state.generated = None;
-            state.auto_gen_suppressed = false;
-
-            // Clean up temp file
-            let _ = std::fs::remove_file(&tmp);
-            true
-        }
-        Err(e) => {
-            state.status_message = format!("Failed to load example: {e:?}");
-            false
-        }
-    }
-}
-
 // ── Project Operations ─────────────────────────────────────────────
 
-/// Open a project from a specific path (e.g. recent files).
-pub fn open_project_at_path(state: &mut AppState, path: &std::path::Path) -> bool {
-    load_project_from_path(state, path)
-}
-
-/// Open a file dialog and load a .papr project.
-/// Returns true if a project was successfully loaded.
-pub fn open_project(state: &mut AppState, _ctx: &eframe::egui::Context) -> bool {
+/// Open a file dialog and return the chosen path (if any).
+pub fn pick_project_path(state: &mut AppState) -> Option<std::path::PathBuf> {
     state.modal_dialog_active = true;
     let path = rfd::FileDialog::new()
         .add_filter("PA Painter Project", &["papr"])
         .pick_file();
     state.modal_dialog_active = false;
-
-    let Some(path) = path else {
-        return false;
-    };
-
-    load_project_from_path(state, &path)
+    path
 }
 
-fn load_project_from_path(state: &mut AppState, path: &std::path::Path) -> bool {
-    match load_project(path) {
-        Ok(result) => {
-            state.status_message = format!("Loaded: {}", path.display());
+/// Apply an already-loaded `LoadResult` to state.
+/// `project_path` is `Some` for file-based opens, `None` for the example project.
+pub fn apply_load_result(
+    state: &mut AppState,
+    result: pa_painter::project::LoadResult,
+    project_path: Option<PathBuf>,
+) {
+    let display_name = project_path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "example project".to_string());
+    state.status_message = format!("Loaded: {display_name}");
 
-            // Apply embedded mesh if present
-            if let Some(mesh) = result.mesh {
-                apply_loaded_mesh(state, mesh);
-            }
+    // Apply embedded mesh if present
+    if let Some(mesh) = result.mesh {
+        apply_loaded_mesh(state, mesh);
+    }
 
-            let editor_state_json = result.editor_state_json.clone();
+    let editor_state_json = result.editor_state_json.clone();
 
-            // Select first layer if any (overridden below if editor state exists)
-            if !result.project.layers.is_empty() {
-                state.selected_layer = Some(0);
-            }
+    // Select first layer if any (overridden below if editor state exists)
+    if !result.project.layers.is_empty() {
+        state.selected_layer = Some(0);
+    }
 
-            state.project = result.project;
-            state.project_path = Some(path.to_path_buf());
-            state.dirty = false;
-            state.generation_snapshot = None;
-            state.generation.discard();
-            state.textures.color = None;
-            state.textures.height = None;
-            state.textures.normal = None;
-            state.textures.stroke_id = None;
-            state.path_overlay.clear();
-            state.undo.clear();
+    state.project = result.project;
+    state.project_path = project_path;
+    state.dirty = false;
+    state.generation_snapshot = None;
+    state.generation.discard();
+    state.textures.color = None;
+    state.textures.height = None;
+    state.textures.normal = None;
+    state.textures.stroke_id = None;
+    state.path_overlay.clear();
+    state.undo.clear();
 
-            // Restore editor UI state (camera, viewport, playback, etc.)
-            if let Some(json) = editor_state_json {
-                if let Ok(es) = serde_json::from_str::<super::state::EditorState>(&json) {
-                    state.apply_editor_state(es);
-                }
-            }
-
-            // Auto-preview will regenerate output after load
-            state.generated = None;
-            state.auto_gen_suppressed = false;
-
-            true
-        }
-        Err(e) => {
-            state.status_message = format!("Failed to load project: {e:?}");
-            false
+    // Restore editor UI state (camera, viewport, playback, etc.)
+    if let Some(json) = editor_state_json {
+        if let Ok(es) = serde_json::from_str::<super::state::EditorState>(&json) {
+            state.apply_editor_state(es);
         }
     }
+
+    // Auto-preview will regenerate output after load
+    state.generated = None;
+    state.auto_gen_suppressed = false;
 }
 
 /// Create a new project by loading a mesh file.

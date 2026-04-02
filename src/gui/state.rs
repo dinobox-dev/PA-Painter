@@ -8,7 +8,7 @@ use eframe::egui;
 use glam::{Vec2, Vec3};
 
 use pa_painter::asset_io::{LoadedMesh, ObjAuxFiles};
-use pa_painter::project::Project;
+use pa_painter::project::{LoadResult, Project};
 use pa_painter::types::{ExportSettings, Layer, OutputSettings, TextureSource};
 
 use super::generation::{GenResult, GenerationManager};
@@ -103,6 +103,74 @@ impl ExportWorker {
         self.total_steps = Arc::new(AtomicU32::new(total));
         let step = Arc::clone(&self.current_step);
         self.handle = Some(thread::spawn(move || work(step)));
+    }
+}
+
+// ── Project Load Worker ──────────────────────────────────────────
+
+/// Source of a project load (determines post-load behavior).
+#[derive(Debug, Clone)]
+pub enum ProjectLoadSource {
+    /// File > Open (dialog already picked the path).
+    Open(PathBuf),
+    /// Recent file or drag-and-drop.
+    Recent(PathBuf),
+    /// Built-in example project.
+    Example,
+}
+
+/// Background worker for loading .papr project files.
+#[derive(Default)]
+pub struct ProjectLoadWorker {
+    handle: Option<thread::JoinHandle<Result<(LoadResult, ProjectLoadSource), String>>>,
+}
+
+impl ProjectLoadWorker {
+    /// True while a load is in-flight (running or finished-but-not-yet-polled).
+    pub fn is_active(&self) -> bool {
+        self.handle.is_some()
+    }
+
+    pub fn poll(&mut self) -> Option<Result<(LoadResult, ProjectLoadSource), String>> {
+        if self.handle.as_ref().is_some_and(|h| h.is_finished()) {
+            match self.handle.take().unwrap().join() {
+                Ok(result) => Some(result),
+                Err(e) => {
+                    let msg = e
+                        .downcast_ref::<&str>()
+                        .copied()
+                        .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                        .unwrap_or("unknown error");
+                    Some(Err(format!("Project load thread panicked: {msg}")))
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn start(&mut self, source: ProjectLoadSource) {
+        use pa_painter::project::load_project;
+
+        self.handle = Some(thread::spawn(move || {
+            let path = match &source {
+                ProjectLoadSource::Open(p) | ProjectLoadSource::Recent(p) => p.clone(),
+                ProjectLoadSource::Example => {
+                    let tmp = std::env::temp_dir().join("pa_painter_example.papr");
+                    let example_bytes: &[u8] = include_bytes!("../../examples/PAPainterLogo.papr");
+                    std::fs::write(&tmp, example_bytes)
+                        .map_err(|e| format!("Failed to write example: {e}"))?;
+                    tmp
+                }
+            };
+            let result =
+                load_project(&path).map_err(|e| format!("Failed to load project: {e:?}"))?;
+            // Clean up temp file for example
+            if matches!(source, ProjectLoadSource::Example) {
+                let _ = std::fs::remove_file(&path);
+            }
+            Ok((result, source))
+        }));
     }
 }
 
@@ -502,6 +570,8 @@ pub struct AppState {
 
     // ── Background Export ──
     pub export_worker: ExportWorker,
+    // ── Background Project Load ──
+    pub project_load_worker: ProjectLoadWorker,
     /// Pending overwrite confirmation (egui window, replaces rfd::MessageDialog).
     pub export_overwrite_confirm: Option<ExportOverwriteConfirm>,
     /// Pending unsaved-changes confirmation before Open/New.
@@ -567,6 +637,7 @@ impl AppState {
             show_export_settings: false,
             export_settings_draft: None,
             export_worker: ExportWorker::default(),
+            project_load_worker: ProjectLoadWorker::default(),
             export_overwrite_confirm: None,
             unsaved_confirm: None,
             modal_dialog_active: false,
