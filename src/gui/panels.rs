@@ -140,6 +140,12 @@ impl PainterApp {
                         ui.close();
                         self.state.pending_new = true;
                     }
+                    if Self::menu_item(ui, "New Window", None, true) {
+                        ui.close();
+                        if let Ok(exe) = std::env::current_exe() {
+                            std::process::Command::new(exe).spawn().ok();
+                        }
+                    }
                     ui.separator();
                     if Self::menu_item(ui, "Open Project...", None, true) {
                         ui.close();

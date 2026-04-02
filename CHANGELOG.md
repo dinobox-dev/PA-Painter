@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Alert dialog for file-not-found errors (auto-removes missing entries from recent list)
 - Drag and drop support for .papr, .obj, .glb, .gltf files with drop overlay
 - Save As (⇧⌘S) with file dialog pre-filled from current project path
+- New Window in File menu (spawns independent instance)
 
 ### Changed
 
