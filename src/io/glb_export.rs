@@ -916,7 +916,7 @@ mod tests {
     #[ignore] // high-res benchmark
     fn visual_sphere_overscan_poisson() {
         use crate::mesh::object_normal::compute_mesh_normal_data;
-        use crate::pipeline::compositing::composite_all_with_paths;
+        use crate::pipeline::compositing::{composite_all_with_paths, CompositeAllInput};
         use crate::pipeline::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::pipeline::path_placement::{generate_paths, PathContext};
         use crate::types::{
@@ -964,18 +964,18 @@ mod tests {
         eprintln!("Overscan+Poisson: {} paths generated", paths.len());
 
         let cached_paths = vec![paths];
-        let maps = composite_all_with_paths(
-            std::slice::from_ref(&layer),
-            res,
-            &[LayerBaseColor::solid(solid)],
-            &settings,
-            Some(&cached_paths),
-            Some(&nd),
-            &[],
-            None,
-            &[1.0],
-            &["__all__"],
-        );
+        let maps = composite_all_with_paths(&CompositeAllInput {
+            layers: std::slice::from_ref(&layer),
+            resolution: res,
+            base_colors: &[LayerBaseColor::solid(solid)],
+            settings: &settings,
+            cached_paths: Some(&cached_paths),
+            normal_data: Some(&nd),
+            masks: &[],
+            stretch_map: None,
+            layer_dry: &[1.0],
+            group_names: &["__all__"],
+        });
 
         let normalized_height = normalize_height_map(&maps.height);
         let normals = generate_normal_map_depicted_form(

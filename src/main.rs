@@ -11,6 +11,7 @@ use pa_painter::mesh::stretch_map::{compute_stretch_map, StretchMap};
 use pa_painter::mesh::uv_mask::UvMask;
 use pa_painter::pipeline::compositing::{
     composite_all_with_paths, generate_all_paths, render_layer, resolve_base_color,
+    CompositeAllInput, RenderLayerInput,
 };
 use pa_painter::pipeline::output::{
     export_all, export_layer_maps, export_manifest, ExportFormat, LayerExportOptions,
@@ -163,18 +164,18 @@ fn main() {
         .map(|l| l.group_name.as_str())
         .collect();
 
-    let global = composite_all_with_paths(
-        &layers,
+    let global = composite_all_with_paths(&CompositeAllInput {
+        layers: &layers,
         resolution,
-        &layer_base_colors,
-        &project.settings,
-        project.cached_paths.as_deref(),
-        normal_data.as_ref(),
-        &mask_refs,
-        stretch_ref,
-        &layer_dry,
-        &layer_group_names,
-    );
+        base_colors: &layer_base_colors,
+        settings: &project.settings,
+        cached_paths: project.cached_paths.as_deref(),
+        normal_data: normal_data.as_ref(),
+        masks: &mask_refs,
+        stretch_map: stretch_ref,
+        layer_dry: &layer_dry,
+        group_names: &layer_group_names,
+    });
 
     // Export
     let normal_y = project.export_settings.normal_y;
@@ -208,16 +209,16 @@ fn main() {
                 .and_then(|cp| cp.get(idx))
                 .map(|v| v.as_slice());
 
-            let layer_maps = render_layer(
-                paint_layer,
-                idx as u32,
-                &base,
-                cached,
-                normal_data.as_ref(),
+            let layer_maps = render_layer(&RenderLayerInput {
+                layer: paint_layer,
+                layer_index: idx as u32,
+                base_color: &base,
+                cached_paths: cached,
+                normal_data: normal_data.as_ref(),
                 mask,
-                stretch_ref,
+                stretch_map: stretch_ref,
                 resolution,
-            );
+            });
 
             export_layer_maps(
                 &layer_maps,

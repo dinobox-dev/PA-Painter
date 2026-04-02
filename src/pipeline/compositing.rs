@@ -643,11 +643,53 @@ fn assign_unique_stroke_ids(all_paths: &mut [Vec<StrokePath>]) {
     }
 }
 
+/// Input for [`composite_all_with_paths`].
+pub struct CompositeAllInput<'a> {
+    pub layers: &'a [PaintLayer],
+    pub resolution: u32,
+    pub base_colors: &'a [LayerBaseColor],
+    pub settings: &'a OutputSettings,
+    /// Pre-generated paths (one `Vec<StrokePath>` per layer, order-sorted).
+    /// When `None`, paths are generated internally via rayon.
+    pub cached_paths: Option<&'a [Vec<StrokePath>]>,
+    pub normal_data: Option<&'a MeshNormalData>,
+    pub masks: &'a [Option<&'a UvMask>],
+    pub stretch_map: Option<&'a StretchMap>,
+    /// Per-layer dryness, parallel to `layers`. dry=0 → wet, dry=1 → opaque over.
+    /// Defaults to all 1.0 when empty.
+    pub layer_dry: &'a [f32],
+    pub group_names: &'a [&'a str],
+}
+
+/// Input for [`composite_layer`]. `global` is kept as a separate parameter
+/// since it is the mutable compositing target, not an input.
+pub struct CompositeLayerInput<'a> {
+    pub layer: &'a PaintLayer,
+    pub layer_index: u32,
+    pub settings: &'a OutputSettings,
+    pub base_color: &'a BaseColorSource<'a>,
+    pub cached_paths: Option<&'a [StrokePath]>,
+    pub normal_data: Option<&'a MeshNormalData>,
+    pub mask: Option<&'a UvMask>,
+    pub stretch_map: Option<&'a StretchMap>,
+}
+
+/// Input for [`render_layer`].
+pub struct RenderLayerInput<'a> {
+    pub layer: &'a PaintLayer,
+    pub layer_index: u32,
+    pub base_color: &'a BaseColorSource<'a>,
+    pub cached_paths: Option<&'a [StrokePath]>,
+    pub normal_data: Option<&'a MeshNormalData>,
+    pub mask: Option<&'a UvMask>,
+    pub stretch_map: Option<&'a StretchMap>,
+    pub resolution: u32,
+}
+
 /// Composite all strokes from all layers into global maps.
 ///
 /// Convenience wrapper around [`composite_all_with_paths`] that generates
 /// paths internally (no cache) and uses default dry values (1.0 per layer).
-#[allow(clippy::too_many_arguments)]
 pub fn composite_all(
     layers: &[PaintLayer],
     resolution: u32,
@@ -658,19 +700,18 @@ pub fn composite_all(
     stretch_map: Option<&StretchMap>,
     group_names: &[&str],
 ) -> GlobalMaps {
-    let default_dry = vec![1.0_f32; layers.len()];
-    composite_all_with_paths(
+    composite_all_with_paths(&CompositeAllInput {
         layers,
         resolution,
         base_colors,
         settings,
-        None,
+        cached_paths: None,
         normal_data,
         masks,
         stretch_map,
-        &default_dry,
+        layer_dry: &[],
         group_names,
-    )
+    })
 }
 
 /// Composite all layers via independent per-layer rendering and merge.
@@ -686,19 +727,19 @@ pub fn composite_all(
 ///
 /// `layer_dry` controls per-layer dryness (parallel to `layers`).
 /// dry=0 → wet surface (subtractive mix), dry=1 → dry surface (opaque over).
-#[allow(clippy::too_many_arguments)]
-pub fn composite_all_with_paths(
-    layers: &[PaintLayer],
-    resolution: u32,
-    base_colors: &[LayerBaseColor],
-    settings: &OutputSettings,
-    cached_paths: Option<&[Vec<StrokePath>]>,
-    normal_data: Option<&MeshNormalData>,
-    masks: &[Option<&UvMask>],
-    stretch_map: Option<&StretchMap>,
-    layer_dry: &[f32],
-    group_names: &[&str],
-) -> GlobalMaps {
+pub fn composite_all_with_paths(input: &CompositeAllInput<'_>) -> GlobalMaps {
+    let CompositeAllInput {
+        layers,
+        resolution,
+        base_colors,
+        settings,
+        cached_paths,
+        normal_data,
+        masks,
+        stretch_map,
+        layer_dry,
+        group_names,
+    } = *input;
     info!(
         "Compositing {} layers at {}×{} (cache={})",
         layers.len(),
@@ -756,16 +797,16 @@ pub fn composite_all_with_paths(
                 .map(|bc| bc.as_source())
                 .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
             let mask = masks.get(layer_index).and_then(|m| *m);
-            render_layer(
+            render_layer(&RenderLayerInput {
                 layer,
-                layer_index as u32,
-                &base,
-                Some(&all_paths[sorted_idx]),
+                layer_index: layer_index as u32,
+                base_color: &base,
+                cached_paths: Some(&all_paths[sorted_idx]),
                 normal_data,
                 mask,
                 stretch_map,
                 resolution,
-            )
+            })
         })
         .collect();
 
@@ -923,18 +964,17 @@ pub fn compute_height_gradients(global: &mut GlobalMaps) {
 ///
 /// When `cached_paths` is `Some`, those paths are used directly instead of
 /// regenerating them.
-#[allow(clippy::too_many_arguments)]
-pub fn composite_layer(
-    layer: &PaintLayer,
-    layer_index: u32,
-    global: &mut GlobalMaps,
-    _settings: &OutputSettings,
-    base_color: &BaseColorSource,
-    cached_paths: Option<&[StrokePath]>,
-    normal_data: Option<&MeshNormalData>,
-    mask: Option<&UvMask>,
-    stretch_map: Option<&StretchMap>,
-) {
+pub fn composite_layer(global: &mut GlobalMaps, input: &CompositeLayerInput<'_>) {
+    let CompositeLayerInput {
+        layer,
+        layer_index,
+        settings: _,
+        base_color,
+        cached_paths,
+        normal_data,
+        mask,
+        stretch_map,
+    } = *input;
     let resolution = global.resolution;
     let paths_owned;
     let paths: &[StrokePath] = if let Some(cached) = cached_paths {
@@ -1067,17 +1107,17 @@ pub fn composite_layer(
 /// The returned `LayerMaps` can be cached and reused when the layer's
 /// parameters haven't changed, enabling fast re-compositing via
 /// `merge_layers()`.
-#[allow(clippy::too_many_arguments)]
-pub fn render_layer(
-    layer: &PaintLayer,
-    layer_index: u32,
-    base_color: &BaseColorSource,
-    cached_paths: Option<&[StrokePath]>,
-    normal_data: Option<&MeshNormalData>,
-    mask: Option<&UvMask>,
-    stretch_map: Option<&StretchMap>,
-    resolution: u32,
-) -> LayerMaps {
+pub fn render_layer(input: &RenderLayerInput<'_>) -> LayerMaps {
+    let RenderLayerInput {
+        layer,
+        layer_index,
+        base_color,
+        cached_paths,
+        normal_data,
+        mask,
+        stretch_map,
+        resolution,
+    } = *input;
     debug!(
         "Rendering layer {} at {}×{} resolution",
         layer_index, resolution, resolution
@@ -1099,15 +1139,17 @@ pub fn render_layer(
     };
 
     composite_layer(
-        layer,
-        layer_index,
         &mut global,
-        &settings,
-        base_color,
-        cached_paths,
-        normal_data,
-        mask,
-        stretch_map,
+        &CompositeLayerInput {
+            layer,
+            layer_index,
+            settings: &settings,
+            base_color,
+            cached_paths,
+            normal_data,
+            mask,
+            stretch_map,
+        },
     );
 
     // Diffuse height based on viscosity: low viscosity → more spreading.
@@ -1672,26 +1714,30 @@ mod tests {
             BackgroundMode::Opaque,
         );
         composite_layer(
-            &layer_a,
-            0,
             &mut global,
-            &settings,
-            &BaseColorSource::solid(solid_a),
-            None,
-            None,
-            None,
-            None,
+            &CompositeLayerInput {
+                layer: &layer_a,
+                layer_index: 0,
+                settings: &settings,
+                base_color: &BaseColorSource::solid(solid_a),
+                cached_paths: None,
+                normal_data: None,
+                mask: None,
+                stretch_map: None,
+            },
         );
         composite_layer(
-            &layer_b,
-            1,
             &mut global,
-            &settings,
-            &BaseColorSource::solid(solid_b),
-            None,
-            None,
-            None,
-            None,
+            &CompositeLayerInput {
+                layer: &layer_b,
+                layer_index: 1,
+                settings: &settings,
+                base_color: &BaseColorSource::solid(solid_b),
+                cached_paths: None,
+                normal_data: None,
+                mask: None,
+                stretch_map: None,
+            },
         );
 
         let center = 32 * 64 + 32;
@@ -1906,15 +1952,17 @@ mod tests {
             BackgroundMode::Opaque,
         );
         composite_layer(
-            &layer,
-            0,
             &mut global,
-            &settings,
-            &BaseColorSource::textured(&stroke_tex, 1, 1, canvas),
-            None,
-            None,
-            None,
-            None,
+            &CompositeLayerInput {
+                layer: &layer,
+                layer_index: 0,
+                settings: &settings,
+                base_color: &BaseColorSource::textured(&stroke_tex, 1, 1, canvas),
+                cached_paths: None,
+                normal_data: None,
+                mask: None,
+                stretch_map: None,
+            },
         );
         let maps = global;
 

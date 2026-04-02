@@ -10,7 +10,9 @@ use pa_painter::mesh::asset_io::LoadedMesh;
 use pa_painter::mesh::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use pa_painter::mesh::stretch_map::{compute_stretch_map, StretchMap};
 use pa_painter::mesh::uv_mask::UvMask;
-use pa_painter::pipeline::compositing::{finalize_layers, render_layer, LayerMaps};
+use pa_painter::pipeline::compositing::{
+    finalize_layers, render_layer, LayerMaps, RenderLayerInput,
+};
 use pa_painter::pipeline::compositing::{resolve_base_color, resolve_base_normal};
 use pa_painter::pipeline::output::{
     blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
@@ -436,16 +438,16 @@ fn run_pipeline(
                     .map(|bc| bc.as_source())
                     .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
                 let mask = mask_refs.get(layer_index).and_then(|m| *m);
-                result_maps.push(Arc::new(render_layer(
+                result_maps.push(Arc::new(render_layer(&RenderLayerInput {
                     layer,
-                    layer_index as u32,
-                    &base,
-                    Some(paths),
+                    layer_index: layer_index as u32,
+                    base_color: &base,
+                    cached_paths: Some(paths),
                     normal_data,
                     mask,
-                    stretch_ref,
-                    input.resolution,
-                )));
+                    stretch_map: stretch_ref,
+                    resolution: input.resolution,
+                })));
                 all_paths.push((path_hash, Arc::clone(paths)));
             }
             LayerCacheState::Miss => {
@@ -458,16 +460,16 @@ fn run_pipeline(
                 let mask = mask_refs.get(layer_index).and_then(|m| *m);
                 let paths_arc = Arc::new(std::mem::take(&mut fresh_paths[fresh_path_idx]));
                 fresh_path_idx += 1;
-                result_maps.push(Arc::new(render_layer(
+                result_maps.push(Arc::new(render_layer(&RenderLayerInput {
                     layer,
-                    layer_index as u32,
-                    &base,
-                    Some(&paths_arc),
+                    layer_index: layer_index as u32,
+                    base_color: &base,
+                    cached_paths: Some(&paths_arc),
                     normal_data,
                     mask,
-                    stretch_ref,
-                    input.resolution,
-                )));
+                    stretch_map: stretch_ref,
+                    resolution: input.resolution,
+                })));
                 all_paths.push((path_hash, paths_arc));
             }
         }
