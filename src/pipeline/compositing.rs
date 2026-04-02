@@ -118,7 +118,7 @@ impl GlobalMaps {
             Vec::new()
         };
 
-        let stroke_time_order = vec![0.0f32; size];
+        let stroke_time_order = vec![f32::MAX; size];
         let stroke_time_arc = vec![0.0f32; size];
 
         Self {
@@ -564,7 +564,7 @@ pub fn composite_stroke(
                 // arc_t = progress along stroke (0.0 at start, 1.0 at end).
                 let arc_t = t.clamp(0.0, 1.0);
                 let order = appearance.time_order;
-                if global.stroke_time_order[idx] == 0.0
+                if global.stroke_time_order[idx] == f32::MAX
                     || order < global.stroke_time_order[idx]
                     || (order == global.stroke_time_order[idx]
                         && arc_t < global.stroke_time_arc[idx])
