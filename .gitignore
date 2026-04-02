@@ -7,7 +7,7 @@
 !examples/*.papr
 *.obj
 !tests/fixtures/*.obj
-output/
+/output/
 
 # IDE
 .idea/
