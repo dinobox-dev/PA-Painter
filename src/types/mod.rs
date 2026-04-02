@@ -689,14 +689,14 @@ impl Layer {
     pub fn render_hash(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        if let Ok(bytes) = serde_json::to_vec(&(
+        let bytes = serde_json::to_vec(&(
             &self.paint,
             &self.guides,
             &self.group_name,
             &self.base_color,
-        )) {
-            bytes.hash(&mut hasher);
-        }
+        ))
+        .expect("render_hash: serialization of layer fields must not fail");
+        bytes.hash(&mut hasher);
         self.seed.hash(&mut hasher);
         hasher.finish()
     }
