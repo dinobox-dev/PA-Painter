@@ -323,7 +323,7 @@ pub fn export_all(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::compositing::composite_all;
+    use crate::pipeline::compositing::{composite_all, CompositeAllInput};
     use crate::test_util::make_layer_with_order;
     use crate::types::{Color, LayerBaseColor};
 
@@ -357,16 +357,12 @@ mod tests {
 
         let settings = OutputSettings::default();
 
-        let maps = composite_all(
+        let maps = composite_all(&CompositeAllInput::new(
             &[layer.clone()],
             res,
             &[LayerBaseColor::solid(Color::WHITE)],
             &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
+        ));
 
         let dir = std::env::temp_dir()
             .join("pap_test_output")
@@ -407,16 +403,12 @@ mod tests {
 
         let settings = OutputSettings::default();
 
-        let maps = composite_all(
+        let maps = composite_all(&CompositeAllInput::new(
             &[layer.clone()],
             res,
             &[LayerBaseColor::solid(Color::WHITE)],
             &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
+        ));
 
         let dir = std::env::temp_dir()
             .join("pap_test_output")

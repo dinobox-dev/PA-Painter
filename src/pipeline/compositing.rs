@@ -585,7 +585,7 @@ pub fn composite_stroke(
 /// Generate stroke paths for all layers in compositing order (parallel).
 ///
 /// Returns a list of path sets, one per layer in `order`-sorted sequence.
-/// The returned vec can be passed to [`composite_all_with_paths`] for
+/// The returned vec can be passed to [`composite_all`] for
 /// reuse across multiple renders with the same layout.
 ///
 /// Path generation (direction field + streamline tracing) is done in parallel
@@ -656,7 +656,7 @@ fn assign_unique_stroke_ids(all_paths: &mut [Vec<StrokePath>]) {
     }
 }
 
-/// Input for [`composite_all_with_paths`].
+/// Input for [`composite_all`].
 pub struct CompositeAllInput<'a> {
     pub layers: &'a [PaintLayer],
     pub resolution: u32,
@@ -672,6 +672,29 @@ pub struct CompositeAllInput<'a> {
     /// Defaults to all 1.0 when empty.
     pub layer_dry: &'a [f32],
     pub group_names: &'a [&'a str],
+}
+
+impl<'a> CompositeAllInput<'a> {
+    /// Create input with required fields; optional fields default to `None`/empty.
+    pub fn new(
+        layers: &'a [PaintLayer],
+        resolution: u32,
+        base_colors: &'a [LayerBaseColor],
+        settings: &'a OutputSettings,
+    ) -> Self {
+        Self {
+            layers,
+            resolution,
+            base_colors,
+            settings,
+            cached_paths: None,
+            normal_data: None,
+            masks: &[],
+            stretch_map: None,
+            layer_dry: &[],
+            group_names: &[],
+        }
+    }
 }
 
 /// Input for [`composite_layer`]. `global` is kept as a separate parameter
@@ -699,34 +722,6 @@ pub struct RenderLayerInput<'a> {
     pub resolution: u32,
 }
 
-/// Composite all strokes from all layers into global maps.
-///
-/// Convenience wrapper around [`composite_all_with_paths`] that generates
-/// paths internally (no cache) and uses default dry values (1.0 per layer).
-pub fn composite_all(
-    layers: &[PaintLayer],
-    resolution: u32,
-    base_colors: &[LayerBaseColor],
-    settings: &OutputSettings,
-    normal_data: Option<&MeshNormalData>,
-    masks: &[Option<&UvMask>],
-    stretch_map: Option<&StretchMap>,
-    group_names: &[&str],
-) -> GlobalMaps {
-    composite_all_with_paths(&CompositeAllInput {
-        layers,
-        resolution,
-        base_colors,
-        settings,
-        cached_paths: None,
-        normal_data,
-        masks,
-        stretch_map,
-        layer_dry: &[],
-        group_names,
-    })
-}
-
 /// Composite all layers via independent per-layer rendering and merge.
 ///
 /// Each layer is rendered into its own [`LayerMaps`] (via [`render_layer`]),
@@ -740,7 +735,7 @@ pub fn composite_all(
 ///
 /// `layer_dry` controls per-layer dryness (parallel to `layers`).
 /// dry=0 → wet surface (subtractive mix), dry=1 → dry surface (opaque over).
-pub fn composite_all_with_paths(input: &CompositeAllInput<'_>) -> GlobalMaps {
+pub fn composite_all(input: &CompositeAllInput<'_>) -> GlobalMaps {
     let CompositeAllInput {
         layers,
         resolution,
@@ -1219,7 +1214,7 @@ pub fn render_layer(input: &RenderLayerInput<'_>) -> LayerMaps {
 
 /// Finalize independently rendered layers into a single [`GlobalMaps`].
 ///
-/// This is the shared "Phase C" used by both the CLI (`composite_all_with_paths`)
+/// This is the shared "Phase C" used by both the CLI (`composite_all`)
 /// and the GUI (`generation.rs`). It performs:
 /// 1. [`GlobalMaps`] initialization
 /// 2. Per-layer base color fill via [`fill_base_color_region`]
@@ -1792,17 +1787,13 @@ mod tests {
         let solid = Color::rgb(0.5, 0.5, 0.5);
 
         let base = [LayerBaseColor::solid(solid)];
-        let maps1 = composite_all(
+        let maps1 = composite_all(&CompositeAllInput::new(
             std::slice::from_ref(&layer),
             64,
             &base,
             &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
-        let maps2 = composite_all(&[layer], 64, &base, &settings, None, &[], None, &[]);
+        ));
+        let maps2 = composite_all(&CompositeAllInput::new(&[layer], 64, &base, &settings));
 
         // Verify non-trivial output (subsumes composite_all_produces_output)
         let painted = maps1.height.iter().filter(|&&h| h > 0.0).count();
@@ -1861,38 +1852,26 @@ mod tests {
         let test_res = 128;
 
         // Render each layer alone
-        let solo_a = composite_all(
+        let solo_a = composite_all(&CompositeAllInput::new(
             &[layer_a.clone()],
             test_res,
             &[LayerBaseColor::solid(red)],
             &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
-        let solo_b = composite_all(
+        ));
+        let solo_b = composite_all(&CompositeAllInput::new(
             &[layer_b.clone()],
             test_res,
             &[LayerBaseColor::solid(blue)],
             &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
+        ));
 
         // Render both together (dry=1.0, opaque stacking)
-        let combined = composite_all(
+        let combined = composite_all(&CompositeAllInput::new(
             &[layer_a, layer_b],
             test_res,
             &base,
             &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
+        ));
 
         // Where only layer A has paint (and layer B does not), the combined
         // result should match the solo render of layer A.
@@ -1923,16 +1902,12 @@ mod tests {
         let settings = OutputSettings::default();
 
         let solid = Color::rgb(0.6, 0.4, 0.3);
-        let maps = composite_all(
+        let maps = composite_all(&CompositeAllInput::new(
             &[layer],
             256,
             &[LayerBaseColor::solid(solid)],
             &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
+        ));
 
         let out_dir = crate::test_module_output_dir("compositing");
 
@@ -2037,21 +2012,13 @@ mod tests {
             }
         }
 
-        let maps = composite_all(
-            &[layer],
-            256,
-            &[LayerBaseColor {
-                solid_color: Color::WHITE,
-                texture: Some(tex),
-                tex_width: 4,
-                tex_height: 4,
-            }],
-            &settings,
-            None,
-            &[],
-            None,
-            &[],
-        );
+        let base = [LayerBaseColor {
+            solid_color: Color::WHITE,
+            texture: Some(tex),
+            tex_width: 4,
+            tex_height: 4,
+        }];
+        let maps = composite_all(&CompositeAllInput::new(&[layer], 256, &base, &settings));
 
         let color_pixels: Vec<u8> = maps
             .color

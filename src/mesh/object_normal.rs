@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn visual_depicted_form_normal_map() {
-        use crate::pipeline::compositing::composite_all;
+        use crate::pipeline::compositing::{composite_all, CompositeAllInput};
         use crate::pipeline::output::{
             export_normal_png, generate_normal_map, generate_normal_map_depicted_form,
         };
@@ -860,16 +860,15 @@ mod tests {
         };
 
         let solid = crate::types::Color::rgb(0.5, 0.4, 0.3);
-        let maps = composite_all(
-            std::slice::from_ref(&layer),
-            res,
-            &[LayerBaseColor::solid(solid)],
-            &settings,
-            Some(&nd),
-            &[],
-            None,
-            &[],
-        );
+        let maps = composite_all(&CompositeAllInput {
+            normal_data: Some(&nd),
+            ..CompositeAllInput::new(
+                std::slice::from_ref(&layer),
+                res,
+                &[LayerBaseColor::solid(solid)],
+                &settings,
+            )
+        });
 
         let out_dir = crate::test_module_output_dir("object_normal");
 
@@ -1035,7 +1034,7 @@ mod tests {
     /// "normal_break_on_lambert.png"  — strokes stop at hard-edge face boundaries.
     #[test]
     fn visual_normal_break_comparison() {
-        use crate::pipeline::compositing::composite_all;
+        use crate::pipeline::compositing::{composite_all, CompositeAllInput};
         use crate::pipeline::output::{
             export_normal_png, generate_normal_map_depicted_form, normalize_height_map,
         };
@@ -1078,26 +1077,24 @@ mod tests {
         let solid = crate::types::Color::rgb(0.5, 0.4, 0.3);
 
         let base_colors = vec![LayerBaseColor::solid(solid)];
-        let maps_off = composite_all(
-            std::slice::from_ref(&base_layer),
-            res,
-            &base_colors,
-            &settings,
-            Some(&nd),
-            &[],
-            None,
-            &[],
-        );
-        let maps_on = composite_all(
-            std::slice::from_ref(&layer_on),
-            res,
-            &base_colors,
-            &settings,
-            Some(&nd),
-            &[],
-            None,
-            &[],
-        );
+        let maps_off = composite_all(&CompositeAllInput {
+            normal_data: Some(&nd),
+            ..CompositeAllInput::new(
+                std::slice::from_ref(&base_layer),
+                res,
+                &base_colors,
+                &settings,
+            )
+        });
+        let maps_on = composite_all(&CompositeAllInput {
+            normal_data: Some(&nd),
+            ..CompositeAllInput::new(
+                std::slice::from_ref(&layer_on),
+                res,
+                &base_colors,
+                &settings,
+            )
+        });
 
         let out_dir = crate::test_module_output_dir("object_normal");
 

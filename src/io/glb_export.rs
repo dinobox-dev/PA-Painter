@@ -661,7 +661,7 @@ mod tests {
     #[test]
     fn visual_sphere_preview() {
         use crate::mesh::object_normal::compute_mesh_normal_data;
-        use crate::pipeline::compositing::composite_all;
+        use crate::pipeline::compositing::{composite_all, CompositeAllInput};
         use crate::pipeline::output::{
             generate_normal_map, generate_normal_map_depicted_form, normalize_height_map,
         };
@@ -709,16 +709,15 @@ mod tests {
                 NormalMode::SurfacePaint => None,
             };
 
-            let maps = composite_all(
-                std::slice::from_ref(&layer),
-                res,
-                &[LayerBaseColor::solid(solid)],
-                &settings,
-                mesh_nd,
-                &[],
-                None,
-                &[],
-            );
+            let maps = composite_all(&CompositeAllInput {
+                normal_data: mesh_nd,
+                ..CompositeAllInput::new(
+                    std::slice::from_ref(&layer),
+                    res,
+                    &[LayerBaseColor::solid(solid)],
+                    &settings,
+                )
+            });
 
             let normalized_height = normalize_height_map(&maps.height);
             let normals = match normal_mode {
@@ -826,7 +825,7 @@ mod tests {
     #[ignore]
     fn visual_transparent_sphere() {
         use crate::mesh::object_normal::compute_mesh_normal_data;
-        use crate::pipeline::compositing::composite_all;
+        use crate::pipeline::compositing::{composite_all, CompositeAllInput};
         use crate::pipeline::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::types::{
             BackgroundMode, Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings,
@@ -861,16 +860,15 @@ mod tests {
             ..OutputSettings::default()
         };
 
-        let maps = composite_all(
-            std::slice::from_ref(&layer),
-            res,
-            &[LayerBaseColor::solid(solid)],
-            &settings,
-            Some(&nd),
-            &[],
-            None,
-            &[],
-        );
+        let maps = composite_all(&CompositeAllInput {
+            normal_data: Some(&nd),
+            ..CompositeAllInput::new(
+                std::slice::from_ref(&layer),
+                res,
+                &[LayerBaseColor::solid(solid)],
+                &settings,
+            )
+        });
 
         let normalized_height = normalize_height_map(&maps.height);
         let normals = generate_normal_map_depicted_form(
@@ -916,7 +914,7 @@ mod tests {
     #[ignore] // high-res benchmark
     fn visual_sphere_overscan_poisson() {
         use crate::mesh::object_normal::compute_mesh_normal_data;
-        use crate::pipeline::compositing::{composite_all_with_paths, CompositeAllInput};
+        use crate::pipeline::compositing::{composite_all, CompositeAllInput};
         use crate::pipeline::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::pipeline::path_placement::{generate_paths, PathContext};
         use crate::types::{
@@ -964,7 +962,7 @@ mod tests {
         eprintln!("Overscan+Poisson: {} paths generated", paths.len());
 
         let cached_paths = vec![paths];
-        let maps = composite_all_with_paths(&CompositeAllInput {
+        let maps = composite_all(&CompositeAllInput {
             layers: std::slice::from_ref(&layer),
             resolution: res,
             base_colors: &[LayerBaseColor::solid(solid)],

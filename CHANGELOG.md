@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Removed `Project::cached_paths`, `set_cached_paths()`, `cached_paths_if_valid()`, and `invalidate_path_cache()` — manage path caches as local variables instead
 - `Project::build_masks` changed from `&self` method to associated function taking an explicit `&[&Layer]` slice
+- Merged `composite_all` and `composite_all_with_paths` into a single `composite_all(&CompositeAllInput)`; use `CompositeAllInput::new()` for the common case
 
 ### Changed
 
