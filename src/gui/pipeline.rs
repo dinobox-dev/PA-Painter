@@ -94,13 +94,12 @@ impl PainterApp {
         }
         self.state.generation.is_preview = is_preview;
 
-        let layers = self.state.project.paint_layers();
         let settings = self.state.project.settings.clone();
 
         let mesh = self.state.loaded_mesh.clone(); // Arc clone
         let cached_normals = self.state.cached_mesh_normals.clone(); // (u32, Arc) clone
 
-        // Resolve per-layer base color and normal from TextureSource.
+        // Single source of truth for all parallel per-layer Vecs below.
         let materials: &[_] = mesh.as_ref().map(|m| m.materials.as_slice()).unwrap_or(&[]);
         let visible_layers: Vec<&pa_painter::types::Layer> = self
             .state
@@ -109,6 +108,9 @@ impl PainterApp {
             .iter()
             .filter(|l| l.visible)
             .collect();
+
+        // All of the following are parallel to visible_layers.
+        let layers: Vec<_> = visible_layers.iter().map(|l| l.to_paint_layer()).collect();
         let layer_base_colors: Vec<_> = visible_layers
             .iter()
             .map(|l| {
@@ -121,30 +123,12 @@ impl PainterApp {
                 pa_painter::pipeline::compositing::resolve_base_normal(&l.base_normal, materials)
             })
             .collect();
-
-        // Group names for visible layers — parallel to `layers` vec
         let layer_group_names: Vec<String> = visible_layers
             .iter()
             .map(|l| l.group_name.clone())
             .collect();
-
-        // Per-layer render hashes (parallel to visible layers / `layers` vec)
-        let layer_hashes: Vec<u64> = self
-            .state
-            .project
-            .layers
-            .iter()
-            .filter(|l| l.visible)
-            .map(|l| l.render_hash())
-            .collect();
-        let layer_path_hashes: Vec<u64> = self
-            .state
-            .project
-            .layers
-            .iter()
-            .filter(|l| l.visible)
-            .map(|l| l.path_hash())
-            .collect();
+        let layer_hashes: Vec<u64> = visible_layers.iter().map(|l| l.render_hash()).collect();
+        let layer_path_hashes: Vec<u64> = visible_layers.iter().map(|l| l.path_hash()).collect();
 
         // Pass layer cache if global inputs (resolution, mesh) haven't changed
         let global_hash = {

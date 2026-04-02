@@ -597,6 +597,19 @@ pub fn generate_all_paths(
     masks: &[Option<&UvMask>],
     stretch_map: Option<&StretchMap>,
 ) -> Vec<Vec<StrokePath>> {
+    debug_assert_eq!(
+        base_colors.len(),
+        layers.len(),
+        "base_colors must be parallel to layers ({} vs {})",
+        base_colors.len(),
+        layers.len()
+    );
+    debug_assert!(
+        masks.is_empty() || masks.len() == layers.len(),
+        "masks must be empty or parallel to layers ({} vs {})",
+        masks.len(),
+        layers.len()
+    );
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
 
@@ -740,6 +753,31 @@ pub fn composite_all_with_paths(input: &CompositeAllInput<'_>) -> GlobalMaps {
         layer_dry,
         group_names,
     } = *input;
+    debug_assert_eq!(
+        base_colors.len(),
+        layers.len(),
+        "base_colors must be parallel to layers ({} vs {})",
+        base_colors.len(),
+        layers.len()
+    );
+    debug_assert!(
+        masks.is_empty() || masks.len() == layers.len(),
+        "masks must be empty or parallel to layers ({} vs {})",
+        masks.len(),
+        layers.len()
+    );
+    debug_assert!(
+        layer_dry.is_empty() || layer_dry.len() == layers.len(),
+        "layer_dry must be empty or parallel to layers ({} vs {})",
+        layer_dry.len(),
+        layers.len()
+    );
+    debug_assert!(
+        group_names.is_empty() || group_names.len() == layers.len(),
+        "group_names must be empty or parallel to layers ({} vs {})",
+        group_names.len(),
+        layers.len()
+    );
     info!(
         "Compositing {} layers at {}×{} (cache={})",
         layers.len(),

@@ -4,7 +4,7 @@ use std::process;
 use clap::Parser;
 use log::{error, info};
 
-use pa_painter::io::project::load_project;
+use pa_painter::io::project::{load_project, Project};
 use pa_painter::mesh::asset_io::load_mesh;
 use pa_painter::mesh::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use pa_painter::mesh::stretch_map::{compute_stretch_map, StretchMap};
@@ -69,7 +69,7 @@ fn main() {
         error!("Failed to load project: {e:?}");
         process::exit(1);
     });
-    let mut project = load_result.project;
+    let project = load_result.project;
 
     let resolution = resolution_override.unwrap_or(project.settings.resolution_preset.resolution());
     info!("Resolution: {resolution}px");
@@ -113,63 +113,59 @@ fn main() {
     });
     let stretch_ref = stretch_data.as_ref();
 
-    // Build UV masks from mesh groups
-    let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = loaded_mesh {
-        project.build_masks(mesh, resolution)
-    } else {
-        (0..project.layers.iter().filter(|l| l.visible).count())
-            .map(|_| None)
-            .collect()
-    };
-    let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
-
-    // Convert slots to paint layers for pipeline
-    let layers = project.paint_layers();
-
-    // Resolve per-layer base color and normal from TextureSource.
     let materials: &[_] = loaded_mesh
         .as_ref()
         .map(|m| m.materials.as_slice())
         .unwrap_or(&[]);
-    let layer_base_colors: Vec<_> = project
-        .layers
+
+    // Single source of truth for all parallel per-layer Vecs.
+    // No mutable borrow of project occurs after this point, so visible_layers
+    // can stay alive through the per-layer export loop below.
+    let visible_layers: Vec<_> = project.layers.iter().filter(|l| l.visible).collect();
+    let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = loaded_mesh {
+        Project::build_masks(&visible_layers, mesh, resolution)
+    } else {
+        visible_layers.iter().map(|_| None).collect()
+    };
+    let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
+    let layers: Vec<_> = visible_layers.iter().map(|l| l.to_paint_layer()).collect();
+    let layer_base_colors: Vec<_> = visible_layers
         .iter()
-        .filter(|l| l.visible)
         .map(|l| resolve_base_color(&l.base_color, materials))
         .collect();
-
-    // Generate (with path cache)
-    info!("Generating...");
-    if project.cached_paths_if_valid().is_none() {
-        let paths = generate_all_paths(
-            &layers,
-            &layer_base_colors,
-            normal_data.as_ref(),
-            &mask_refs,
-            stretch_ref,
-        );
-        project.set_cached_paths(paths);
-    }
-
-    let layer_dry: Vec<f32> = project
-        .layers
+    let layer_dry: Vec<f32> = visible_layers.iter().map(|l| l.dry).collect();
+    let layer_group_names: Vec<&str> = visible_layers
         .iter()
-        .filter(|l| l.visible)
-        .map(|l| l.dry)
-        .collect();
-    let layer_group_names: Vec<&str> = project
-        .layers
-        .iter()
-        .filter(|l| l.visible)
         .map(|l| l.group_name.as_str())
         .collect();
+
+    info!("Generating...");
+    let paths = generate_all_paths(
+        &layers,
+        &layer_base_colors,
+        normal_data.as_ref(),
+        &mask_refs,
+        stretch_ref,
+    );
+
+    // paths[i] corresponds to layers sorted by order (generate_all_paths contract).
+    // Build a map from original layer index to its position in that sorted output,
+    // so the per-layer export loop can look up the correct path set.
+    let mut path_idx_for = vec![0usize; layers.len()];
+    {
+        let mut order_idx: Vec<usize> = (0..layers.len()).collect();
+        order_idx.sort_by_key(|&i| layers[i].order);
+        for (sorted_pos, &orig_idx) in order_idx.iter().enumerate() {
+            path_idx_for[orig_idx] = sorted_pos;
+        }
+    }
 
     let global = composite_all_with_paths(&CompositeAllInput {
         layers: &layers,
         resolution,
         base_colors: &layer_base_colors,
         settings: &project.settings,
-        cached_paths: project.cached_paths.as_deref(),
+        cached_paths: Some(&paths),
         normal_data: normal_data.as_ref(),
         masks: &mask_refs,
         stretch_map: stretch_ref,
@@ -197,17 +193,12 @@ fn main() {
     if per_layer {
         info!("Exporting per-layer maps...");
         let mut manifest_entries = Vec::new();
-        let visible_layers: Vec<_> = project.layers.iter().filter(|l| l.visible).collect();
 
         for (idx, (layer, paint_layer)) in visible_layers.iter().zip(layers.iter()).enumerate() {
             let base_color = &layer_base_colors[idx];
             let base = base_color.as_source();
             let mask = mask_refs.get(idx).and_then(|m| *m);
-            let cached = project
-                .cached_paths
-                .as_ref()
-                .and_then(|cp| cp.get(idx))
-                .map(|v| v.as_slice());
+            let cached = paths.get(path_idx_for[idx]).map(|v| v.as_slice());
 
             let layer_maps = render_layer(&RenderLayerInput {
                 layer: paint_layer,

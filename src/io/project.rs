@@ -181,12 +181,18 @@ impl Project {
             .collect()
     }
 
-    /// Build UV masks for visible layers from the loaded mesh.
+    /// Build UV masks for the given layers from the loaded mesh.
     /// Returns `None` for `__all__` groups (paint entire UV space).
-    pub fn build_masks(&self, mesh: &LoadedMesh, resolution: u32) -> Vec<Option<UvMask>> {
-        self.layers
+    ///
+    /// `layers` must be the same pre-filtered slice that is passed to the
+    /// compositing pipeline, so that mask indices align with layer indices.
+    pub fn build_masks(
+        layers: &[&Layer],
+        mesh: &LoadedMesh,
+        resolution: u32,
+    ) -> Vec<Option<UvMask>> {
+        layers
             .iter()
-            .filter(|l| l.visible)
             .map(|layer| {
                 if layer.group_name == "__all__" {
                     None
