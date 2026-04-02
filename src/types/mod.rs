@@ -844,7 +844,7 @@ impl StrokePath {
             return self.points[0];
         }
         if t >= 1.0 {
-            // Safety: len >= 1 checked above, so last() is always Some.
+            // Invariant: len >= 1 checked above, so last() is always Some.
             return *self.points.last().expect("non-empty path");
         }
         let (seg, frac) = self.find_segment(self.total_length * t);
