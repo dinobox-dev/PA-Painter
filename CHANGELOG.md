@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Recent projects list in File menu and welcome screen with name, path, and relative time
 - Alert dialog for file-not-found errors (auto-removes missing entries from recent list)
 - Drag and drop support for .papr, .obj, .glb, .gltf files with drop overlay
+- Save As (⇧⌘S) with file dialog pre-filled from current project path
 
 ### Changed
 
@@ -26,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Welcome screen: horizontal Open/New buttons with recent projects table below
 - Enabled eframe persistence: theme, sidebar widths, and window size saved across sessions
 - Fixed left sidebar flicker on startup (min_width = default_width)
+- Reorganized File menu: clear separator groups for create / open / save+export
+- Moved Force Full-Res from File to Edit menu
+- Force Full-Res disabled when no mesh is loaded
 
 ## [0.2.4] — 2026-03-31
 
