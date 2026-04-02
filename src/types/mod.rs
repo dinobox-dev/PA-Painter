@@ -719,9 +719,9 @@ impl Layer {
         p.overlap_ratio.map(|v| v.to_bits()).hash(&mut hasher);
         p.overlap_dist_factor.map(|v| v.to_bits()).hash(&mut hasher);
         // Non-PaintValues path-affecting fields
-        if let Ok(bytes) = serde_json::to_vec(&(&self.guides, &self.group_name, &self.base_color)) {
-            bytes.hash(&mut hasher);
-        }
+        let bytes = serde_json::to_vec(&(&self.guides, &self.group_name, &self.base_color))
+            .expect("path_hash: serialization of layer fields must not fail");
+        bytes.hash(&mut hasher);
         self.seed.hash(&mut hasher);
         hasher.finish()
     }
