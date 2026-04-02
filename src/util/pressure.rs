@@ -41,16 +41,10 @@ fn evaluate_bezier_spline(knots: &[CurveKnot], t: f32) -> f32 {
         };
     }
 
-    // Find segment
     let n = knots.len();
-    let mut seg = 0;
-    for i in 0..n - 1 {
-        if knots[i + 1].pos[0] >= t {
-            seg = i;
-            break;
-        }
-        seg = i;
-    }
+    let seg = (0..n - 1)
+        .find(|&i| knots[i + 1].pos[0] >= t)
+        .unwrap_or(n - 2);
 
     let p0 = knots[seg].pos;
     let p1 = knots[seg].handle_out;
