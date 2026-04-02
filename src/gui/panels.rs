@@ -140,6 +140,7 @@ impl PainterApp {
                         ui.close();
                         self.state.pending_new = true;
                     }
+                    ui.separator();
                     if Self::menu_item(ui, "Open Project...", None, true) {
                         ui.close();
                         self.state.pending_open = true;
@@ -168,6 +169,7 @@ impl PainterApp {
                             }
                         });
                     }
+                    ui.separator();
                     if Self::menu_item(
                         ui,
                         "Save",
@@ -177,23 +179,23 @@ impl PainterApp {
                         ui.close();
                         self.state.pending_save = true;
                     }
-                    ui.separator();
+                    if Self::menu_item(
+                        ui,
+                        "Save As...",
+                        Some(KeyboardShortcut::new(
+                            Modifiers::COMMAND | Modifiers::SHIFT,
+                            Key::S,
+                        )),
+                        true,
+                    ) {
+                        ui.close();
+                        self.state.pending_save_as = true;
+                    }
                     let can_export =
                         self.state.generated.is_some() && !self.state.export_worker.is_running();
                     if Self::menu_item(ui, "Export...", None, can_export) {
                         ui.close();
                         self.state.pending_export = true;
-                    }
-                    ui.separator();
-                    let can_gen = !self.state.generation.is_running();
-                    if Self::menu_item(
-                        ui,
-                        "Force Full-Res",
-                        Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::G)),
-                        can_gen,
-                    ) {
-                        ui.close();
-                        self.start_generation();
                     }
                 });
                 ui.menu_button("Edit", |ui: &mut egui::Ui| {
@@ -227,6 +229,18 @@ impl PainterApp {
                         if let Some(snap) = self.state.undo.redo(current) {
                             self.state.apply_snapshot(snap);
                         }
+                    }
+                    ui.separator();
+                    let can_gen =
+                        !self.state.generation.is_running() && self.state.loaded_mesh.is_some();
+                    if Self::menu_item(
+                        ui,
+                        "Force Full-Res",
+                        Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::G)),
+                        can_gen,
+                    ) {
+                        ui.close();
+                        self.start_generation();
                     }
                 });
                 ui.menu_button("View", |ui: &mut egui::Ui| {

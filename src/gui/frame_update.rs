@@ -35,12 +35,20 @@ impl PainterApp {
             }
         }
 
-        if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::S)) {
+        let save_as_mods = egui::Modifiers {
+            command: true,
+            shift: true,
+            ..Default::default()
+        };
+        if ctx.input_mut(|i| i.consume_key(save_as_mods, egui::Key::S)) {
+            self.state.pending_save_as = true;
+        } else if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::S)) {
             self.state.pending_save = true;
         }
         if ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::G))
             && !self.state.generation.is_running()
             && !self.state.modal_dialog_active
+            && self.state.loaded_mesh.is_some()
         {
             self.start_generation();
         }
@@ -169,6 +177,13 @@ impl PainterApp {
         if self.state.pending_save {
             self.state.pending_save = false;
             dialogs::save_project_action(&mut self.state);
+            if let Some(ref path) = self.state.project_path {
+                self.recent_files = recent_files::push(path);
+            }
+        }
+        if self.state.pending_save_as {
+            self.state.pending_save_as = false;
+            dialogs::save_project_as_action(&mut self.state);
             if let Some(ref path) = self.state.project_path {
                 self.recent_files = recent_files::push(path);
             }

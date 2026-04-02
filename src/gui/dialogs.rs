@@ -377,6 +377,42 @@ pub fn save_project_action(state: &mut AppState) {
     }
 }
 
+/// Always show a Save As dialog, regardless of whether a project path exists.
+pub fn save_project_as_action(state: &mut AppState) {
+    state.modal_dialog_active = true;
+    let mut dialog = rfd::FileDialog::new().add_filter("PA Painter Project", &["papr"]);
+    if let Some(ref path) = state.project_path {
+        if let Some(dir) = path.parent() {
+            dialog = dialog.set_directory(dir);
+        }
+        if let Some(name) = path.file_name() {
+            dialog = dialog.set_file_name(name.to_string_lossy());
+        }
+    }
+    let result = dialog.save_file();
+    state.modal_dialog_active = false;
+    let Some(mut path) = result else {
+        return;
+    };
+    if path.extension().is_none() {
+        path.set_extension("papr");
+    }
+
+    state.project.manifest.modified_at = utc_now_iso8601();
+
+    let editor_json = serde_json::to_vec_pretty(&state.extract_editor_state()).ok();
+    match save_project(&state.project, &path, editor_json.as_deref()) {
+        Ok(()) => {
+            state.project_path = Some(path);
+            state.dirty = false;
+            state.status_message = "Project saved".to_string();
+        }
+        Err(e) => {
+            state.status_message = format!("Save failed: {e:?}");
+        }
+    }
+}
+
 /// Derive the export subfolder name from the project file path.
 /// Returns `"untitled"` if no project has been saved yet.
 fn export_folder_name(state: &AppState) -> String {
