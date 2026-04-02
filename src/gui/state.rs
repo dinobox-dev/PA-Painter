@@ -7,8 +7,8 @@ use std::time::Instant;
 use eframe::egui;
 use glam::{Vec2, Vec3};
 
+use pa_painter::io::project::{LoadResult, Project};
 use pa_painter::mesh::asset_io::{LoadedMesh, ObjAuxFiles};
-use pa_painter::project::{LoadResult, Project};
 use pa_painter::types::{ExportSettings, Layer, OutputSettings, TextureSource};
 
 use super::generation::{GenResult, GenerationManager};
@@ -150,7 +150,7 @@ impl ProjectLoadWorker {
     }
 
     pub fn start(&mut self, source: ProjectLoadSource) {
-        use pa_painter::project::load_project;
+        use pa_painter::io::project::load_project;
 
         self.handle = Some(thread::spawn(move || {
             let path = match &source {

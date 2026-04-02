@@ -1195,7 +1195,7 @@ mod tests {
                 .expect("save obj_normal_rgb");
 
             // GLB 3D preview
-            crate::glb_export::export_preview_glb(&crate::glb_export::GlbExportParams {
+            crate::io::glb_export::export_preview_glb(&crate::io::glb_export::GlbExportParams {
                 mesh: &mesh,
                 color_map: &maps.color,
                 height_map: &normalized_height,

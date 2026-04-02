@@ -7,6 +7,7 @@ use log::{error, info};
 use pa_painter::compositing::{
     composite_all_with_paths, generate_all_paths, render_layer, resolve_base_color,
 };
+use pa_painter::io::project::load_project;
 use pa_painter::mesh::asset_io::load_mesh;
 use pa_painter::mesh::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use pa_painter::mesh::stretch_map::{compute_stretch_map, StretchMap};
@@ -15,7 +16,6 @@ use pa_painter::output::{
     export_all, export_layer_maps, export_manifest, ExportFormat, LayerExportOptions,
     LayerManifestEntry,
 };
-use pa_painter::project::load_project;
 use pa_painter::types::NormalMode;
 
 #[derive(Clone, clap::ValueEnum)]

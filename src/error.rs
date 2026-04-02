@@ -1,8 +1,8 @@
 //! Unified error type that aggregates all sub-system errors in the painter pipeline.
 
+use crate::io::project::ProjectError;
 use crate::mesh::asset_io::{MeshError, TextureError};
 use crate::output::OutputError;
-use crate::project::ProjectError;
 
 /// Unified error type for the painter pipeline.
 #[derive(Debug, thiserror::Error)]

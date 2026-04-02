@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use pa_painter::compositing::LayerMaps;
-use pa_painter::glb_export;
+use pa_painter::io::glb_export;
+use pa_painter::io::project::{save_project, utc_now_iso8601, Project};
 use pa_painter::mesh::asset_io::{
     collect_obj_aux_files, extract_uv_edges, load_mesh, LoadedMesh, MeshMaterialInfo,
 };
@@ -15,7 +16,6 @@ use pa_painter::output::{
     export_stroke_time_png, normalize_height_map, ExportFormat, LayerExportOptions,
     LayerManifestEntry,
 };
-use pa_painter::project::{save_project, utc_now_iso8601, Project};
 use pa_painter::types::{
     BackgroundMode, Color, EmbeddedTexture, ExportSettings, Layer, NormalMode, PaintValues,
     TextureSource,
@@ -112,7 +112,7 @@ pub fn pick_project_path(state: &mut AppState) -> Option<std::path::PathBuf> {
 /// `project_path` is `Some` for file-based opens, `None` for the example project.
 pub fn apply_load_result(
     state: &mut AppState,
-    result: pa_painter::project::LoadResult,
+    result: pa_painter::io::project::LoadResult,
     project_path: Option<PathBuf>,
 ) {
     let display_name = project_path

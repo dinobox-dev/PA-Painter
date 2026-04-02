@@ -17,7 +17,7 @@
 //!
 //! ```no_run
 //! use std::path::Path;
-//! use pa_painter::project::load_project;
+//! use pa_painter::io::project::load_project;
 //!
 //! let result = load_project(Path::new("scene.papr")).unwrap();
 //! let project = result.project;
@@ -61,11 +61,10 @@ pub mod path_placement;
 pub mod stroke_height;
 
 // ── Data & types ──
-pub mod project;
 pub mod types;
 
 // ── I/O & export ──
-pub mod glb_export;
+pub mod io;
 
 // ── Mesh loading & support ──
 pub mod mesh;
