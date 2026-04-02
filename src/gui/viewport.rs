@@ -85,7 +85,8 @@ fn update_group_dim_cache(ctx: &egui::Context, state: &mut AppState) {
 
     let texture = state.loaded_mesh.as_ref().and_then(|mesh| {
         let group = mesh.groups.iter().find(|g| g.name == key.group_name)?;
-        let mask = pa_painter::uv_mask::UvMask::from_mesh_group(mesh, group, GROUP_DIM_RESOLUTION);
+        let mask =
+            pa_painter::mesh::uv_mask::UvMask::from_mesh_group(mesh, group, GROUP_DIM_RESOLUTION);
 
         let inside_alpha: u8 = 80;
         let outside_alpha: u8 = 160;
@@ -140,7 +141,7 @@ fn resolve_setup_texture(
     ctx: &egui::Context,
     source: &TextureSource,
     is_color: bool,
-    mesh: Option<&pa_painter::asset_io::LoadedMesh>,
+    mesh: Option<&pa_painter::mesh::asset_io::LoadedMesh>,
 ) -> Option<egui::TextureHandle> {
     let name = if is_color {
         "setup_base_color"

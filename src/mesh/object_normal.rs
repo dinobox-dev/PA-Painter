@@ -4,7 +4,7 @@
 use glam::{Vec2, Vec3};
 use log::debug;
 
-use crate::asset_io::LoadedMesh;
+use crate::mesh::asset_io::LoadedMesh;
 
 // ── MikkTSpace interface ──
 
@@ -350,7 +350,7 @@ fn rasterize_triangle_uv(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset_io::LoadedMesh;
+    use crate::mesh::asset_io::LoadedMesh;
 
     const EPS: f32 = 1e-4;
 
@@ -737,7 +737,7 @@ mod tests {
     #[test]
     fn cube_fixture_normals() {
         let fixtures = crate::test_fixtures_dir();
-        let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
+        let mesh = crate::mesh::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
         let data = compute_mesh_normal_data(&mesh, 64);
 
         // All computed normals should be unit length (where they're non-zero)
@@ -758,7 +758,7 @@ mod tests {
     #[test]
     fn visual_cube_normal_map_rgb() {
         let fixtures = crate::test_fixtures_dir();
-        let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
+        let mesh = crate::mesh::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
         let res = 256u32;
         let data = compute_mesh_normal_data(&mesh, res);
 
@@ -792,7 +792,7 @@ mod tests {
     #[test]
     fn visual_cube_lambert_shading() {
         let fixtures = crate::test_fixtures_dir();
-        let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
+        let mesh = crate::mesh::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
         let res = 256u32;
         let data = compute_mesh_normal_data(&mesh, res);
 
@@ -834,7 +834,7 @@ mod tests {
         };
 
         let fixtures = crate::test_fixtures_dir();
-        let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
+        let mesh = crate::mesh::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
         let res = 256u32;
         let nd = compute_mesh_normal_data(&mesh, res);
 
@@ -1045,7 +1045,7 @@ mod tests {
         };
 
         let fixtures = crate::test_fixtures_dir();
-        let mesh = crate::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
+        let mesh = crate::mesh::asset_io::load_mesh(&fixtures.join("cube_binary.glb")).unwrap();
         let res = 256u32;
         let nd = compute_mesh_normal_data(&mesh, res);
 

@@ -9,15 +9,15 @@ use glam::Vec2;
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 
-use crate::asset_io::linear_to_srgb;
 use crate::compositing::{GlobalMaps, LayerMaps};
-use crate::object_normal::MeshNormalData;
+use crate::mesh::asset_io::linear_to_srgb;
+use crate::mesh::object_normal::MeshNormalData;
+use crate::mesh::uv_mask::UvMask;
 use crate::types::{
     BackgroundMode, Color, HsvColor, NormalMode, NormalYConvention, OutputSettings,
 };
 use crate::util::math::smoothstep;
 use crate::util::stroke_color::hsv_to_rgb;
-use crate::uv_mask::UvMask;
 
 // ── Error Type ──
 
@@ -812,8 +812,8 @@ pub fn export_all(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset_io::{linear_to_srgb, load_texture};
     use crate::compositing::composite_all;
+    use crate::mesh::asset_io::{linear_to_srgb, load_texture};
     use crate::test_util::make_layer_with_order;
     use crate::types::{Color, LayerBaseColor, NormalYConvention, OutputSettings};
 

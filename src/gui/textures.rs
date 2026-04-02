@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use pa_painter::asset_io::LoadedTexture;
+use pa_painter::mesh::asset_io::LoadedTexture;
 use pa_painter::types::Color;
 
 /// Convert a LoadedTexture (linear float RGBA) to an egui TextureHandle.

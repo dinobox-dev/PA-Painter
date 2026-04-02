@@ -6,7 +6,7 @@
 use glam::{Vec2, Vec3};
 use log::debug;
 
-use crate::asset_io::LoadedMesh;
+use crate::mesh::asset_io::LoadedMesh;
 
 /// Pre-computed stretch factor rasterized into UV space.
 ///
@@ -199,7 +199,7 @@ fn barycentric(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> (f32, f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset_io::LoadedMesh;
+    use crate::mesh::asset_io::LoadedMesh;
 
     fn make_unit_square_mesh() -> LoadedMesh {
         // Two triangles forming a 1×1 square in XY plane, UV = position.xy

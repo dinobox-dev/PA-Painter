@@ -65,15 +65,10 @@ pub mod project;
 pub mod types;
 
 // ── I/O & export ──
-pub mod asset_io;
 pub mod glb_export;
 
-// ── Pipeline support ──
-pub mod object_normal;
-
-// ── Mesh support ──
-pub mod stretch_map;
-pub mod uv_mask;
+// ── Mesh loading & support ──
+pub mod mesh;
 
 // ── Utilities ──
 pub mod util;

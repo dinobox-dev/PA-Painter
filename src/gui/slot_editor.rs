@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use eframe::egui;
 
-use pa_painter::asset_io;
+use pa_painter::mesh::asset_io;
 use pa_painter::types::{
     CurveKnot, EmbeddedTexture, PaintPreset, PaintValues, PresetLibrary, PressureCurve,
     TextureSource,
@@ -1035,7 +1035,7 @@ fn layer_material_index(state: &AppState, group_name: &str) -> Option<usize> {
 fn layer_material<'a>(
     state: &'a AppState,
     group_name: &str,
-) -> Option<&'a pa_painter::asset_io::MeshMaterialInfo> {
+) -> Option<&'a pa_painter::mesh::asset_io::MeshMaterialInfo> {
     let mesh = state.loaded_mesh.as_ref()?;
     let idx = mesh.groups.iter().position(|g| g.name == group_name)?;
     mesh.materials.get(idx)
@@ -1179,7 +1179,7 @@ fn show_normal_source_controls(ui: &mut egui::Ui, state: &mut AppState, layer_id
 /// Material texture dropdown (ComboBox).
 fn show_material_combo(
     ui: &mut egui::Ui,
-    loaded_mesh: &Option<Arc<pa_painter::asset_io::LoadedMesh>>,
+    loaded_mesh: &Option<Arc<pa_painter::mesh::asset_io::LoadedMesh>>,
     mat_idx: &mut usize,
     id_salt: &str,
     is_color: bool,

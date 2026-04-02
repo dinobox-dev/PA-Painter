@@ -12,14 +12,14 @@ use log::{debug, info, warn};
 
 use crate::direction_field::DirectionField;
 #[cfg(test)]
-use crate::object_normal::sample_object_normal;
-use crate::object_normal::MeshNormalData;
-use crate::stretch_map::StretchMap;
+use crate::mesh::object_normal::sample_object_normal;
+use crate::mesh::object_normal::MeshNormalData;
+use crate::mesh::stretch_map::StretchMap;
+use crate::mesh::uv_mask::UvMask;
 use crate::types::{PaintLayer, StrokeParams, StrokePath, BASE_RESOLUTION};
 use crate::util::math::rotate_vec2;
 use crate::util::rng::SeededRng;
 use crate::util::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
-use crate::uv_mask::UvMask;
 
 /// Clamp range for stretch factors in path placement.
 /// Prevents degenerate meshes from causing extreme over/under-sampling.

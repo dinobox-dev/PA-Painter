@@ -2,7 +2,7 @@
 
 use glam::Vec2;
 
-use crate::asset_io::LoadedMesh;
+use crate::mesh::asset_io::LoadedMesh;
 use crate::types::MeshGroup;
 
 /// A boolean bitmap mask in UV space.

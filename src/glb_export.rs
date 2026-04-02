@@ -11,8 +11,8 @@ use std::path::Path;
 
 use glam::Vec2;
 
-use crate::asset_io::{linear_to_srgb, LoadedMesh};
-use crate::object_normal::compute_vertex_normals;
+use crate::mesh::asset_io::{linear_to_srgb, LoadedMesh};
+use crate::mesh::object_normal::compute_vertex_normals;
 use crate::types::{Color, NormalYConvention};
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -659,7 +659,7 @@ mod tests {
     #[test]
     fn visual_sphere_preview() {
         use crate::compositing::composite_all;
-        use crate::object_normal::compute_mesh_normal_data;
+        use crate::mesh::object_normal::compute_mesh_normal_data;
         use crate::output::{
             generate_normal_map, generate_normal_map_depicted_form, normalize_height_map,
         };
@@ -824,7 +824,7 @@ mod tests {
     #[ignore]
     fn visual_transparent_sphere() {
         use crate::compositing::composite_all;
-        use crate::object_normal::compute_mesh_normal_data;
+        use crate::mesh::object_normal::compute_mesh_normal_data;
         use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::types::{
             BackgroundMode, Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings,
@@ -914,7 +914,7 @@ mod tests {
     #[ignore] // high-res benchmark
     fn visual_sphere_overscan_poisson() {
         use crate::compositing::composite_all_with_paths;
-        use crate::object_normal::compute_mesh_normal_data;
+        use crate::mesh::object_normal::compute_mesh_normal_data;
         use crate::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::path_placement::{generate_paths, PathContext};
         use crate::types::{

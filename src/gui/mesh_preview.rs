@@ -4,7 +4,7 @@ use eframe::wgpu;
 use eframe::wgpu::util::DeviceExt;
 use glam::{Mat4, Vec3};
 
-use pa_painter::asset_io::LoadedMesh;
+use pa_painter::mesh::asset_io::LoadedMesh;
 
 use super::textures::linear_to_srgb_u8;
 

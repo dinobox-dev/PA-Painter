@@ -10,9 +10,9 @@ use super::PainterApp;
 use pa_painter::compositing::{
     fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
 };
+use pa_painter::mesh::uv_mask::UvMask;
 use pa_painter::output::blend_normals_udn;
 use pa_painter::types::{BaseColorSource, Color};
-use pa_painter::uv_mask::UvMask;
 
 impl PainterApp {
     /// Hash of visible layers' base texture state (color, normal, group, order, visibility).

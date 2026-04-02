@@ -9,9 +9,10 @@ use glam::Vec2;
 use log::{debug, info};
 use rayon::prelude::*;
 
-use crate::object_normal::{try_sample_object_normal, MeshNormalData};
+use crate::mesh::object_normal::{try_sample_object_normal, MeshNormalData};
+use crate::mesh::stretch_map::StretchMap;
+use crate::mesh::uv_mask::UvMask;
 use crate::path_placement::{generate_paths, PathContext};
-use crate::stretch_map::StretchMap;
 use crate::stroke_height::{generate_stroke_height, StrokeHeightResult};
 use crate::types::{
     BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal,
@@ -22,7 +23,6 @@ use crate::util::math::{lerp, perpendicular, smoothstep};
 use crate::util::rng::SeededRng;
 use crate::util::stroke_color::ColorTextureRef;
 use crate::util::stroke_color::{compute_stroke_color, sample_bilinear};
-use crate::uv_mask::UvMask;
 
 /// Density threshold at which a stroke pixel becomes fully opaque.
 /// Below this, opacity ramps smoothly from 0 (via smoothstep).
@@ -187,7 +187,7 @@ impl LayerMaps {
 /// Needs access to the mesh's material list for `MeshMaterial` variants.
 pub fn resolve_base_color(
     source: &TextureSource,
-    materials: &[crate::asset_io::MeshMaterialInfo],
+    materials: &[crate::mesh::asset_io::MeshMaterialInfo],
 ) -> LayerBaseColor {
     use crate::types::{checkerboard_warning_texture, pixels_to_colors};
 
@@ -241,7 +241,7 @@ pub fn resolve_base_color(
 /// Resolve a [`TextureSource`] into owned base normal data for UDN blending.
 pub fn resolve_base_normal(
     source: &TextureSource,
-    materials: &[crate::asset_io::MeshMaterialInfo],
+    materials: &[crate::mesh::asset_io::MeshMaterialInfo],
 ) -> LayerBaseNormal {
     match source {
         TextureSource::None | TextureSource::Solid(_) => LayerBaseNormal::none(),
@@ -2130,7 +2130,7 @@ mod tests {
     /// masked region, regardless of layer order.
     #[test]
     fn base_color_specific_group_overrides_all() {
-        use crate::uv_mask::UvMask;
+        use crate::mesh::uv_mask::UvMask;
 
         let res = 8u32;
         let size = (res * res) as usize;

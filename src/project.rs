@@ -19,15 +19,15 @@ use serde::{Deserialize, Serialize};
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
-use crate::asset_io::{
+use crate::mesh::asset_io::{
     decode_linear_png_bytes, decode_srgb_png_bytes, encode_pixels_as_linear_png,
     encode_pixels_as_srgb_png, load_mesh_from_bytes_with_aux, LoadedMesh, ObjAuxFiles,
 };
+use crate::mesh::uv_mask::UvMask;
 use crate::types::{
     EmbeddedTexture, ExportSettings, Layer, OutputSettings, PaintLayer, PresetLibrary, StrokePath,
     TextureSource,
 };
-use crate::uv_mask::UvMask;
 
 /// Return the current UTC time as an ISO 8601 string (e.g. `"2026-02-27T14:30:00Z"`).
 pub fn utc_now_iso8601() -> String {
@@ -930,7 +930,7 @@ mod tests {
     /// Regression: .papr round-trip with OBJ mesh must preserve group names and materials.
     #[test]
     fn round_trip_obj_aux_groups() {
-        use crate::asset_io::{collect_obj_aux_files, load_mesh};
+        use crate::mesh::asset_io::{collect_obj_aux_files, load_mesh};
 
         let obj_path = crate::test_fixtures_dir().join("usemtl_disambiguate.obj");
 
