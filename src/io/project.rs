@@ -25,7 +25,7 @@ use crate::mesh::asset_io::{
 };
 use crate::mesh::uv_mask::UvMask;
 use crate::types::{
-    EmbeddedTexture, ExportSettings, Layer, OutputSettings, PaintLayer, PresetLibrary, StrokePath,
+    EmbeddedTexture, ExportSettings, Layer, OutputSettings, PaintLayer, PresetLibrary,
     TextureSource,
 };
 
@@ -115,14 +115,6 @@ struct ProjectData {
     export_settings: ExportSettings,
 }
 
-/// Snapshot of the state that was used to generate the cached paths.
-/// Stores per-layer path_hash() values so that only path-affecting
-/// field changes invalidate the cache.
-#[derive(Debug)]
-struct PathCacheKey {
-    hashes: Vec<u64>,
-}
-
 /// Full project state (in-memory representation).
 #[derive(Debug)]
 pub struct Project {
@@ -138,11 +130,6 @@ pub struct Project {
     /// Auxiliary OBJ files (MTL + textures). Only relevant for OBJ format meshes.
     /// Stored in .papr so the full material pipeline can be replayed on load.
     pub obj_aux: Option<ObjAuxFiles>,
-    /// Runtime path cache — one entry per layer in order-sorted sequence.
-    /// Not serialized to disk.
-    pub cached_paths: Option<Vec<Vec<StrokePath>>>,
-    /// Key used to validate `cached_paths` (private).
-    path_cache_key: Option<PathCacheKey>,
 }
 
 impl Default for Project {
@@ -165,8 +152,6 @@ impl Default for Project {
             export_settings: ExportSettings::default(),
             mesh_bytes: None,
             obj_aux: None,
-            cached_paths: None,
-            path_cache_key: None,
         }
     }
 }
@@ -208,34 +193,6 @@ impl Project {
                 }
             })
             .collect()
-    }
-
-    /// Return cached paths if they are still valid for the current layers
-    /// and base color. Returns `None` on cache miss.
-    pub fn cached_paths_if_valid(&self) -> Option<&[Vec<StrokePath>]> {
-        let key = self.path_cache_key.as_ref()?;
-        let paths = self.cached_paths.as_ref()?;
-        let current: Vec<u64> = self.layers.iter().map(|l| l.path_hash()).collect();
-        if key.hashes == current {
-            Some(paths.as_slice())
-        } else {
-            None
-        }
-    }
-
-    /// Store newly generated paths in the cache, along with a snapshot of the
-    /// current project state that produced them.
-    pub fn set_cached_paths(&mut self, paths: Vec<Vec<StrokePath>>) {
-        self.path_cache_key = Some(PathCacheKey {
-            hashes: self.layers.iter().map(|l| l.path_hash()).collect(),
-        });
-        self.cached_paths = Some(paths);
-    }
-
-    /// Explicitly invalidate the path cache.
-    pub fn invalidate_path_cache(&mut self) {
-        self.cached_paths = None;
-        self.path_cache_key = None;
     }
 }
 
@@ -482,8 +439,6 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
         export_settings: data.export_settings,
         mesh_bytes,
         obj_aux,
-        cached_paths: None,
-        path_cache_key: None,
     };
 
     Ok(LoadResult {
@@ -645,8 +600,6 @@ mod tests {
             export_settings: ExportSettings::default(),
             mesh_bytes: None,
             obj_aux: None,
-            cached_paths: None,
-            path_cache_key: None,
         }
     }
 
@@ -668,8 +621,6 @@ mod tests {
             export_settings: ExportSettings::default(),
             mesh_bytes: None,
             obj_aux: None,
-            cached_paths: None,
-            path_cache_key: None,
         }
     }
 
