@@ -176,7 +176,7 @@ impl LayerMaps {
             gradient_x: vec![0.0f32; size],
             gradient_y: vec![0.0f32; size],
             paint_load: vec![0.0f32; size],
-            stroke_time_order: vec![0.0f32; size],
+            stroke_time_order: vec![f32::MAX; size],
             stroke_time_arc: vec![0.0f32; size],
             resolution,
         }
@@ -2141,7 +2141,7 @@ mod tests {
             gradient_x: vec![0.0; size],
             gradient_y: vec![0.0; size],
             paint_load: vec![0.0; size],
-            stroke_time_order: vec![0.0; size],
+            stroke_time_order: vec![f32::MAX; size],
             stroke_time_arc: vec![0.0; size],
             resolution: res,
         };
@@ -2206,7 +2206,7 @@ mod tests {
             gradient_x: vec![0.0; size],
             gradient_y: vec![0.0; size],
             paint_load: vec![0.0; size],
-            stroke_time_order: vec![0.0; size],
+            stroke_time_order: vec![f32::MAX; size],
             stroke_time_arc: vec![0.0; size],
             resolution: res,
         };
