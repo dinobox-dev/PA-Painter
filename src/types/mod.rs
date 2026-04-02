@@ -194,10 +194,9 @@ pub struct EmbeddedTexture {
     pub pixels: Arc<Vec<[f32; 4]>>,
     pub width: u32,
     pub height: u32,
-    /// Hash of pixel data, computed once on load. Included in serialization
-    /// so that `render_hash()` and `PartialEq` can detect content changes
-    /// without inspecting the full pixel buffer.
-    #[serde(default)]
+    /// Hash of pixel data, computed on load. Not persisted — always
+    /// recomputed from the decoded pixel buffer when a project is loaded.
+    #[serde(skip)]
     pub content_hash: u64,
 }
 
