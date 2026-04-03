@@ -11,6 +11,17 @@ use super::{LoadedMesh, MeshError, MeshMaterialInfo};
 use crate::types::MeshGroup;
 
 // ---------------------------------------------------------------------------
+// Path helpers
+// ---------------------------------------------------------------------------
+
+/// Normalize Windows backslash path separators to forward slashes.
+/// MTL files exported from Windows tools (3ds Max, etc.) use `\` separators
+/// which are not recognised as path separators on macOS/Linux.
+fn normalize_tex_path(p: &str) -> String {
+    p.replace('\\', "/")
+}
+
+// ---------------------------------------------------------------------------
 // OBJ auxiliary files
 // ---------------------------------------------------------------------------
 
@@ -59,12 +70,13 @@ pub fn collect_obj_aux_files(obj_path: &Path) -> Option<ObjAuxFiles> {
             .map(|rest| rest.trim());
 
         if let Some(name) = tex_name {
-            if name.is_empty() || !seen.insert(name.to_string()) {
+            let name = normalize_tex_path(name);
+            if name.is_empty() || !seen.insert(name.clone()) {
                 continue;
             }
             let tex_path = obj_dir
-                .map(|d| d.join(name))
-                .unwrap_or_else(|| PathBuf::from(name));
+                .map(|d| d.join(&name))
+                .unwrap_or_else(|| PathBuf::from(&name));
             match std::fs::read(&tex_path) {
                 Ok(bytes) => texture_files.push((name.to_string(), bytes)),
                 Err(e) => warn!(
@@ -369,10 +381,11 @@ fn mtl_to_material_info(
     ];
 
     let base_color_texture = mat.diffuse_texture.as_ref().and_then(|tex_path| {
+        let tex_path = normalize_tex_path(tex_path);
         let full = if let Some(dir) = obj_dir {
-            dir.join(tex_path)
+            dir.join(&tex_path)
         } else {
-            PathBuf::from(tex_path)
+            PathBuf::from(&tex_path)
         };
         match load_texture(&full) {
             Ok(tex) => Some(tex),
@@ -387,10 +400,11 @@ fn mtl_to_material_info(
     });
 
     let normal_texture = mat.normal_texture.as_ref().and_then(|tex_path| {
+        let tex_path = normalize_tex_path(tex_path);
         let full = if let Some(dir) = obj_dir {
-            dir.join(tex_path)
+            dir.join(&tex_path)
         } else {
-            PathBuf::from(tex_path)
+            PathBuf::from(&tex_path)
         };
         match load_texture(&full) {
             Ok(tex) => Some(tex),
