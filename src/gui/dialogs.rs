@@ -343,9 +343,19 @@ impl PainterApp {
                                         ui.checkbox(&mut popup.layer_enabled[i], "");
                                     }
                                     if enabled {
-                                        ui.strong(&lm.name);
+                                        ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(&lm.name).strong(),
+                                            )
+                                            .truncate(),
+                                        );
                                     } else {
-                                        ui.colored_label(weak, &lm.name);
+                                        ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(&lm.name).color(weak),
+                                            )
+                                            .truncate(),
+                                        );
                                     }
 
                                     // Color + Normal pinned to right
@@ -730,7 +740,7 @@ fn source_label_with_chip(
         TextureSource::File(Some(tex)) => {
             ui.spacing_mut().item_spacing.x = 2.0;
             ui.colored_label(text_color, FOLDER_OPEN);
-            ui.colored_label(text_color, &tex.label);
+            ui.add(egui::Label::new(egui::RichText::new(&tex.label).color(text_color)).truncate());
         }
         TextureSource::File(None) => {
             ui.colored_label(weak, "(no file)");
