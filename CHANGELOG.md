@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.3.0]
+## [0.3.0] — 2026-04-03
 
 ### Added
 
@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Reorganized File menu: clear separator groups for create / open / save+export
 - Moved Force Full-Res from File to Edit menu
 - Force Full-Res disabled when no mesh is loaded
+- Built-in presets cached with OnceLock instead of re-allocating on every access
+
+### Fixed
+
+- Windows backslash paths in OBJ/MTL texture references not resolving on macOS/Linux
+- Long mesh names and texture file paths overflowing the mesh load popup
+- Stroke drawing animation order incorrect on unpainted pixels due to inconsistent time-order sentinel between layer and global maps
 
 ## [0.2.4] — 2026-03-31
 
