@@ -4,7 +4,6 @@
 //! paint layers into a single [`GlobalMaps`] struct, respecting layer ordering and masks.
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
 
 use glam::Vec2;
 use log::{debug, info};
@@ -16,8 +15,8 @@ use crate::mesh::uv_mask::DistanceField;
 use crate::pipeline::path_placement::{generate_paths, PathContext};
 use crate::pipeline::stroke_height::{generate_stroke_height, StrokeHeightResult};
 use crate::types::{
-    BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerBaseNormal,
-    LayerCompositeSettings, NormalMode, OutputSettings, PaintLayer, StrokePath, TextureSource,
+    BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerCompositeSettings, NormalMode,
+    OutputSettings, PaintLayer, StrokePath,
 };
 use crate::util::brush_profile::{generate_brush_profile, jitter_brush_profile};
 use crate::util::math::{lerp, perpendicular, smoothstep};
@@ -209,103 +208,9 @@ impl LayerMaps {
     }
 }
 
-/// Resolve a [`TextureSource`] into owned base color data for compositing.
-///
-/// Needs access to the mesh's material list for `MeshMaterial` variants.
-pub fn resolve_base_color(
-    source: &TextureSource,
-    materials: &[crate::mesh::asset_io::MeshMaterialInfo],
-) -> LayerBaseColor {
-    use crate::types::{checkerboard_warning_texture, pixels_to_colors};
-
-    match source {
-        TextureSource::None => LayerBaseColor::solid(Color::WHITE),
-        TextureSource::Solid(rgb) => LayerBaseColor::solid(Color::rgb(rgb[0], rgb[1], rgb[2])),
-        TextureSource::MeshMaterial(idx) => {
-            if let Some(mat) = materials.get(*idx) {
-                if let Some(ref tex) = mat.base_color_texture {
-                    let colors = pixels_to_colors(&tex.pixels);
-                    LayerBaseColor {
-                        solid_color: Color::from(mat.base_color_factor),
-                        texture: Some(colors),
-                        tex_width: tex.width,
-                        tex_height: tex.height,
-                    }
-                } else {
-                    let f = mat.base_color_factor;
-                    LayerBaseColor::solid(Color::rgb(f[0], f[1], f[2]))
-                }
-            } else {
-                LayerBaseColor::solid(Color::WHITE)
-            }
-        }
-        TextureSource::File(Some(tex)) => {
-            if tex.pixels.is_empty() {
-                LayerBaseColor::solid(Color::WHITE)
-            } else {
-                let colors = pixels_to_colors(&tex.pixels);
-                LayerBaseColor {
-                    solid_color: Color::WHITE,
-                    texture: Some(colors),
-                    tex_width: tex.width,
-                    tex_height: tex.height,
-                }
-            }
-        }
-        TextureSource::File(None) => {
-            static CHECKERBOARD: OnceLock<(crate::types::EmbeddedTexture, Vec<Color>)> =
-                OnceLock::new();
-            let (cb, colors) = CHECKERBOARD.get_or_init(|| {
-                let cb = checkerboard_warning_texture();
-                let colors = pixels_to_colors(&cb.pixels);
-                (cb, colors)
-            });
-            LayerBaseColor {
-                solid_color: Color::rgb(1.0, 0.0, 1.0),
-                texture: Some(colors.clone()),
-                tex_width: cb.width,
-                tex_height: cb.height,
-            }
-        }
-    }
-}
-
-/// Resolve a [`TextureSource`] into owned base normal data for UDN blending.
-pub fn resolve_base_normal(
-    source: &TextureSource,
-    materials: &[crate::mesh::asset_io::MeshMaterialInfo],
-) -> LayerBaseNormal {
-    match source {
-        TextureSource::None | TextureSource::Solid(_) => LayerBaseNormal::none(),
-        TextureSource::MeshMaterial(idx) => {
-            if let Some(mat) = materials.get(*idx) {
-                if let Some(ref tex) = mat.normal_texture {
-                    LayerBaseNormal {
-                        pixels: Some(tex.pixels.clone()),
-                        width: tex.width,
-                        height: tex.height,
-                    }
-                } else {
-                    LayerBaseNormal::none()
-                }
-            } else {
-                LayerBaseNormal::none()
-            }
-        }
-        TextureSource::File(Some(tex)) => {
-            if tex.pixels.is_empty() {
-                LayerBaseNormal::none()
-            } else {
-                LayerBaseNormal {
-                    pixels: Some(tex.pixels.as_ref().clone()),
-                    width: tex.width,
-                    height: tex.height,
-                }
-            }
-        }
-        TextureSource::File(None) => LayerBaseNormal::none(),
-    }
-}
+// ── Material resolution (TextureSource → base color / normal) ──
+mod material_resolve;
+pub use material_resolve::{resolve_base_color, resolve_base_normal};
 
 /// Clip threshold (pixels) for distance-field-based mask checks.
 /// Matches the legacy `dilate(2)` behaviour: island boundary + 2 px of seam cover.
