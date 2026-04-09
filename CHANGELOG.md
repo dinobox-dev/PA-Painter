@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- UV island boundary density drop: seeds near island edges were filtered by the dilated bitmap mask, eliminating overscan and causing sparse strokes at island boundaries
+- Brush rasterization bleeding into adjacent UV islands: strokes near island edges could paint pixels belonging to a different mesh group
+
+### Changed
+
+- UV mask pipeline replaced with Manhattan distance field: a single `DistanceField` per layer (O(n) to compute) replaces the dual bitmap mask approach, enabling both overscan seed generation (large threshold) and post-render clipping (2 px threshold) from one structure
+- `UvMask::dilate()` no longer used in the rendering pipeline (retained for tests and external use)
+
+### Breaking
+
+- `CompositeAllInput.masks` → `dist_fields: &[Option<&DistanceField>]`
+- `RenderLayerInput.mask` → `dist_field: Option<&DistanceField>`
+- `CompositeLayerInput.mask` → `dist_field: Option<&DistanceField>`
+- `PathContext.mask` → `dist_field: Option<&DistanceField>`
+- `generate_all_paths`, `finalize_layers`, `fill_base_color_region`, `blend_normals_udn`: mask parameter replaced with distance field
+- `Project::build_masks` → `Project::build_dist_fields`
+- Added: `DistanceField`, `UvMask::distance_field()`, `LayerMaps::clip_to_dist_field()`, `CLIP_DISTANCE_PX`
+
 ## [0.3.0] — 2026-04-03
 
 ### Added
