@@ -329,10 +329,10 @@ fn generate_paths_determinism() {
 
     assert_eq!(paths1.len(), paths2.len());
     for (a, b) in paths1.iter().zip(paths2.iter()) {
-        assert_eq!(a.points.len(), b.points.len());
+        assert_eq!(a.points().len(), b.points().len());
         assert_eq!(a.stroke_id, b.stroke_id);
         assert_eq!(a.layer_index, b.layer_index);
-        for (pa, pb) in a.points.iter().zip(b.points.iter()) {
+        for (pa, pb) in a.points().iter().zip(b.points().iter()) {
             assert_eq!(pa.x, pb.x);
             assert_eq!(pa.y, pb.y);
         }
@@ -340,7 +340,7 @@ fn generate_paths_determinism() {
 
     // Verify all path points stay within UV [0,1] bounds
     for path in &paths1 {
-        for point in &path.points {
+        for point in path.points() {
             assert!(
                 point.x >= 0.0 && point.x <= 1.0 && point.y >= 0.0 && point.y <= 1.0,
                 "path point ({:.4}, {:.4}) is outside UV [0,1] bounds",
@@ -359,12 +359,12 @@ fn generate_paths_sorted_by_y() {
     assert!(!paths.is_empty(), "should generate some paths");
     for i in 1..paths.len() {
         assert!(
-            paths[i].points[0].y >= paths[i - 1].points[0].y,
+            paths[i].points()[0].y >= paths[i - 1].points()[0].y,
             "paths should be sorted by y: path[{}].y={:.4} < path[{}].y={:.4}",
             i,
-            paths[i].points[0].y,
+            paths[i].points()[0].y,
             i - 1,
-            paths[i - 1].points[0].y
+            paths[i - 1].points()[0].y
         );
     }
 }
@@ -391,7 +391,7 @@ fn area_coverage_90_percent() {
     let r = (brush_radius_uv * resolution as f32).ceil() as i32;
 
     for path in &paths {
-        for point in &path.points {
+        for point in path.points() {
             let px = (point.x * resolution as f32) as i32;
             let py = (point.y * resolution as f32) as i32;
             for dy in -r..=r {
@@ -493,7 +493,7 @@ fn generate_paths_with_partial_dist_field() {
 
     // All path points should be in [0, 1] (clipped to UV)
     for path in &paths {
-        for &pt in &path.points {
+        for &pt in path.points() {
             assert!(
                 pt.x >= 0.0 && pt.x <= 1.0 && pt.y >= 0.0 && pt.y <= 1.0,
                 "path point ({:.3}, {:.3}) outside UV [0,1]",
@@ -616,7 +616,7 @@ fn draw_paths_to_png(paths: &[StrokePath], resolution: u32, filename: &str) {
         let hue = (idx as f32 * 0.618034) % 1.0;
         let (r, g, b) = hue_to_rgb(hue);
 
-        for point in &path.points {
+        for point in path.points() {
             let px = (point.x * resolution as f32) as i32;
             let py = (point.y * resolution as f32) as i32;
             for dy in -1..=1 {
@@ -748,7 +748,7 @@ fn draw_paths_on_texture(
     for (idx, path) in paths.iter().enumerate() {
         let hue = (idx as f32 * 0.618034) % 1.0;
         let (r, g, b) = hue_to_rgb(hue);
-        for point in &path.points {
+        for point in path.points() {
             let px = (point.x * resolution as f32) as i32;
             let py = (point.y * resolution as f32) as i32;
             if px >= 0 && px < resolution as i32 && py >= 0 && py < resolution as i32 {
@@ -1401,7 +1401,7 @@ fn draw_paths_on_normals(
     for (idx, path) in paths.iter().enumerate() {
         let hue = (idx as f32 * 0.618034) % 1.0;
         let (r, g, b) = hue_to_rgb(hue);
-        for point in &path.points {
+        for point in path.points() {
             let px = (point.x * resolution as f32) as i32;
             let py = (point.y * resolution as f32) as i32;
             for dy in -1..=1 {
@@ -1609,7 +1609,7 @@ fn visual_density_comparison() {
         for (idx, path) in paths.iter().enumerate() {
             let hue = (idx as f32 * 0.618034) % 1.0;
             let (r, g, b) = hue_to_rgb(hue);
-            for point in &path.points {
+            for point in path.points() {
                 let px = (point.x * resolution as f32) as i32;
                 let py = (point.y * resolution as f32) as i32;
                 for dy in -1..=1 {

@@ -765,7 +765,7 @@ impl PresetLibrary {
 /// A stroke path: ordered list of UV-space points with cached arc-length table.
 #[derive(Debug, Clone)]
 pub struct StrokePath {
-    pub points: Vec<Vec2>,
+    points: Vec<Vec2>,
     pub layer_index: u32,
     pub stroke_id: u32,
     cumulative_lengths: Vec<f32>,
@@ -793,6 +793,11 @@ impl StrokePath {
     /// Total arc length of the path (O(1), cached).
     pub fn arc_length(&self) -> f32 {
         self.total_length
+    }
+
+    /// The points along this path (UV-space).
+    pub fn points(&self) -> &[Vec2] {
+        &self.points
     }
 
     /// Cached cumulative arc lengths (one entry per point, starting at 0.0).

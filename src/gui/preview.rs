@@ -358,7 +358,7 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
     // Simplify paths for overlay rendering: cap total points to keep UI responsive.
     // At 100K points, 7000 paths get ~14 pts each (~70px spacing) — enough for preview.
     const OVERLAY_POINT_BUDGET: usize = 100_000;
-    let original_total_points: usize = paths.iter().map(|p| p.points.len()).sum();
+    let original_total_points: usize = paths.iter().map(|p| p.points().len()).sum();
     let original_total_segments = original_total_points.saturating_sub(paths.len());
     let point_stride = if original_total_points > OVERLAY_POINT_BUDGET {
         original_total_points.div_ceil(OVERLAY_POINT_BUDGET)
@@ -369,22 +369,25 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
     let path_points: Vec<Vec<[f32; 2]>> = paths
         .iter()
         .map(|p| {
-            if point_stride > 1 && p.points.len() > 2 {
+            if point_stride > 1 && p.points().len() > 2 {
                 let mut pts: Vec<[f32; 2]> = p
-                    .points
+                    .points()
                     .iter()
                     .step_by(point_stride)
                     .map(|v| [v.x, v.y])
                     .collect();
                 // Always include the last point for path continuity
-                let last = p.points.last().expect("path always has at least one point");
+                let last = p
+                    .points()
+                    .last()
+                    .expect("path always has at least one point");
                 let last_pt = [last.x, last.y];
                 if pts.last() != Some(&last_pt) {
                     pts.push(last_pt);
                 }
                 pts
             } else {
-                p.points.iter().map(|v| [v.x, v.y]).collect()
+                p.points().iter().map(|v| [v.x, v.y]).collect()
             }
         })
         .collect();

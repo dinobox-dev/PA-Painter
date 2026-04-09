@@ -313,7 +313,7 @@ pub fn composite_stroke(
     let local_h = local_height.height;
     let res_f = res as f32;
 
-    let points = &path.points;
+    let points = path.points();
     if points.len() < 2 || local_w < 2 || local_h < 2 {
         return;
     }
@@ -901,17 +901,17 @@ pub fn composite_layer(global: &mut GlobalMaps, input: &CompositeLayerInput<'_>)
                 if let Some(n) = try_sample_object_normal(nd, mid) {
                     return Some([n.x, n.y, n.z]);
                 }
-                let len = path.points.len();
-                let mid_idx = len / 2;
+                let pts = path.points();
+                let mid_idx = pts.len() / 2;
                 // Search midpoint → start
-                for i in (0..mid_idx).rev() {
-                    if let Some(n) = try_sample_object_normal(nd, path.points[i]) {
+                for &pt in pts[..mid_idx].iter().rev() {
+                    if let Some(n) = try_sample_object_normal(nd, pt) {
                         return Some([n.x, n.y, n.z]);
                     }
                 }
                 // Search midpoint → end
-                for i in mid_idx..len {
-                    if let Some(n) = try_sample_object_normal(nd, path.points[i]) {
+                for &pt in &pts[mid_idx..] {
+                    if let Some(n) = try_sample_object_normal(nd, pt) {
                         return Some([n.x, n.y, n.z]);
                     }
                 }
@@ -930,7 +930,7 @@ pub fn composite_layer(global: &mut GlobalMaps, input: &CompositeLayerInput<'_>)
             // Use stretch-weighted arc length when available so that height
             // map resolution matches 3D stroke length, not UV length.
             let arc_len = match stretch_map {
-                Some(sm) => sm.weighted_arc_length(&path.points),
+                Some(sm) => sm.weighted_arc_length(path.points()),
                 None => path.arc_length(),
             };
             let stroke_length_px = (arc_len * resolution as f32).ceil() as usize;
