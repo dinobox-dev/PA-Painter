@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use pa_painter::io::project::{save_project, utc_now_iso8601};
-use pa_painter::mesh::asset_io::load_mesh;
+use pa_painter::mesh::asset_io::{load_mesh, LoadedMesh};
 use pa_painter::types::{PaintValues, TextureSource};
 
 use super::mesh_loading::build_mesh_load_popup;
@@ -98,20 +98,7 @@ pub fn new_project(state: &mut AppState, _ctx: &eframe::egui::Context) {
         }
     };
 
-    let filename = mesh_path
-        .file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let format = mesh_path
-        .extension()
-        .map(|e| e.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let mesh_bytes = std::fs::read(&mesh_path).ok();
-
-    state.mesh_load_popup = Some(build_mesh_load_popup(
-        mesh, &filename, &format, mesh_path, mesh_bytes, false,
-    ));
-    state.status_message = format!("New project — {}", filename);
+    open_mesh_popup(state, mesh, mesh_path, false);
 }
 
 /// Reload mesh from the same path and diff groups against existing layers.
@@ -240,6 +227,10 @@ pub fn replace_mesh(state: &mut AppState) {
         }
     };
 
+    open_mesh_popup(state, mesh, path, true);
+}
+
+fn open_mesh_popup(state: &mut AppState, mesh: LoadedMesh, path: PathBuf, is_replace: bool) {
     let filename = path
         .file_name()
         .map(|f| f.to_string_lossy().to_string())
@@ -249,11 +240,15 @@ pub fn replace_mesh(state: &mut AppState) {
         .map(|e| e.to_string_lossy().to_string())
         .unwrap_or_default();
     let mesh_bytes = std::fs::read(&path).ok();
-
+    let label = if is_replace {
+        "Replace mesh"
+    } else {
+        "New project"
+    };
     state.mesh_load_popup = Some(build_mesh_load_popup(
-        mesh, &filename, &format, path, mesh_bytes, true,
+        mesh, &filename, &format, path, mesh_bytes, is_replace,
     ));
-    state.status_message = format!("Replace mesh — {}", filename);
+    state.status_message = format!("{label} — {filename}");
 }
 
 fn do_save(state: &mut AppState, path: PathBuf) {
