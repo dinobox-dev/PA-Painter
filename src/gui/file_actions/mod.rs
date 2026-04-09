@@ -50,6 +50,7 @@ pub(super) fn apply_mesh(
         state.textures.stroke_id = None;
         state.generated = None;
         state.path_overlay.clear();
+        state.generation.path_cache.clear();
         state.auto_gen_suppressed = false;
     }
 
@@ -85,6 +86,7 @@ pub(super) fn apply_loaded_mesh(state: &mut AppState, mesh: LoadedMesh) -> bool 
         state.textures.stroke_id = None;
         state.generated = None;
         state.path_overlay.clear();
+        state.generation.path_cache.clear();
         state.auto_gen_suppressed = false;
     }
 
