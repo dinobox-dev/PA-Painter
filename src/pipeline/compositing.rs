@@ -390,7 +390,6 @@ pub fn composite_stroke(
         return;
     }
 
-    let stroke_length_px = (total_len * res_f).ceil() as usize;
     let half_lateral_uv = local_h as f32 / 2.0 / res_f;
     let base_pad = 0.5 / res_f;
 
@@ -473,7 +472,7 @@ pub fn composite_stroke(
 
                 // Local frame coordinates
                 let t = (accum + proj) / total_len;
-                let lx_f = t * stroke_length_px as f32;
+                let lx_f = t * local_w as f32;
                 let ly_f = lateral * res_f + local_h as f32 / 2.0;
 
                 if lx_f < 0.0
