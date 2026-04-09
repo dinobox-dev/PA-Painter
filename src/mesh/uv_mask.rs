@@ -143,9 +143,9 @@ impl UvMask {
         let mut dt = vec![inf; n];
 
         // Initialise: 0 for true pixels, inf for false
-        for i in 0..n {
-            if self.data[i] {
-                dt[i] = 0.0;
+        for (d, &inside) in dt.iter_mut().zip(&self.data) {
+            if inside {
+                *d = 0.0;
             }
         }
 
