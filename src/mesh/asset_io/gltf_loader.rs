@@ -1,6 +1,6 @@
 //! glTF/GLB mesh loading.
 
-use glam::{Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 
 use super::{srgb_to_linear, LoadedMesh, LoadedTexture, MeshError, MeshMaterialInfo};
 use crate::types::MeshGroup;
@@ -21,6 +21,31 @@ pub(super) fn load_gltf_from_bytes(bytes: &[u8]) -> Result<LoadedMesh, MeshError
     build_mesh_from_gltf(document, buffers, images)
 }
 
+/// Collect all (world_transform, mesh_index) pairs by walking the scene node tree.
+/// This ensures node transforms (translation/rotation/scale) are applied to vertices.
+fn collect_mesh_instances(document: &gltf::Document) -> Vec<(Mat4, usize)> {
+    let mut result = Vec::new();
+    for scene in document.scenes() {
+        for node in scene.nodes() {
+            collect_node_meshes(&node, Mat4::IDENTITY, &mut result);
+        }
+    }
+    result
+}
+
+fn collect_node_meshes(node: &gltf::Node, parent_transform: Mat4, result: &mut Vec<(Mat4, usize)>) {
+    let local = Mat4::from_cols_array_2d(&node.transform().matrix());
+    let world = parent_transform * local;
+
+    if let Some(mesh) = node.mesh() {
+        result.push((world, mesh.index()));
+    }
+
+    for child in node.children() {
+        collect_node_meshes(&child, world, result);
+    }
+}
+
 fn build_mesh_from_gltf(
     document: gltf::Document,
     buffers: Vec<gltf::buffer::Data>,
@@ -33,14 +58,30 @@ fn build_mesh_from_gltf(
     let mut materials = Vec::new();
     let mut prim_idx = 0u32;
 
-    for mesh in document.meshes() {
+    // Walk scene nodes to get meshes with their world transforms.
+    // Falls back to all meshes with identity if there is no scene hierarchy.
+    let mesh_instances = {
+        let from_nodes = collect_mesh_instances(&document);
+        if from_nodes.is_empty() {
+            document
+                .meshes()
+                .map(|m| (Mat4::IDENTITY, m.index()))
+                .collect()
+        } else {
+            from_nodes
+        }
+    };
+
+    for (world_transform, mesh_idx) in &mesh_instances {
+        let mesh = document.meshes().nth(*mesh_idx).unwrap();
+
         for primitive in mesh.primitives() {
             let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
 
             let prim_positions: Vec<Vec3> = reader
                 .read_positions()
                 .ok_or_else(|| MeshError::ParseError("No position data".to_string()))?
-                .map(Vec3::from)
+                .map(|p| world_transform.transform_point3(Vec3::from(p)))
                 .collect();
 
             let prim_uvs: Vec<Vec2> = reader
@@ -268,5 +309,33 @@ mod tests {
         assert_eq!(glb.uvs.len(), gltf.uvs.len());
         assert_eq!(glb.indices.len(), gltf.indices.len());
         assert_eq!(glb.indices, gltf.indices);
+    }
+
+    #[test]
+    fn node_transforms_applied_to_positions() {
+        // two_nodes_translated.glb: two identical triangles, but the second
+        // node has translation [10, 0, 0]. Without applying transforms both
+        // triangles would overlap at the origin.
+        let mesh = load_mesh(&fixtures_dir().join("two_nodes_translated.glb")).unwrap();
+
+        assert_eq!(mesh.positions.len(), 6, "two triangles × 3 vertices");
+        assert_eq!(mesh.groups.len(), 2);
+
+        // First triangle: at origin (x in 0..1)
+        let first_max_x = mesh.positions[0..3]
+            .iter()
+            .map(|p| p.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(first_max_x <= 1.0 + 0.01, "first tri should be near origin");
+
+        // Second triangle: translated by x+10 (x in 10..11)
+        let second_min_x = mesh.positions[3..6]
+            .iter()
+            .map(|p| p.x)
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            second_min_x >= 10.0 - 0.01,
+            "second tri should be translated to x=10, got min_x={second_min_x}"
+        );
     }
 }
