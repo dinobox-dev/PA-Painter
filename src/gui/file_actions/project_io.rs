@@ -256,6 +256,21 @@ pub fn replace_mesh(state: &mut AppState) {
     state.status_message = format!("Replace mesh — {}", filename);
 }
 
+fn do_save(state: &mut AppState, path: PathBuf) {
+    state.project.manifest.modified_at = utc_now_iso8601();
+    let editor_json = serde_json::to_vec_pretty(&state.extract_editor_state()).ok();
+    match save_project(&state.project, &path, editor_json.as_deref()) {
+        Ok(()) => {
+            state.project_path = Some(path);
+            state.dirty = false;
+            state.status_message = "Project saved".to_string();
+        }
+        Err(e) => {
+            state.status_message = format!("Save failed: {e:?}");
+        }
+    }
+}
+
 /// Save the project to its current path, or show a Save As dialog.
 pub fn save_project_action(state: &mut AppState) {
     let path = if let Some(ref path) = state.project_path {
@@ -275,19 +290,7 @@ pub fn save_project_action(state: &mut AppState) {
         path
     };
 
-    state.project.manifest.modified_at = utc_now_iso8601();
-
-    let editor_json = serde_json::to_vec_pretty(&state.extract_editor_state()).ok();
-    match save_project(&state.project, &path, editor_json.as_deref()) {
-        Ok(()) => {
-            state.project_path = Some(path);
-            state.dirty = false;
-            state.status_message = "Project saved".to_string();
-        }
-        Err(e) => {
-            state.status_message = format!("Save failed: {e:?}");
-        }
-    }
+    do_save(state, path);
 }
 
 /// Always show a Save As dialog, regardless of whether a project path exists.
@@ -311,17 +314,5 @@ pub fn save_project_as_action(state: &mut AppState) {
         path.set_extension("papr");
     }
 
-    state.project.manifest.modified_at = utc_now_iso8601();
-
-    let editor_json = serde_json::to_vec_pretty(&state.extract_editor_state()).ok();
-    match save_project(&state.project, &path, editor_json.as_deref()) {
-        Ok(()) => {
-            state.project_path = Some(path);
-            state.dirty = false;
-            state.status_message = "Project saved".to_string();
-        }
-        Err(e) => {
-            state.status_message = format!("Save failed: {e:?}");
-        }
-    }
+    do_save(state, path);
 }
