@@ -7,7 +7,7 @@ use super::pipeline::collect_layer_refs;
 use super::state;
 use super::PainterApp;
 
-use pa_painter::mesh::uv_mask::UvMask;
+use pa_painter::mesh::uv_mask::{DistanceField, UvMask};
 use pa_painter::pipeline::compositing::{
     fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
 };
@@ -102,8 +102,9 @@ impl PainterApp {
             .collect();
         sorted_layers.sort_by_key(|l| l.order);
 
-        // Build UV masks
-        let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = self.state.loaded_mesh {
+        // Build distance fields for base color/normal fill
+        let dist_fields: Vec<Option<DistanceField>> = if let Some(ref mesh) = self.state.loaded_mesh
+        {
             sorted_layers
                 .iter()
                 .map(|layer| {
@@ -114,9 +115,8 @@ impl PainterApp {
                             .iter()
                             .find(|g| g.name == layer.group_name)
                             .map(|group| {
-                                let mut mask = UvMask::from_mesh_group(mesh, group, resolution);
-                                mask.dilate(2);
-                                mask
+                                let mask = UvMask::from_mesh_group(mesh, group, resolution);
+                                mask.distance_field()
                             })
                     }
                 })
@@ -124,7 +124,8 @@ impl PainterApp {
         } else {
             sorted_layers.iter().map(|_| None).collect()
         };
-        let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
+        let mask_refs: Vec<Option<&DistanceField>> =
+            dist_fields.iter().map(|m| m.as_ref()).collect();
 
         // Fill base colors
         let default_base = BaseColorSource::solid(Color::WHITE);

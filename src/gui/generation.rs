@@ -9,7 +9,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use pa_painter::mesh::asset_io::LoadedMesh;
 use pa_painter::mesh::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use pa_painter::mesh::stretch_map::{compute_stretch_map, StretchMap};
-use pa_painter::mesh::uv_mask::UvMask;
+use pa_painter::mesh::uv_mask::{DistanceField, UvMask};
 use pa_painter::pipeline::compositing::{
     finalize_layers, render_layer, LayerMaps, RenderLayerInput,
 };
@@ -275,7 +275,8 @@ fn run_pipeline(
     stage.store(STAGE_MASKS, Ordering::Relaxed);
     set_progress(progress, p_masks);
 
-    let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = input.mesh {
+    // Build distance fields from UV masks (EDT, O(n) per layer).
+    let dist_fields: Vec<Option<DistanceField>> = if let Some(ref mesh) = input.mesh {
         input
             .layer_group_names
             .iter()
@@ -287,9 +288,8 @@ fn run_pipeline(
                         .iter()
                         .find(|g| g.name == *group_name)
                         .map(|group| {
-                            let mut mask = UvMask::from_mesh_group(mesh, group, input.resolution);
-                            mask.dilate(2);
-                            mask
+                            let mask = UvMask::from_mesh_group(mesh, group, input.resolution);
+                            mask.distance_field()
                         })
                 }
             })
@@ -309,7 +309,7 @@ fn run_pipeline(
         .map(|mesh| compute_stretch_map(mesh, input.resolution));
     let stretch_ref = stretch_data.as_ref();
 
-    let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
+    let df_refs: Vec<Option<&DistanceField>> = dist_fields.iter().map(|m| m.as_ref()).collect();
 
     let mut sorted: Vec<(usize, &PaintLayer)> = input.layers.iter().enumerate().collect();
     sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
@@ -376,14 +376,14 @@ fn run_pipeline(
                 width: base.tex_width,
                 height: base.tex_height,
             });
-            let mask = mask_refs.get(layer_index).and_then(|m| *m);
+            let df = df_refs.get(layer_index).and_then(|m| *m);
             let result = generate_paths(
                 layer,
                 layer_index as u32,
                 &PathContext {
                     color_tex: tex_ref.as_ref(),
                     normal_data,
-                    mask,
+                    dist_field: df,
                     stretch_map: stretch_ref,
                     cancel: Some(cancel),
                 },
@@ -437,17 +437,21 @@ fn run_pipeline(
                     .get(layer_index)
                     .map(|bc| bc.as_source())
                     .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
-                let mask = mask_refs.get(layer_index).and_then(|m| *m);
-                result_maps.push(Arc::new(render_layer(&RenderLayerInput {
+                let df = df_refs.get(layer_index).and_then(|m| *m);
+                let mut layer_maps = render_layer(&RenderLayerInput {
                     layer,
                     layer_index: layer_index as u32,
                     base_color: &base,
                     cached_paths: Some(paths),
                     normal_data,
-                    mask,
+                    dist_field: df,
                     stretch_map: stretch_ref,
                     resolution: input.resolution,
-                })));
+                });
+                if let Some(df) = df {
+                    layer_maps.clip_to_dist_field(df);
+                }
+                result_maps.push(Arc::new(layer_maps));
                 all_paths.push((path_hash, Arc::clone(paths)));
             }
             LayerCacheState::Miss => {
@@ -457,19 +461,23 @@ fn run_pipeline(
                     .get(layer_index)
                     .map(|bc| bc.as_source())
                     .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
-                let mask = mask_refs.get(layer_index).and_then(|m| *m);
+                let df = df_refs.get(layer_index).and_then(|m| *m);
                 let paths_arc = Arc::new(std::mem::take(&mut fresh_paths[fresh_path_idx]));
                 fresh_path_idx += 1;
-                result_maps.push(Arc::new(render_layer(&RenderLayerInput {
+                let mut layer_maps = render_layer(&RenderLayerInput {
                     layer,
                     layer_index: layer_index as u32,
                     base_color: &base,
                     cached_paths: Some(&paths_arc),
                     normal_data,
-                    mask,
+                    dist_field: df,
                     stretch_map: stretch_ref,
                     resolution: input.resolution,
-                })));
+                });
+                if let Some(df) = df {
+                    layer_maps.clip_to_dist_field(df);
+                }
+                result_maps.push(Arc::new(layer_maps));
                 all_paths.push((path_hash, paths_arc));
             }
         }
@@ -505,9 +513,9 @@ fn run_pipeline(
                 .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE))
         })
         .collect();
-    let sorted_masks: Vec<Option<&UvMask>> = sorted
+    let sorted_masks: Vec<Option<&DistanceField>> = sorted
         .iter()
-        .map(|&(layer_index, _)| mask_refs.get(layer_index).and_then(|m| *m))
+        .map(|&(layer_index, _)| df_refs.get(layer_index).and_then(|m| *m))
         .collect();
     let layer_dry: Vec<f32> = sorted
         .iter()
@@ -575,14 +583,14 @@ fn run_pipeline(
     for &(layer_index, _) in &sorted {
         if let Some(bn) = input.layer_base_normals.get(layer_index) {
             if let Some(ref pixels) = bn.pixels {
-                let mask = mask_refs.get(layer_index).and_then(|m| *m);
+                let df = df_refs.get(layer_index).and_then(|m| *m);
                 blend_normals_udn(
                     &mut normal_map,
                     pixels,
                     bn.width,
                     bn.height,
                     input.resolution,
-                    mask,
+                    df,
                 );
             }
         }
@@ -747,13 +755,14 @@ fn run_remerge(
         }
     }
 
-    // Build UV masks
+    // Build distance fields (this path uses cached LayerMaps that were
+    // already clipped during their original render)
     let materials: &[_] = input
         .mesh
         .as_ref()
         .map(|m| m.materials.as_slice())
         .unwrap_or(&[]);
-    let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = input.mesh {
+    let dist_fields: Vec<Option<DistanceField>> = if let Some(ref mesh) = input.mesh {
         sorted_layers
             .iter()
             .map(|layer| {
@@ -764,9 +773,8 @@ fn run_remerge(
                         .iter()
                         .find(|g| g.name == layer.group_name)
                         .map(|group| {
-                            let mut mask = UvMask::from_mesh_group(mesh, group, resolution);
-                            mask.dilate(2);
-                            mask
+                            let mask = UvMask::from_mesh_group(mesh, group, resolution);
+                            mask.distance_field()
                         })
                 }
             })
@@ -774,7 +782,7 @@ fn run_remerge(
     } else {
         sorted_layers.iter().map(|_| None).collect()
     };
-    let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
+    let mask_refs: Vec<Option<&DistanceField>> = dist_fields.iter().map(|m| m.as_ref()).collect();
 
     // Initialize GlobalMaps
     // Finalize layers (fill base colors → merge → gradients)

@@ -3,7 +3,7 @@
 use glam::Vec2;
 
 use crate::mesh::object_normal::MeshNormalData;
-use crate::mesh::uv_mask::UvMask;
+use crate::mesh::uv_mask::DistanceField;
 use crate::types::NormalYConvention;
 use crate::util::math::smoothstep;
 
@@ -148,8 +148,9 @@ pub fn blend_normals_udn(
     base_w: u32,
     base_h: u32,
     resolution: u32,
-    mask: Option<&UvMask>,
+    dist_field: Option<&DistanceField>,
 ) {
+    use crate::pipeline::compositing::CLIP_DISTANCE_PX;
     if base_w == 0 || base_h == 0 || base_normal_pixels.is_empty() {
         return;
     }
@@ -163,10 +164,10 @@ pub fn blend_normals_udn(
                 break;
             }
 
-            // Skip pixels outside the layer's UV mask region
-            if let Some(m) = mask {
+            // Skip pixels outside the layer's UV island (clip distance)
+            if let Some(df) = dist_field {
                 let uv = Vec2::new((x as f32 + 0.5) / res_f, (y as f32 + 0.5) / res_f);
-                if !m.sample(uv) {
+                if !df.sample(uv, CLIP_DISTANCE_PX) {
                     continue;
                 }
             }

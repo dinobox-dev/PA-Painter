@@ -12,7 +12,7 @@ use rayon::prelude::*;
 
 use crate::mesh::object_normal::{try_sample_object_normal, MeshNormalData};
 use crate::mesh::stretch_map::StretchMap;
-use crate::mesh::uv_mask::UvMask;
+use crate::mesh::uv_mask::DistanceField;
 use crate::pipeline::path_placement::{generate_paths, PathContext};
 use crate::pipeline::stroke_height::{generate_stroke_height, StrokeHeightResult};
 use crate::types::{
@@ -165,6 +165,32 @@ pub struct LayerMaps {
 }
 
 impl LayerMaps {
+    /// Zero out all pixel data outside the clip distance of a UV island.
+    ///
+    /// Used after [`render_layer()`] to clip rasterization overflow back to
+    /// the island boundary (with [`CLIP_DISTANCE_PX`] seam coverage).
+    pub fn clip_to_dist_field(&mut self, df: &DistanceField) {
+        let res = self.resolution;
+        let res_f = res as f32;
+        for py in 0..res {
+            for px in 0..res {
+                let uv = glam::Vec2::new((px as f32 + 0.5) / res_f, (py as f32 + 0.5) / res_f);
+                if !df.sample(uv, CLIP_DISTANCE_PX) {
+                    let idx = (py * res + px) as usize;
+                    self.height[idx] = 0.0;
+                    self.color[idx] = Color::new(0.0, 0.0, 0.0, 0.0);
+                    self.stroke_id[idx] = 0;
+                    self.object_normal[idx] = [0.0; 3];
+                    self.gradient_x[idx] = 0.0;
+                    self.gradient_y[idx] = 0.0;
+                    self.paint_load[idx] = 0.0;
+                    self.stroke_time_order[idx] = f32::MAX;
+                    self.stroke_time_arc[idx] = 0.0;
+                }
+            }
+        }
+    }
+
     /// Create empty layer maps with transparent background.
     pub fn new(resolution: u32) -> Self {
         let size = (resolution * resolution) as usize;
@@ -281,22 +307,26 @@ pub fn resolve_base_normal(
     }
 }
 
+/// Clip threshold (pixels) for distance-field-based mask checks.
+/// Matches the legacy `dilate(2)` behaviour: island boundary + 2 px of seam cover.
+pub const CLIP_DISTANCE_PX: f32 = 2.0;
+
 /// Fill a region of the color map with a per-layer base color.
 ///
-/// When `mask` is `None`, fills the entire map.
+/// When `dist_field` is `None`, fills the entire map.
 /// Only call in [`BackgroundMode::Opaque`] — in Transparent mode the canvas stays clear.
 pub fn fill_base_color_region(
     global: &mut GlobalMaps,
     base_color: &BaseColorSource,
-    mask: Option<&UvMask>,
+    dist_field: Option<&DistanceField>,
 ) {
     let res = global.resolution;
     let res_f = res as f32;
     for py in 0..res {
         for px in 0..res {
-            if let Some(m) = mask {
+            if let Some(df) = dist_field {
                 let uv = Vec2::new((px as f32 + 0.5) / res_f, (py as f32 + 0.5) / res_f);
-                if !m.sample(uv) {
+                if !df.sample(uv, CLIP_DISTANCE_PX) {
                     continue;
                 }
             }
@@ -593,7 +623,7 @@ pub fn generate_all_paths(
     layers: &[PaintLayer],
     base_colors: &[LayerBaseColor],
     normal_data: Option<&MeshNormalData>,
-    masks: &[Option<&UvMask>],
+    dist_fields: &[Option<&DistanceField>],
     stretch_map: Option<&StretchMap>,
 ) -> Vec<Vec<StrokePath>> {
     debug_assert_eq!(
@@ -604,9 +634,9 @@ pub fn generate_all_paths(
         layers.len()
     );
     debug_assert!(
-        masks.is_empty() || masks.len() == layers.len(),
-        "masks must be empty or parallel to layers ({} vs {})",
-        masks.len(),
+        dist_fields.is_empty() || dist_fields.len() == layers.len(),
+        "dist_fields must be empty or parallel to layers ({} vs {})",
+        dist_fields.len(),
         layers.len()
     );
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
@@ -624,14 +654,14 @@ pub fn generate_all_paths(
                 width: base.tex_width,
                 height: base.tex_height,
             });
-            let mask = masks.get(layer_index).and_then(|m| *m);
+            let df = dist_fields.get(layer_index).and_then(|m| *m);
             generate_paths(
                 layer,
                 layer_index as u32,
                 &PathContext {
                     color_tex: tex_ref.as_ref(),
                     normal_data,
-                    mask,
+                    dist_field: df,
                     stretch_map,
                     ..Default::default()
                 },
@@ -665,7 +695,8 @@ pub struct CompositeAllInput<'a> {
     /// When `None`, paths are generated internally via rayon.
     pub cached_paths: Option<&'a [Vec<StrokePath>]>,
     pub normal_data: Option<&'a MeshNormalData>,
-    pub masks: &'a [Option<&'a UvMask>],
+    /// Per-layer distance fields derived from UV masks.
+    pub dist_fields: &'a [Option<&'a DistanceField>],
     pub stretch_map: Option<&'a StretchMap>,
     /// Per-layer dryness, parallel to `layers`. dry=0 → wet, dry=1 → opaque over.
     /// Defaults to all 1.0 when empty.
@@ -688,7 +719,7 @@ impl<'a> CompositeAllInput<'a> {
             settings,
             cached_paths: None,
             normal_data: None,
-            masks: &[],
+            dist_fields: &[],
             stretch_map: None,
             layer_dry: &[],
             group_names: &[],
@@ -705,7 +736,7 @@ pub struct CompositeLayerInput<'a> {
     pub base_color: &'a BaseColorSource<'a>,
     pub cached_paths: Option<&'a [StrokePath]>,
     pub normal_data: Option<&'a MeshNormalData>,
-    pub mask: Option<&'a UvMask>,
+    pub dist_field: Option<&'a DistanceField>,
     pub stretch_map: Option<&'a StretchMap>,
 }
 
@@ -716,7 +747,7 @@ pub struct RenderLayerInput<'a> {
     pub base_color: &'a BaseColorSource<'a>,
     pub cached_paths: Option<&'a [StrokePath]>,
     pub normal_data: Option<&'a MeshNormalData>,
-    pub mask: Option<&'a UvMask>,
+    pub dist_field: Option<&'a DistanceField>,
     pub stretch_map: Option<&'a StretchMap>,
     pub resolution: u32,
 }
@@ -742,7 +773,7 @@ pub fn composite_all(input: &CompositeAllInput<'_>) -> GlobalMaps {
         settings,
         cached_paths,
         normal_data,
-        masks,
+        dist_fields,
         stretch_map,
         layer_dry,
         group_names,
@@ -755,9 +786,9 @@ pub fn composite_all(input: &CompositeAllInput<'_>) -> GlobalMaps {
         layers.len()
     );
     debug_assert!(
-        masks.is_empty() || masks.len() == layers.len(),
-        "masks must be empty or parallel to layers ({} vs {})",
-        masks.len(),
+        dist_fields.is_empty() || dist_fields.len() == layers.len(),
+        "dist_fields must be empty or parallel to layers ({} vs {})",
+        dist_fields.len(),
         layers.len()
     );
     debug_assert!(
@@ -801,14 +832,14 @@ pub fn composite_all(input: &CompositeAllInput<'_>) -> GlobalMaps {
                     width: base.tex_width,
                     height: base.tex_height,
                 });
-                let mask = masks.get(layer_index).and_then(|m| *m);
+                let df = dist_fields.get(layer_index).and_then(|m| *m);
                 generate_paths(
                     layer,
                     layer_index as u32,
                     &PathContext {
                         color_tex: tex_ref.as_ref(),
                         normal_data,
-                        mask,
+                        dist_field: df,
                         stretch_map,
                         ..Default::default()
                     },
@@ -828,17 +859,21 @@ pub fn composite_all(input: &CompositeAllInput<'_>) -> GlobalMaps {
                 .get(layer_index)
                 .map(|bc| bc.as_source())
                 .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE));
-            let mask = masks.get(layer_index).and_then(|m| *m);
-            render_layer(&RenderLayerInput {
+            let df = dist_fields.get(layer_index).and_then(|m| *m);
+            let mut maps = render_layer(&RenderLayerInput {
                 layer,
                 layer_index: layer_index as u32,
                 base_color: &base,
                 cached_paths: Some(&all_paths[sorted_idx]),
                 normal_data,
-                mask,
+                dist_field: df,
                 stretch_map,
                 resolution,
-            })
+            });
+            if let Some(df) = df {
+                maps.clip_to_dist_field(df);
+            }
+            maps
         })
         .collect();
 
@@ -853,9 +888,9 @@ pub fn composite_all(input: &CompositeAllInput<'_>) -> GlobalMaps {
                 .unwrap_or_else(|| BaseColorSource::solid(Color::WHITE))
         })
         .collect();
-    let sorted_masks: Vec<Option<&UvMask>> = sorted
+    let sorted_dfs: Vec<Option<&DistanceField>> = sorted
         .iter()
-        .map(|&(layer_index, _)| masks.get(layer_index).and_then(|m| *m))
+        .map(|&(layer_index, _)| dist_fields.get(layer_index).and_then(|m| *m))
         .collect();
     let sorted_dry: Vec<f32> = sorted
         .iter()
@@ -869,7 +904,7 @@ pub fn composite_all(input: &CompositeAllInput<'_>) -> GlobalMaps {
     let global = finalize_layers(
         &layer_refs,
         &sorted_base_colors,
-        &sorted_masks,
+        &sorted_dfs,
         &sorted_dry,
         &sorted_groups,
         resolution,
@@ -1004,7 +1039,7 @@ pub fn composite_layer(global: &mut GlobalMaps, input: &CompositeLayerInput<'_>)
         base_color,
         cached_paths,
         normal_data,
-        mask,
+        dist_field,
         stretch_map,
     } = *input;
     let resolution = global.resolution;
@@ -1023,7 +1058,7 @@ pub fn composite_layer(global: &mut GlobalMaps, input: &CompositeLayerInput<'_>)
             &PathContext {
                 color_tex: tex_ref.as_ref(),
                 normal_data,
-                mask,
+                dist_field,
                 stretch_map,
                 ..Default::default()
             },
@@ -1146,7 +1181,7 @@ pub fn render_layer(input: &RenderLayerInput<'_>) -> LayerMaps {
         base_color,
         cached_paths,
         normal_data,
-        mask,
+        dist_field,
         stretch_map,
         resolution,
     } = *input;
@@ -1179,7 +1214,7 @@ pub fn render_layer(input: &RenderLayerInput<'_>) -> LayerMaps {
             base_color,
             cached_paths,
             normal_data,
-            mask,
+            dist_field,
             stretch_map,
         },
     );
@@ -1220,7 +1255,7 @@ pub fn render_layer(input: &RenderLayerInput<'_>) -> LayerMaps {
 /// 3. Layer merge via [`merge_layers`]
 /// 4. Height gradient computation via [`compute_height_gradients`]
 ///
-/// All slices (`layer_maps`, `base_colors`, `masks`, `layer_dry`,
+/// All slices (`layer_maps`, `base_colors`, `dist_fields`, `layer_dry`,
 /// `group_names`) must be in compositing order (sorted by layer `order`).
 ///
 /// Base color fill uses a 2-pass strategy so that specific vertex-group
@@ -1234,7 +1269,7 @@ pub fn render_layer(input: &RenderLayerInput<'_>) -> LayerMaps {
 pub fn finalize_layers(
     layer_maps: &[&LayerMaps],
     base_colors: &[BaseColorSource<'_>],
-    masks: &[Option<&UvMask>],
+    dist_fields: &[Option<&DistanceField>],
     layer_dry: &[f32],
     group_names: &[&str],
     resolution: u32,
@@ -1265,8 +1300,8 @@ pub fn finalize_layers(
                 continue;
             }
             debug_assert!(
-                masks.get(i).and_then(|m| *m).is_none(),
-                "__all__ layer at index {} has a mask — convention violated",
+                dist_fields.get(i).and_then(|m| *m).is_none(),
+                "__all__ layer at index {} has a dist_field — convention violated",
                 i,
             );
             fill_base_color_region(&mut global, bc, None);
@@ -1278,8 +1313,8 @@ pub fn finalize_layers(
             if group == "__all__" || !filled_groups.insert(group) {
                 continue;
             }
-            let mask = masks.get(i).and_then(|m| *m);
-            fill_base_color_region(&mut global, bc, mask);
+            let df = dist_fields.get(i).and_then(|m| *m);
+            fill_base_color_region(&mut global, bc, df);
         }
     }
 
@@ -1754,7 +1789,7 @@ mod tests {
                 base_color: &BaseColorSource::solid(solid_a),
                 cached_paths: None,
                 normal_data: None,
-                mask: None,
+                dist_field: None,
                 stretch_map: None,
             },
         );
@@ -1767,7 +1802,7 @@ mod tests {
                 base_color: &BaseColorSource::solid(solid_b),
                 cached_paths: None,
                 normal_data: None,
-                mask: None,
+                dist_field: None,
                 stretch_map: None,
             },
         );
@@ -1972,7 +2007,7 @@ mod tests {
                 base_color: &BaseColorSource::textured(&stroke_tex, 1, 1, canvas),
                 cached_paths: None,
                 normal_data: None,
-                mask: None,
+                dist_field: None,
                 stretch_map: None,
             },
         );
@@ -2097,6 +2132,7 @@ mod tests {
             data: mask_data,
             resolution: res,
         };
+        let df = mask.distance_field();
 
         // Two empty LayerMaps (no paint — we only test base color fill)
         let empty_layer = LayerMaps {
@@ -2122,13 +2158,13 @@ mod tests {
         // Even though __all__ comes AFTER arm, arm's blue must win in the masked region.
         let layer_refs: Vec<&LayerMaps> = vec![&empty_layer, &empty_layer];
         let base_colors = vec![BaseColorSource::solid(blue), BaseColorSource::solid(red)];
-        let masks: Vec<Option<&UvMask>> = vec![Some(&mask), None];
+        let dfs: Vec<Option<&DistanceField>> = vec![Some(&df), None];
         let group_names: Vec<&str> = vec!["arm", "__all__"];
 
         let global = finalize_layers(
             &layer_refs,
             &base_colors,
-            &masks,
+            &dfs,
             &[1.0, 1.0],
             &group_names,
             res,
@@ -2189,13 +2225,13 @@ mod tests {
             BaseColorSource::solid(green),
             BaseColorSource::solid(yellow),
         ];
-        let masks: Vec<Option<&UvMask>> = vec![None, None];
+        let dfs: Vec<Option<&DistanceField>> = vec![None, None];
         let group_names: Vec<&str> = vec!["__all__", "__all__"];
 
         let global = finalize_layers(
             &layer_refs,
             &base_colors,
-            &masks,
+            &dfs,
             &[1.0, 1.0],
             &group_names,
             res,

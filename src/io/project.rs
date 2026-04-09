@@ -23,7 +23,7 @@ use crate::mesh::asset_io::{
     decode_linear_png_bytes, decode_srgb_png_bytes, encode_pixels_as_linear_png,
     encode_pixels_as_srgb_png, load_mesh_from_bytes_with_aux, LoadedMesh, ObjAuxFiles,
 };
-use crate::mesh::uv_mask::UvMask;
+use crate::mesh::uv_mask::{DistanceField, UvMask};
 use crate::types::{
     EmbeddedTexture, ExportSettings, Layer, OutputSettings, PaintLayer, PresetLibrary,
     TextureSource,
@@ -166,16 +166,20 @@ impl Project {
             .collect()
     }
 
-    /// Build UV masks for the given layers from the loaded mesh.
-    /// Returns `None` for `__all__` groups (paint entire UV space).
+    /// Build distance fields for the given layers from the loaded mesh.
+    ///
+    /// Returns one [`DistanceField`] per layer (`None` for `__all__` groups).
+    /// The distance field encodes the Euclidean distance to the nearest mask
+    /// pixel, enabling both clip (threshold=2) and seed overscan queries from
+    /// a single precomputed structure.
     ///
     /// `layers` must be the same pre-filtered slice that is passed to the
     /// compositing pipeline, so that mask indices align with layer indices.
-    pub fn build_masks(
+    pub fn build_dist_fields(
         layers: &[&Layer],
         mesh: &LoadedMesh,
         resolution: u32,
-    ) -> Vec<Option<UvMask>> {
+    ) -> Vec<Option<DistanceField>> {
         layers
             .iter()
             .map(|layer| {
@@ -186,9 +190,8 @@ impl Project {
                         .iter()
                         .find(|g| g.name == layer.group_name)
                         .map(|group| {
-                            let mut mask = UvMask::from_mesh_group(mesh, group, resolution);
-                            mask.dilate(2);
-                            mask
+                            let mask = UvMask::from_mesh_group(mesh, group, resolution);
+                            mask.distance_field()
                         })
                 }
             })

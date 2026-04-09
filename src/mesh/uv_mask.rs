@@ -8,6 +8,7 @@ use crate::types::MeshGroup;
 /// A boolean bitmap mask in UV space.
 ///
 /// `true` pixels indicate UV coverage by a mesh group's triangles.
+#[derive(Clone)]
 pub struct UvMask {
     pub data: Vec<bool>,
     pub resolution: u32,
@@ -129,12 +130,128 @@ impl UvMask {
         self.data[(py * res + px) as usize]
     }
 
+    /// Compute a Manhattan distance field from the mask boundary.
+    ///
+    /// Each pixel stores the L1 (Manhattan) distance in pixels to the nearest
+    /// `true` pixel. Pixels inside the mask have distance 0.
+    /// Two-pass per axis, O(n) where n = resolution².
+    pub fn distance_field(&self) -> DistanceField {
+        let res = self.resolution as usize;
+        let n = res * res;
+        let inf = (res + res) as f32; // larger than any real Manhattan distance
+
+        let mut dt = vec![inf; n];
+
+        // Initialise: 0 for true pixels, inf for false
+        for i in 0..n {
+            if self.data[i] {
+                dt[i] = 0.0;
+            }
+        }
+
+        // Vertical pass (columns)
+        for x in 0..res {
+            // top → bottom
+            for y in 1..res {
+                let idx = y * res + x;
+                let above = dt[(y - 1) * res + x] + 1.0;
+                if above < dt[idx] {
+                    dt[idx] = above;
+                }
+            }
+            // bottom → top
+            for y in (0..res - 1).rev() {
+                let idx = y * res + x;
+                let below = dt[(y + 1) * res + x] + 1.0;
+                if below < dt[idx] {
+                    dt[idx] = below;
+                }
+            }
+        }
+
+        // Horizontal pass (rows)
+        for y in 0..res {
+            let row = y * res;
+            // left → right
+            for x in 1..res {
+                let left = dt[row + x - 1] + 1.0;
+                if left < dt[row + x] {
+                    dt[row + x] = left;
+                }
+            }
+            // right → left
+            for x in (0..res - 1).rev() {
+                let right = dt[row + x + 1] + 1.0;
+                if right < dt[row + x] {
+                    dt[row + x] = right;
+                }
+            }
+        }
+
+        DistanceField {
+            data: dt,
+            resolution: self.resolution,
+        }
+    }
+
     /// All-true mask for `__full_uv__` groups.
     pub fn full(resolution: u32) -> UvMask {
         UvMask {
             data: vec![true; (resolution * resolution) as usize],
             resolution,
         }
+    }
+}
+
+/// Manhattan distance field derived from a [`UvMask`].
+///
+/// Each pixel stores the L1 distance (in pixels) to the nearest `true` pixel
+/// in the source mask. Use [`sample`](Self::sample) for UV-space queries with
+/// an arbitrary distance threshold.
+pub struct DistanceField {
+    /// Row-major distance values. Size = `resolution²`.
+    pub data: Vec<f32>,
+    /// Pixel resolution (width = height).
+    pub resolution: u32,
+}
+
+impl DistanceField {
+    /// Check if a UV point is within `threshold` pixels of the mask.
+    pub fn sample(&self, uv: Vec2, threshold: f32) -> bool {
+        let res = self.resolution;
+        let px = ((uv.x * res as f32).floor() as i32).clamp(0, res as i32 - 1) as u32;
+        let py = ((uv.y * res as f32).floor() as i32).clamp(0, res as i32 - 1) as u32;
+        self.data[(py * res + px) as usize] <= threshold
+    }
+
+    /// Bounding box of pixels within `threshold` distance, in UV space.
+    pub fn aabb(&self, threshold: f32) -> (Vec2, Vec2) {
+        let res = self.resolution;
+        let res_f = res as f32;
+        let mut min_x = res;
+        let mut max_x = 0u32;
+        let mut min_y = res;
+        let mut max_y = 0u32;
+
+        for py in 0..res {
+            for px in 0..res {
+                if self.data[(py * res + px) as usize] <= threshold {
+                    min_x = min_x.min(px);
+                    max_x = max_x.max(px);
+                    min_y = min_y.min(py);
+                    max_y = max_y.max(py);
+                }
+            }
+        }
+
+        if max_x < min_x {
+            return (Vec2::ZERO, Vec2::ZERO);
+        }
+
+        (
+            Vec2::new(min_x as f32 / res_f, min_y as f32 / res_f),
+            Vec2::new((max_x + 1) as f32 / res_f, (max_y + 1) as f32 / res_f),
+        )
     }
 }
 
@@ -323,5 +440,62 @@ mod tests {
         let (lo, hi) = mask.aabb();
         assert_eq!(lo, Vec2::ZERO);
         assert_eq!(hi, Vec2::ZERO);
+    }
+
+    #[test]
+    fn distance_field_correctness() {
+        // 8×8 mask with a single true pixel at (4, 4)
+        let res = 8u32;
+        let mut data = vec![false; (res * res) as usize];
+        data[(4 * res + 4) as usize] = true;
+        let mask = UvMask {
+            data,
+            resolution: res,
+        };
+
+        let df = mask.distance_field();
+
+        // The true pixel should have distance 0
+        assert_eq!(df.data[(4 * res + 4) as usize], 0.0);
+
+        // Adjacent pixels should have distance 1.0
+        assert!(
+            (df.data[(4 * res + 5) as usize] - 1.0).abs() < 0.01,
+            "right neighbor dist={}, expected 1.0",
+            df.data[(4 * res + 5) as usize]
+        );
+        assert!(
+            (df.data[(3 * res + 4) as usize] - 1.0).abs() < 0.01,
+            "top neighbor dist={}, expected 1.0",
+            df.data[(3 * res + 4) as usize]
+        );
+
+        // Diagonal pixel: Manhattan distance = |dx| + |dy| = 1 + 1 = 2
+        let diag = df.data[(3 * res + 3) as usize];
+        assert!(
+            (diag - 2.0).abs() < 0.01,
+            "diagonal dist={diag}, expected 2.0 (Manhattan)"
+        );
+
+        // Corner (0,0): Manhattan distance = |4| + |4| = 8
+        let corner = df.data[0];
+        assert!(
+            (corner - 8.0).abs() < 0.01,
+            "corner dist={corner}, expected 8.0 (Manhattan)"
+        );
+    }
+
+    #[test]
+    fn distance_field_sample_threshold() {
+        let (mesh, group) = make_half_mesh();
+        let mask = UvMask::from_mesh_group(&mesh, &group, 32);
+        let df = mask.distance_field();
+
+        // Point well inside the triangle: distance should be 0
+        assert!(df.sample(Vec2::new(0.1, 0.3), 0.0));
+        // Point outside should fail at threshold 0 but pass at large threshold
+        let outside = Vec2::new(0.9, 0.5);
+        assert!(!df.sample(outside, 0.0));
+        assert!(df.sample(outside, 100.0));
     }
 }

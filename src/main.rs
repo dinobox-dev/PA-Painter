@@ -8,7 +8,7 @@ use pa_painter::io::project::{load_project, Project};
 use pa_painter::mesh::asset_io::load_mesh;
 use pa_painter::mesh::object_normal::{compute_mesh_normal_data, MeshNormalData};
 use pa_painter::mesh::stretch_map::{compute_stretch_map, StretchMap};
-use pa_painter::mesh::uv_mask::UvMask;
+use pa_painter::mesh::uv_mask::DistanceField;
 use pa_painter::pipeline::compositing::{
     composite_all, generate_all_paths, render_layer, resolve_base_color, CompositeAllInput,
     RenderLayerInput,
@@ -122,12 +122,12 @@ fn main() {
     // No mutable borrow of project occurs after this point, so visible_layers
     // can stay alive through the per-layer export loop below.
     let visible_layers: Vec<_> = project.layers.iter().filter(|l| l.visible).collect();
-    let masks: Vec<Option<UvMask>> = if let Some(ref mesh) = loaded_mesh {
-        Project::build_masks(&visible_layers, mesh, resolution)
+    let dist_fields: Vec<Option<DistanceField>> = if let Some(ref mesh) = loaded_mesh {
+        Project::build_dist_fields(&visible_layers, mesh, resolution)
     } else {
         visible_layers.iter().map(|_| None).collect()
     };
-    let mask_refs: Vec<Option<&UvMask>> = masks.iter().map(|m| m.as_ref()).collect();
+    let df_refs: Vec<Option<&DistanceField>> = dist_fields.iter().map(|m| m.as_ref()).collect();
     let layers: Vec<_> = visible_layers.iter().map(|l| l.to_paint_layer()).collect();
     let layer_base_colors: Vec<_> = visible_layers
         .iter()
@@ -144,7 +144,7 @@ fn main() {
         &layers,
         &layer_base_colors,
         normal_data.as_ref(),
-        &mask_refs,
+        &df_refs,
         stretch_ref,
     );
 
@@ -167,7 +167,7 @@ fn main() {
         settings: &project.settings,
         cached_paths: Some(&paths),
         normal_data: normal_data.as_ref(),
-        masks: &mask_refs,
+        dist_fields: &df_refs,
         stretch_map: stretch_ref,
         layer_dry: &layer_dry,
         group_names: &layer_group_names,
@@ -197,19 +197,22 @@ fn main() {
         for (idx, (layer, paint_layer)) in visible_layers.iter().zip(layers.iter()).enumerate() {
             let base_color = &layer_base_colors[idx];
             let base = base_color.as_source();
-            let mask = mask_refs.get(idx).and_then(|m| *m);
+            let df = df_refs.get(idx).and_then(|m| *m);
             let cached = paths.get(path_idx_for[idx]).map(|v| v.as_slice());
 
-            let layer_maps = render_layer(&RenderLayerInput {
+            let mut layer_maps = render_layer(&RenderLayerInput {
                 layer: paint_layer,
                 layer_index: idx as u32,
                 base_color: &base,
                 cached_paths: cached,
                 normal_data: normal_data.as_ref(),
-                mask,
+                dist_field: df,
                 stretch_map: stretch_ref,
                 resolution,
             });
+            if let Some(df) = df {
+                layer_maps.clip_to_dist_field(df);
+            }
 
             export_layer_maps(
                 &layer_maps,

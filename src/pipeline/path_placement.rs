@@ -14,7 +14,7 @@ use log::{debug, info, warn};
 use crate::mesh::object_normal::sample_object_normal;
 use crate::mesh::object_normal::MeshNormalData;
 use crate::mesh::stretch_map::StretchMap;
-use crate::mesh::uv_mask::UvMask;
+use crate::mesh::uv_mask::DistanceField;
 use crate::pipeline::direction_field::DirectionField;
 use crate::types::{PaintLayer, StrokeParams, StrokePath, BASE_RESOLUTION};
 use crate::util::math::rotate_vec2;
@@ -34,7 +34,7 @@ const STRETCH_CLAMP_MAX: f32 = 2.0;
 pub struct PathContext<'a> {
     pub color_tex: Option<&'a ColorTextureRef<'a>>,
     pub normal_data: Option<&'a MeshNormalData>,
-    pub mask: Option<&'a UvMask>,
+    pub dist_field: Option<&'a DistanceField>,
     pub stretch_map: Option<&'a StretchMap>,
     pub cancel: Option<&'a AtomicBool>,
 }
@@ -190,7 +190,8 @@ pub fn trace_streamline(
     color_tex: Option<&ColorTextureRef<'_>>,
     _normal_data: Option<&MeshNormalData>,
     uv_bounds: (Vec2, Vec2),
-    mask: Option<&UvMask>,
+    dist_field: Option<&DistanceField>,
+    dist_threshold: f32,
     stretch_map: Option<&StretchMap>,
 ) -> Option<Vec<Vec2>> {
     let base_step = 1.0 / resolution as f32;
@@ -255,9 +256,9 @@ pub fn trace_streamline(
             break;
         }
 
-        // Mask boundary check
-        if let Some(mask) = mask {
-            if !mask.sample(next_pos) {
+        // Mask boundary check (distance field)
+        if let Some(df) = dist_field {
+            if !df.sample(next_pos, dist_threshold) {
                 break;
             }
         }
@@ -366,7 +367,7 @@ pub fn generate_paths(
 ) -> Vec<StrokePath> {
     let color_tex = ctx.color_tex;
     let normal_data = ctx.normal_data;
-    let mask = ctx.mask;
+    let dist_field = ctx.dist_field;
     let stretch_map = ctx.stretch_map;
     let cancel = ctx.cancel;
     // Path geometry is resolution-independent in UV space: seed density and
@@ -382,10 +383,16 @@ pub fn generate_paths(
     let margin = brush_width_uv * 3.0;
     let min_length = brush_width_uv;
 
-    // When a mask is provided, seed within its AABB (expanded by overscan margin).
-    // Otherwise use the full [0,1]² with overscan.
-    let (seed_lo, seed_hi) = if let Some(m) = mask {
-        let (mlo, mhi) = m.aabb();
+    // Distance field threshold in pixels for seed filtering / trace boundary.
+    // margin (UV) × df_resolution → pixel distance.
+    let seed_threshold = dist_field
+        .map(|df| margin * df.resolution as f32)
+        .unwrap_or(0.0);
+
+    // When a distance field is provided, seed within its AABB at the seed
+    // threshold (expanded by overscan margin). Otherwise use the full [0,1]².
+    let (seed_lo, seed_hi) = if let Some(df) = dist_field {
+        let (mlo, mhi) = df.aabb(seed_threshold);
         (
             Vec2::new((mlo.x - margin).max(-margin), (mlo.y - margin).max(-margin)),
             Vec2::new(
@@ -405,9 +412,12 @@ pub fn generate_paths(
     }
     debug!("Generated {} seed points", seeds.len());
 
-    // Filter seeds by mask
-    let filtered_seeds: Vec<Vec2> = if let Some(m) = mask {
-        seeds.into_iter().filter(|s| m.sample(*s)).collect()
+    // Filter seeds by distance field (overscan threshold)
+    let filtered_seeds: Vec<Vec2> = if let Some(df) = dist_field {
+        seeds
+            .into_iter()
+            .filter(|s| df.sample(*s, seed_threshold))
+            .collect()
     } else {
         seeds
     };
@@ -433,7 +443,8 @@ pub fn generate_paths(
             color_tex,
             normal_data,
             (seed_lo, seed_hi),
-            mask,
+            dist_field,
+            seed_threshold,
             stretch_map,
         ) {
             if let Some(clipped) = clip_path_to_uv(path) {
@@ -614,6 +625,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         )
         .expect("horizontal path should exist");
@@ -645,6 +657,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         )
         .expect("vertical path should exist");
@@ -684,6 +697,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         );
 
@@ -725,6 +739,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         );
 
@@ -754,6 +769,7 @@ mod tests {
                 None,
                 (Vec2::ZERO, Vec2::ONE),
                 None,
+                0.0,
                 None,
             ) {
                 let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
@@ -931,6 +947,79 @@ mod tests {
     }
 
     #[test]
+    fn generate_paths_with_dist_field_produces_strokes() {
+        use crate::mesh::uv_mask::UvMask;
+
+        // Full-coverage mask → distance field.
+        // Strokes should still be generated (not rejected by the distance check).
+        let mask = UvMask::full(512);
+        let df = mask.distance_field();
+
+        let layer = make_layer();
+        let paths = generate_paths(
+            &layer,
+            0,
+            &PathContext {
+                dist_field: Some(&df),
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            paths.len() > 10,
+            "full-coverage dist_field should produce many paths, got {}",
+            paths.len()
+        );
+    }
+
+    #[test]
+    fn generate_paths_with_partial_dist_field() {
+        use crate::mesh::uv_mask::UvMask;
+
+        // Mask covering only the left half (columns 0..256 of 512)
+        let res = 512u32;
+        let mut data = vec![false; (res * res) as usize];
+        for py in 0..res {
+            for px in 0..res / 2 {
+                data[(py * res + px) as usize] = true;
+            }
+        }
+        let mask = UvMask {
+            data,
+            resolution: res,
+        };
+        let df = mask.distance_field();
+
+        let layer = make_layer();
+        let paths = generate_paths(
+            &layer,
+            0,
+            &PathContext {
+                dist_field: Some(&df),
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            paths.len() > 5,
+            "half-coverage dist_field should produce paths, got {}",
+            paths.len()
+        );
+
+        // All path points should be in [0, 1] (clipped to UV)
+        for path in &paths {
+            for &pt in &path.points {
+                assert!(
+                    pt.x >= 0.0 && pt.x <= 1.0 && pt.y >= 0.0 && pt.y <= 1.0,
+                    "path point ({:.3}, {:.3}) outside UV [0,1]",
+                    pt.x,
+                    pt.y
+                );
+            }
+        }
+    }
+
+    #[test]
     fn streamline_curved_two_guides() {
         let guides = vec![
             Guide {
@@ -963,6 +1052,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         );
 
@@ -1013,6 +1103,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         );
 
@@ -1292,6 +1383,7 @@ mod tests {
                 None,
                 (Vec2::ZERO, Vec2::ONE),
                 None,
+                0.0,
                 None,
             ) {
                 let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
@@ -1332,6 +1424,7 @@ mod tests {
                 None,
                 (Vec2::ZERO, Vec2::ONE),
                 None,
+                0.0,
                 None,
             ) {
                 let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
@@ -1368,6 +1461,7 @@ mod tests {
                     None,
                     (Vec2::ZERO, Vec2::ONE),
                     None,
+                    0.0,
                     None,
                 ) {
                     let len: f32 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
@@ -1434,6 +1528,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         );
 
@@ -1452,6 +1547,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         );
 
@@ -1510,6 +1606,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         );
         let path_no_break = trace_streamline(
@@ -1522,6 +1619,7 @@ mod tests {
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         );
 
@@ -1596,6 +1694,7 @@ mod tests {
             Some(&nd),
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         );
 
@@ -1614,6 +1713,7 @@ mod tests {
             Some(&nd),
             (Vec2::ZERO, Vec2::ONE),
             None,
+            0.0,
             None,
         );
 
@@ -1673,6 +1773,7 @@ mod tests {
                 None,
                 (Vec2::ZERO, Vec2::ONE),
                 None,
+                0.0,
                 None,
             );
             let path_with_tex = trace_streamline(
@@ -1685,6 +1786,7 @@ mod tests {
                 None,
                 (Vec2::ZERO, Vec2::ONE),
                 None,
+                0.0,
                 None,
             );
 
@@ -1722,6 +1824,7 @@ mod tests {
                 None,
                 (Vec2::ZERO, Vec2::ONE),
                 None,
+                0.0,
                 None,
             );
             let path_with_nd = trace_streamline(
@@ -1734,6 +1837,7 @@ mod tests {
                 Some(&nd),
                 (Vec2::ZERO, Vec2::ONE),
                 None,
+                0.0,
                 None,
             );
 

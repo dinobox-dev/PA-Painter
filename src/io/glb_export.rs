@@ -969,7 +969,7 @@ mod tests {
             settings: &settings,
             cached_paths: Some(&cached_paths),
             normal_data: Some(&nd),
-            masks: &[],
+            dist_fields: &[],
             stretch_map: None,
             layer_dry: &[1.0],
             group_names: &["__all__"],
