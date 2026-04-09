@@ -48,7 +48,9 @@ impl PainterApp {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(frame)
             .show(ctx, |ui: &mut egui::Ui| {
-                let es = state.export_settings_draft.as_mut().unwrap();
+                let Some(es) = state.export_settings_draft.as_mut() else {
+                    return;
+                };
                 ui.spacing_mut().item_spacing.y = 4.0;
 
                 // ── Header ──
