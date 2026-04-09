@@ -264,6 +264,7 @@ fn bilinear_sample(data: &[f32], width: usize, height: usize, x: f32, y: f32) ->
 }
 
 /// Per-stroke appearance parameters for compositing.
+#[derive(Debug, Clone, Copy)]
 pub struct StrokeAppearance {
     pub color: Color,
     pub id: u32,
