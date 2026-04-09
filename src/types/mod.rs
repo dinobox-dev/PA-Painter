@@ -807,6 +807,11 @@ impl StrokePath {
 
     /// Find segment index and local fraction for a given distance along the path.
     fn find_segment(&self, distance: f32) -> (usize, f32) {
+        debug_assert!(
+            self.points.len() >= 2,
+            "find_segment requires at least 2 points, got {}",
+            self.points.len()
+        );
         let last_seg = self.points.len() - 2;
         let idx = match self.cumulative_lengths.binary_search_by(|v| {
             v.partial_cmp(&distance)
