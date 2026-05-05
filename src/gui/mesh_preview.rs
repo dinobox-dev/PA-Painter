@@ -272,7 +272,7 @@ struct GpuMikkTSpaceInput<'a> {
     tangents: Vec<[f32; 4]>,
 }
 
-impl mikktspace::Geometry for GpuMikkTSpaceInput<'_> {
+impl bevy_mikktspace::Geometry for GpuMikkTSpaceInput<'_> {
     fn num_faces(&self) -> usize {
         self.mesh.indices.len() / 3
     }
@@ -297,8 +297,14 @@ impl mikktspace::Geometry for GpuMikkTSpaceInput<'_> {
         uv.into()
     }
 
-    fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
-        self.tangents[face * 3 + vert] = tangent;
+    fn set_tangent(
+        &mut self,
+        tangent_space: Option<bevy_mikktspace::TangentSpace>,
+        face: usize,
+        vert: usize,
+    ) {
+        self.tangents[face * 3 + vert] =
+            tangent_space.unwrap_or_default().tangent_encoded();
     }
 }
 
@@ -315,7 +321,7 @@ fn build_vertices(mesh: &LoadedMesh) -> (Vec<Vertex>, Vec<u32>) {
         normals: &normals,
         tangents: vec![[1.0, 0.0, 0.0, 1.0]; face_count * 3],
     };
-    mikktspace::generate_tangents(&mut mikk);
+    let _ = bevy_mikktspace::generate_tangents(&mut mikk);
 
     let total = face_count * 3;
     let mut vertices = Vec::with_capacity(total);

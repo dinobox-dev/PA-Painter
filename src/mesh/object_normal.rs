@@ -21,7 +21,7 @@ struct MikkTSpaceInput<'a> {
     face_bitangents: Vec<Vec3>,
 }
 
-impl<'a> mikktspace::Geometry for MikkTSpaceInput<'a> {
+impl bevy_mikktspace::Geometry for MikkTSpaceInput<'_> {
     fn num_faces(&self) -> usize {
         self.mesh.indices.len() / 3
     }
@@ -47,17 +47,14 @@ impl<'a> mikktspace::Geometry for MikkTSpaceInput<'a> {
 
     fn set_tangent(
         &mut self,
-        tangent: [f32; 3],
-        bi_tangent: [f32; 3],
-        _f_mag_s: f32,
-        _f_mag_t: f32,
-        _bi_tangent_preserves_orientation: bool,
+        tangent_space: Option<bevy_mikktspace::TangentSpace>,
         face: usize,
         vert: usize,
     ) {
         let fv = face * 3 + vert;
-        self.face_tangents[fv] = Vec3::from(tangent);
-        self.face_bitangents[fv] = Vec3::from(bi_tangent);
+        let ts = tangent_space.unwrap_or_default();
+        self.face_tangents[fv] = Vec3::from(ts.tangent());
+        self.face_bitangents[fv] = Vec3::from(ts.bi_tangent());
     }
 }
 
@@ -104,7 +101,7 @@ pub fn compute_mesh_normal_data(mesh: &LoadedMesh, resolution: u32) -> MeshNorma
         face_bitangents: vec![Vec3::ZERO; face_count * 3],
     };
 
-    if !mikktspace::generate_tangents(&mut mikk) {
+    if bevy_mikktspace::generate_tangents(&mut mikk).is_err() {
         debug!("MikkTSpace generation failed; tangents will be zero");
     }
 
