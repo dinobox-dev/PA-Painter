@@ -27,11 +27,7 @@ impl StretchMap {
         let x = ((uv.x * res as f32).floor() as i32).clamp(0, res as i32 - 1) as usize;
         let y = ((uv.y * res as f32).floor() as i32).clamp(0, res as i32 - 1) as usize;
         let v = self.data[y * res as usize + x];
-        if v > 0.0 {
-            v
-        } else {
-            1.0
-        }
+        if v > 0.0 { v } else { 1.0 }
     }
 
     pub fn resolution(&self) -> u32 {

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use pa_painter::io::project::{save_project, utc_now_iso8601};
-use pa_painter::mesh::asset_io::{load_mesh, LoadedMesh};
+use pa_painter::mesh::asset_io::{LoadedMesh, load_mesh};
 use pa_painter::types::{PaintValues, TextureSource};
 
 use super::mesh_loading::build_mesh_load_popup;

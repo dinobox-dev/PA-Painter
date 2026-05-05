@@ -11,7 +11,7 @@ use std::path::Path;
 
 use glam::Vec2;
 
-use crate::mesh::asset_io::{linear_to_srgb, LoadedMesh};
+use crate::mesh::asset_io::{LoadedMesh, linear_to_srgb};
 use crate::mesh::object_normal::compute_vertex_normals;
 use crate::types::{Color, NormalYConvention};
 
@@ -661,7 +661,7 @@ mod tests {
     #[test]
     fn visual_sphere_preview() {
         use crate::mesh::object_normal::compute_mesh_normal_data;
-        use crate::pipeline::compositing::{composite_all, CompositeAllInput};
+        use crate::pipeline::compositing::{CompositeAllInput, composite_all};
         use crate::pipeline::output::{
             generate_normal_map, generate_normal_map_depicted_form, normalize_height_map,
         };
@@ -813,11 +813,12 @@ mod tests {
         assert!(prim.get(&gltf::Semantic::Normals).is_some());
         assert!(prim.get(&gltf::Semantic::TexCoords(0)).is_some());
         assert!(prim.indices().is_some());
-        assert!(prim
-            .material()
-            .pbr_metallic_roughness()
-            .base_color_texture()
-            .is_some());
+        assert!(
+            prim.material()
+                .pbr_metallic_roughness()
+                .base_color_texture()
+                .is_some()
+        );
         assert!(prim.material().normal_texture().is_some());
     }
 
@@ -825,7 +826,7 @@ mod tests {
     #[ignore]
     fn visual_transparent_sphere() {
         use crate::mesh::object_normal::compute_mesh_normal_data;
-        use crate::pipeline::compositing::{composite_all, CompositeAllInput};
+        use crate::pipeline::compositing::{CompositeAllInput, composite_all};
         use crate::pipeline::output::{generate_normal_map_depicted_form, normalize_height_map};
         use crate::types::{
             BackgroundMode, Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings,
@@ -914,9 +915,9 @@ mod tests {
     #[ignore] // high-res benchmark
     fn visual_sphere_overscan_poisson() {
         use crate::mesh::object_normal::compute_mesh_normal_data;
-        use crate::pipeline::compositing::{composite_all, CompositeAllInput};
+        use crate::pipeline::compositing::{CompositeAllInput, composite_all};
         use crate::pipeline::output::{generate_normal_map_depicted_form, normalize_height_map};
-        use crate::pipeline::path_placement::{generate_paths, PathContext};
+        use crate::pipeline::path_placement::{PathContext, generate_paths};
         use crate::types::{
             BackgroundMode, Color as C, Guide, LayerBaseColor, NormalMode, OutputSettings,
             PaintLayer, StrokeParams,

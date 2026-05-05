@@ -12,7 +12,7 @@ use pa_painter::util::pressure::{evaluate_pressure, preset_to_custom};
 use super::preview::StrokePreviewCache;
 
 use super::preview;
-use super::sidebar::{build_group_names, section_header, SECTION_INDENT};
+use super::sidebar::{SECTION_INDENT, build_group_names, section_header};
 use super::state::AppState;
 use super::widgets::{paint_icon, paint_truncated_text, slider_row, small_icon_button};
 

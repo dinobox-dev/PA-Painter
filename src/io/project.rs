@@ -20,8 +20,8 @@ use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::mesh::asset_io::{
-    decode_linear_png_bytes, decode_srgb_png_bytes, encode_pixels_as_linear_png,
-    encode_pixels_as_srgb_png, load_mesh_from_bytes_with_aux, LoadedMesh, ObjAuxFiles,
+    LoadedMesh, ObjAuxFiles, decode_linear_png_bytes, decode_srgb_png_bytes,
+    encode_pixels_as_linear_png, encode_pixels_as_srgb_png, load_mesh_from_bytes_with_aux,
 };
 use crate::mesh::uv_mask::{DistanceField, UvMask};
 use crate::types::{

@@ -303,8 +303,7 @@ impl bevy_mikktspace::Geometry for GpuMikkTSpaceInput<'_> {
         face: usize,
         vert: usize,
     ) {
-        self.tangents[face * 3 + vert] =
-            tangent_space.unwrap_or_default().tangent_encoded();
+        self.tangents[face * 3 + vert] = tangent_space.unwrap_or_default().tangent_encoded();
     }
 }
 

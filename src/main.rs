@@ -4,18 +4,18 @@ use std::process;
 use clap::Parser;
 use log::{error, info};
 
-use pa_painter::io::project::{load_project, Project};
+use pa_painter::io::project::{Project, load_project};
 use pa_painter::mesh::asset_io::load_mesh;
-use pa_painter::mesh::object_normal::{compute_mesh_normal_data, MeshNormalData};
-use pa_painter::mesh::stretch_map::{compute_stretch_map, StretchMap};
+use pa_painter::mesh::object_normal::{MeshNormalData, compute_mesh_normal_data};
+use pa_painter::mesh::stretch_map::{StretchMap, compute_stretch_map};
 use pa_painter::mesh::uv_mask::DistanceField;
 use pa_painter::pipeline::compositing::{
-    composite_all, generate_all_paths, render_layer, resolve_base_color, CompositeAllInput,
-    RenderLayerInput,
+    CompositeAllInput, RenderLayerInput, composite_all, generate_all_paths, render_layer,
+    resolve_base_color,
 };
 use pa_painter::pipeline::output::{
-    export_all, export_layer_maps, export_manifest, ExportFormat, LayerExportOptions,
-    LayerManifestEntry,
+    ExportFormat, LayerExportOptions, LayerManifestEntry, export_all, export_layer_maps,
+    export_manifest,
 };
 use pa_painter::types::NormalMode;
 

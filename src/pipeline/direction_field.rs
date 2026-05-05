@@ -263,11 +263,7 @@ impl DirectionField {
             // High variance — guide boundary. Use nearest texel to preserve
             // each guide region's direction without cross-boundary blending.
             let nearest = if fx < 0.5 {
-                if fy < 0.5 {
-                    d00
-                } else {
-                    d01
-                }
+                if fy < 0.5 { d00 } else { d01 }
             } else if fy < 0.5 {
                 d10
             } else {

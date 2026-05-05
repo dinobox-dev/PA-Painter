@@ -2,10 +2,10 @@
 
 use eframe::egui;
 
+use super::PainterApp;
 use super::generation;
 use super::mesh_preview;
 use super::state;
-use super::PainterApp;
 
 /// Extract per-layer LayerMaps references (in compositing order).
 /// Prefers `rendered_layers` from GenResult; falls back to `layer_cache` from GenerationManager
@@ -412,10 +412,20 @@ impl PainterApp {
         // Sync GPU textures with current generation state
         if self.state.mesh_preview.show_result() {
             if let Some(ref generated) = self.state.generated {
-                mesh_preview::upload_color_texture(rs, &generated.color, generated.resolution as usize);
-                mesh_preview::upload_normal_texture(rs, &generated.normal_map, generated.resolution as usize);
-                let lh =
-                    collect_layer_refs(&generated.rendered_layers, &self.state.generation.layer_cache);
+                mesh_preview::upload_color_texture(
+                    rs,
+                    &generated.color,
+                    generated.resolution as usize,
+                );
+                mesh_preview::upload_normal_texture(
+                    rs,
+                    &generated.normal_map,
+                    generated.resolution as usize,
+                );
+                let lh = collect_layer_refs(
+                    &generated.rendered_layers,
+                    &self.state.generation.layer_cache,
+                );
                 let (sc, lc, ng) = mesh_preview::upload_time_texture(
                     rs,
                     &lh,

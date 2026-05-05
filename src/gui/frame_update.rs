@@ -2,11 +2,11 @@
 
 use eframe::egui;
 
+use super::PainterApp;
 use super::file_actions;
 use super::preview;
 use super::recent_files;
 use super::state::{ProjectLoadSource, UnsavedAction};
-use super::PainterApp;
 
 use pa_painter::types::BASE_RESOLUTION;
 

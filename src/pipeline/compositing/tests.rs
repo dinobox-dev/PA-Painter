@@ -19,11 +19,7 @@ impl LocalFrameTransform {
             return None;
         }
         let uv = self.uv_map[ly * self.width + lx];
-        if uv.x.is_nan() {
-            None
-        } else {
-            Some(uv)
-        }
+        if uv.x.is_nan() { None } else { Some(uv) }
     }
 
     fn uv_to_pixel(uv: Vec2, resolution: u32) -> (i32, i32) {
@@ -406,7 +402,7 @@ fn multi_layer_strokes_isolated() {
     layer_a.params.brush_width = 20.0;
     layer_a.params.color_variation = 0.0;
     layer_a.params.viscosity = 1.0; // no diffusion spreading
-                                    // Horizontal strokes in the top half
+    // Horizontal strokes in the top half
     layer_a.guides = vec![Guide {
         guide_type: GuideType::Directional,
         position: Vec2::new(0.5, 0.25),
@@ -419,7 +415,7 @@ fn multi_layer_strokes_isolated() {
     layer_b.params.brush_width = 20.0;
     layer_b.params.color_variation = 0.0;
     layer_b.params.viscosity = 1.0; // no diffusion spreading
-                                    // Vertical strokes in the bottom half
+    // Vertical strokes in the bottom half
     layer_b.guides = vec![Guide {
         guide_type: GuideType::Directional,
         position: Vec2::new(0.5, 0.75),

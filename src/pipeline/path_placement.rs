@@ -10,16 +10,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use glam::Vec2;
 use log::{debug, info, warn};
 
+use crate::mesh::object_normal::MeshNormalData;
 #[cfg(test)]
 use crate::mesh::object_normal::sample_object_normal;
-use crate::mesh::object_normal::MeshNormalData;
 use crate::mesh::stretch_map::StretchMap;
 use crate::mesh::uv_mask::DistanceField;
 use crate::pipeline::direction_field::DirectionField;
-use crate::types::{PaintLayer, StrokeParams, StrokePath, BASE_RESOLUTION};
+use crate::types::{BASE_RESOLUTION, PaintLayer, StrokeParams, StrokePath};
 use crate::util::math::rotate_vec2;
 use crate::util::rng::SeededRng;
-use crate::util::stroke_color::{channel_max_diff, sample_bilinear, ColorTextureRef};
+use crate::util::stroke_color::{ColorTextureRef, channel_max_diff, sample_bilinear};
 
 /// Clamp range for stretch factors in path placement.
 /// Prevents degenerate meshes from causing extreme over/under-sampling.

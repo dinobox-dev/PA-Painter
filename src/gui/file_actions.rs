@@ -12,7 +12,7 @@ pub use project_io::{
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use pa_painter::mesh::asset_io::{extract_uv_edges, load_mesh, LoadedMesh};
+use pa_painter::mesh::asset_io::{LoadedMesh, extract_uv_edges, load_mesh};
 
 use super::state::AppState;
 

@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -7,17 +7,17 @@ use eframe::egui;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use pa_painter::mesh::asset_io::LoadedMesh;
-use pa_painter::mesh::object_normal::{compute_mesh_normal_data, MeshNormalData};
-use pa_painter::mesh::stretch_map::{compute_stretch_map, StretchMap};
+use pa_painter::mesh::object_normal::{MeshNormalData, compute_mesh_normal_data};
+use pa_painter::mesh::stretch_map::{StretchMap, compute_stretch_map};
 use pa_painter::mesh::uv_mask::{DistanceField, UvMask};
 use pa_painter::pipeline::compositing::{
-    finalize_layers, render_layer, LayerMaps, RenderLayerInput,
+    LayerMaps, RenderLayerInput, finalize_layers, render_layer,
 };
 use pa_painter::pipeline::compositing::{resolve_base_color, resolve_base_normal};
 use pa_painter::pipeline::output::{
     blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form,
 };
-use pa_painter::pipeline::path_placement::{generate_paths, PathContext};
+use pa_painter::pipeline::path_placement::{PathContext, generate_paths};
 use pa_painter::types::{
     BackgroundMode, BaseColorSource, Color, Layer, LayerBaseColor, LayerBaseNormal, NormalMode,
     OutputSettings, PaintLayer, StrokePath,

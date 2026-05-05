@@ -2,7 +2,7 @@
 
 use glam::{Mat4, Vec2, Vec3};
 
-use super::{srgb_to_linear, LoadedMesh, LoadedTexture, MeshError, MeshMaterialInfo};
+use super::{LoadedMesh, LoadedTexture, MeshError, MeshMaterialInfo, srgb_to_linear};
 use crate::types::MeshGroup;
 
 // ---------------------------------------------------------------------------

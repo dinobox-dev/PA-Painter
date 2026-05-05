@@ -5,7 +5,7 @@ mod gltf_loader;
 mod obj;
 mod texture;
 
-pub use obj::{collect_obj_aux_files, ObjAuxFiles};
+pub use obj::{ObjAuxFiles, collect_obj_aux_files};
 pub use texture::{
     decode_linear_png_bytes, decode_srgb_png_bytes, encode_pixels_as_linear_png,
     encode_pixels_as_srgb_png, load_texture,

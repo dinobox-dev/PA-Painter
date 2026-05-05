@@ -3,10 +3,10 @@
 
 use eframe::egui;
 
+use super::PainterApp;
 use super::file_actions;
 use super::recent_files;
 use super::state::{AppState, GuideTool, ProjectLoadSource, UnsavedAction};
-use super::PainterApp;
 
 use pa_painter::pipeline::output::ExportFormat;
 use pa_painter::types::{NormalYConvention, TextureSource};

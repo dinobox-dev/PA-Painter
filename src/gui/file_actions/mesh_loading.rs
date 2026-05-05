@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use pa_painter::mesh::asset_io::{collect_obj_aux_files, LoadedMesh, MeshMaterialInfo};
+use pa_painter::mesh::asset_io::{LoadedMesh, MeshMaterialInfo, collect_obj_aux_files};
 use pa_painter::types::{EmbeddedTexture, TextureSource};
 
 use crate::gui::state::{AppState, LayerMapping, MeshLoadPopup};

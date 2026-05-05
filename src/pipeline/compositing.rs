@@ -9,11 +9,11 @@ use glam::Vec2;
 use log::{debug, info};
 use rayon::prelude::*;
 
-use crate::mesh::object_normal::{try_sample_object_normal, MeshNormalData};
+use crate::mesh::object_normal::{MeshNormalData, try_sample_object_normal};
 use crate::mesh::stretch_map::StretchMap;
 use crate::mesh::uv_mask::DistanceField;
-use crate::pipeline::path_placement::{generate_paths, PathContext};
-use crate::pipeline::stroke_height::{generate_stroke_height, StrokeHeightResult};
+use crate::pipeline::path_placement::{PathContext, generate_paths};
+use crate::pipeline::stroke_height::{StrokeHeightResult, generate_stroke_height};
 use crate::types::{
     BackgroundMode, BaseColorSource, Color, LayerBaseColor, LayerCompositeSettings, NormalMode,
     OutputSettings, PaintLayer, StrokePath,
@@ -334,11 +334,7 @@ pub fn composite_stroke(
         .map(|i| {
             let seg = points[i + 1] - points[i];
             let len = seg.length();
-            if len < 1e-8 {
-                Vec2::ZERO
-            } else {
-                seg / len
-            }
+            if len < 1e-8 { Vec2::ZERO } else { seg / len }
         })
         .collect();
 

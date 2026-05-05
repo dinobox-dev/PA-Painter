@@ -4,8 +4,8 @@ use std::path::Path;
 
 use log::debug;
 
-use super::normal_map::normals_to_pixels;
 use super::OutputError;
+use super::normal_map::normals_to_pixels;
 use crate::mesh::asset_io::linear_to_srgb;
 use crate::types::{Color, HsvColor, NormalYConvention};
 use crate::util::stroke_color::hsv_to_rgb;

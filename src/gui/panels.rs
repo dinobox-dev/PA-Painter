@@ -2,12 +2,12 @@
 
 use eframe::egui;
 
+use super::PainterApp;
 use super::recent_files;
 use super::sidebar;
 use super::slot_editor;
 use super::viewport;
 use super::widgets;
-use super::PainterApp;
 
 impl PainterApp {
     /// Colored banner below the menu bar when a newer version is available.

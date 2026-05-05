@@ -427,7 +427,13 @@ mod tests {
             assert!(
                 err < 1e-5,
                 "Hue boundary error: {:.8} for RGB({:.3}, {:.3}, {:.3}), HSV(h={:.5}, s={:.5}, v={:.5})",
-                err, c.r, c.g, c.b, hsv.h, hsv.s, hsv.v
+                err,
+                c.r,
+                c.g,
+                c.b,
+                hsv.h,
+                hsv.s,
+                hsv.v
             );
         }
     }

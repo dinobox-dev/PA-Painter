@@ -323,7 +323,7 @@ pub fn export_all(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::compositing::{composite_all, CompositeAllInput};
+    use crate::pipeline::compositing::{CompositeAllInput, composite_all};
     use crate::test_util::make_layer_with_order;
     use crate::types::{Color, LayerBaseColor};
 

@@ -2,14 +2,14 @@
 
 use eframe::egui_wgpu;
 
+use super::PainterApp;
 use super::mesh_preview;
 use super::pipeline::collect_layer_refs;
 use super::state;
-use super::PainterApp;
 
 use pa_painter::mesh::uv_mask::{DistanceField, UvMask};
 use pa_painter::pipeline::compositing::{
-    fill_base_color_region, resolve_base_color, resolve_base_normal, GlobalMaps,
+    GlobalMaps, fill_base_color_region, resolve_base_color, resolve_base_normal,
 };
 use pa_painter::pipeline::output::blend_normals_udn;
 use pa_painter::types::{BaseColorSource, Color};

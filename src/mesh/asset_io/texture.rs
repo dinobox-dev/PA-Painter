@@ -4,7 +4,7 @@ use log::debug;
 use std::io::Cursor;
 use std::path::Path;
 
-use super::{linear_to_srgb, srgb_to_linear, LoadedTexture, TextureError};
+use super::{LoadedTexture, TextureError, linear_to_srgb, srgb_to_linear};
 
 // ---------------------------------------------------------------------------
 // Texture loading
