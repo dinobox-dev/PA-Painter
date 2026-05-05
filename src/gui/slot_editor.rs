@@ -141,8 +141,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                             .on_hover_text("Shuffle")
                             .clicked()
                         {
-                            use rand::Rng;
-                            layer.seed = rand::thread_rng().gen_range(0..26u32.pow(6));
+                            use rand::RngExt;
+                            layer.seed = rand::rng().random_range(0..26u32.pow(6));
                             ui.data_mut(|d| d.remove::<String>(state_id));
                         }
                     });

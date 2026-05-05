@@ -1,9 +1,8 @@
 //! Deterministic random number generator wrapper backed by ChaCha8.
 
 use glam::Vec2;
-use rand::Rng;
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
+use rand::rngs::ChaCha8Rng;
+use rand::{RngExt, SeedableRng};
 
 /// Deterministic PRNG wrapper. Same seed always produces same sequence.
 pub struct SeededRng {
@@ -19,7 +18,7 @@ impl SeededRng {
 
     /// Random f32 in [0, 1).
     pub fn next_f32(&mut self) -> f32 {
-        self.rng.gen::<f32>()
+        self.rng.random::<f32>()
     }
 
     /// Random f32 in [min, max).
@@ -29,12 +28,12 @@ impl SeededRng {
 
     /// Random i32 in [min, max] (inclusive).
     pub fn next_i32_range(&mut self, min: i32, max: i32) -> i32 {
-        self.rng.gen_range(min..=max)
+        self.rng.random_range(min..=max)
     }
 
-    /// Random usize in [0, n). Uses gen_range to avoid float-cast bias.
+    /// Random usize in [0, n). Uses random_range to avoid float-cast bias.
     pub fn next_usize_below(&mut self, n: usize) -> usize {
-        self.rng.gen_range(0..n)
+        self.rng.random_range(0..n)
     }
 
     /// Random point in circle of given radius.
