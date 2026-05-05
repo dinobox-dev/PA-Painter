@@ -80,57 +80,53 @@ impl PainterApp {
 }
 
 impl eframe::App for PainterApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Intercept window close when there are unsaved changes.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.state.unsaved_confirm = Some(UnsavedAction::Quit);
         }
 
-        // On macOS, rfd dialogs pump the event loop and can re-enter update().
-        // Absorb all input so the UI renders (keeping egui state consistent)
-        // but nothing is interactive.
-        if self.state.modal_dialog_active {
-            egui::Area::new(egui::Id::new("modal_input_blocker"))
-                .fixed_pos(egui::Pos2::ZERO)
-                .order(egui::Order::Foreground)
-                .interactable(true)
-                .show(ctx, |ui: &mut egui::Ui| {
-                    let size = ctx.content_rect().size();
-                    ui.allocate_exact_size(size, egui::Sense::click_and_drag());
-                });
-        }
-
-        // Repaint while the pointer is over the window so hover reactions are instant.
         if ctx.input(|i| i.pointer.has_pointer()) {
             ctx.request_repaint();
         }
         self.init_lazy(ctx);
         self.handle_keyboard(ctx);
         self.handle_file_drop(ctx);
+        self.dispatch_deferred(ctx);
+        self.sync_gpu_textures();
+        self.poll_workers(ctx);
+    }
 
-        // Capture pre-frame snapshot AFTER undo/redo so the restore itself
-        // is invisible to the change tracker.
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
+        // On macOS, rfd dialogs pump the event loop and can re-enter ui().
+        if self.state.modal_dialog_active {
+            egui::Area::new(egui::Id::new("modal_input_blocker"))
+                .fixed_pos(egui::Pos2::ZERO)
+                .order(egui::Order::Foreground)
+                .interactable(true)
+                .show(&ctx, |blocker_ui: &mut egui::Ui| {
+                    let size = ctx.content_rect().size();
+                    blocker_ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+                });
+        }
+
         let pre_frame = self.state.take_snapshot();
-        // Project-replacing actions explicitly set dirty=false; skip auto-dirty for those frames.
         let project_replacing = self.state.pending_open
             || self.state.pending_new
             || self.state.pending_open_example
             || self.pending_open_recent.is_some()
             || self.state.project_load_worker.is_active();
 
-        self.dispatch_deferred(ctx);
-        self.sync_gpu_textures();
-        self.poll_workers(ctx);
-
         // ── UI panels (order matters for egui layout) ──
-        self.show_menu_bar(ctx);
-        self.show_update_banner(ctx);
-        self.show_status_bar(ctx);
-        self.show_sidebars(ctx);
-        self.show_central_panel(ctx);
-        self.show_mesh_load_popup(ctx);
-        self.show_auxiliary_windows(ctx);
+        self.show_menu_bar(ui);
+        self.show_update_banner(ui);
+        self.show_status_bar(ui);
+        self.show_sidebars(ui);
+        self.show_central_panel(ui);
+        self.show_mesh_load_popup(&ctx);
+        self.show_auxiliary_windows(&ctx);
 
         // Drag-and-drop overlay
         if !ctx.input(|i| i.raw.hovered_files.is_empty()) {
@@ -166,7 +162,7 @@ impl eframe::App for PainterApp {
             );
         }
 
-        self.auto_preview_tick(ctx, project_replacing);
+        self.auto_preview_tick(&ctx, project_replacing);
 
         // ── Undo: track post-frame changes ──
         let post_frame = self.state.take_snapshot();
@@ -185,7 +181,7 @@ impl eframe::App for PainterApp {
 impl PainterApp {
     /// One-time lazy initialization (checkerboard texture, etc.).
     fn init_lazy(&mut self, ctx: &egui::Context) {
-        ctx.style_mut(|s| s.spacing.scroll.dormant_handle_opacity = 0.4);
+        ctx.global_style_mut(|s| s.spacing.scroll.dormant_handle_opacity = 0.4);
         if self.checkerboard.is_none() {
             self.checkerboard = Some(viewport::make_checkerboard(ctx));
         }
@@ -205,10 +201,8 @@ impl PainterApp {
         // Older projects lack model_transform in editor.json — if it
         // deserialized as identity, recompute from mesh bounds.
         let needs_recompute = self.state.mesh_preview.model_transform == glam::Mat4::IDENTITY;
-        if needs_recompute {
-            if let Some(ref mesh) = self.state.loaded_mesh {
-                self.state.mesh_preview.recompute_model_transform(mesh);
-            }
+        if needs_recompute && let Some(ref mesh) = self.state.loaded_mesh {
+            self.state.mesh_preview.recompute_model_transform(mesh);
         }
         self.init_mesh_preview_no_fit();
     }

@@ -666,15 +666,15 @@ impl AppState {
         self.dirty = true;
 
         // Fix selection indices if out of bounds
-        if let Some(idx) = self.selected_layer {
-            if idx >= self.project.layers.len() {
-                self.selected_layer = if self.project.layers.is_empty() {
-                    None
-                } else {
-                    Some(self.project.layers.len() - 1)
-                };
-                self.selected_guide = None;
-            }
+        if let Some(idx) = self.selected_layer
+            && idx >= self.project.layers.len()
+        {
+            self.selected_layer = if self.project.layers.is_empty() {
+                None
+            } else {
+                Some(self.project.layers.len() - 1)
+            };
+            self.selected_guide = None;
         }
         // Fix selected_guide if the layer now has fewer guides
         if let Some(gi) = self.selected_guide {

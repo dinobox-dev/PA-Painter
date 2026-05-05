@@ -103,18 +103,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                         );
 
                         // Select all on initial focus
-                        if te_resp.gained_focus() {
-                            if let Some(mut state) =
+                        if te_resp.gained_focus()
+                            && let Some(mut state) =
                                 egui::TextEdit::load_state(ui.ctx(), te_resp.id)
-                            {
-                                state
-                                    .cursor
-                                    .set_char_range(Some(egui::text::CCursorRange::two(
-                                        egui::text::CCursor::new(0),
-                                        egui::text::CCursor::new(buf.len()),
-                                    )));
-                                state.store(ui.ctx(), te_resp.id);
-                            }
+                        {
+                            state
+                                .cursor
+                                .set_char_range(Some(egui::text::CCursorRange::two(
+                                    egui::text::CCursor::new(0),
+                                    egui::text::CCursor::new(buf.len()),
+                                )));
+                            state.store(ui.ctx(), te_resp.id);
                         }
 
                         // Filter: keep only A-Z, auto-uppercase
@@ -923,31 +922,31 @@ fn draw_curve_knots_and_handles(
             knots.remove(i);
         }
 
-        if response.double_clicked() {
-            if let Some(pointer_pos) = ui.ctx().pointer_latest_pos() {
-                let near_existing = knots.iter().any(|k| {
-                    canvas.to_screen(k.pos[0], k.pos[1]).distance(pointer_pos) < HIT_RADIUS
-                });
-                if !near_existing {
-                    let [cx, cy] = canvas.to_curve(pointer_pos);
-                    if cx > 0.01 && cx < 0.99 {
-                        let insert_at = knots
-                            .iter()
-                            .position(|k| k.pos[0] > cx)
-                            .unwrap_or(knots.len());
-                        let prev = if insert_at > 0 {
-                            Some(knots[insert_at - 1].pos)
-                        } else {
-                            None
-                        };
-                        let next = if insert_at < knots.len() {
-                            Some(knots[insert_at].pos)
-                        } else {
-                            None
-                        };
-                        let new_knot = CurveKnot::smooth([cx, cy], prev, next);
-                        knots.insert(insert_at, new_knot);
-                    }
+        if response.double_clicked()
+            && let Some(pointer_pos) = ui.ctx().pointer_latest_pos()
+        {
+            let near_existing = knots
+                .iter()
+                .any(|k| canvas.to_screen(k.pos[0], k.pos[1]).distance(pointer_pos) < HIT_RADIUS);
+            if !near_existing {
+                let [cx, cy] = canvas.to_curve(pointer_pos);
+                if cx > 0.01 && cx < 0.99 {
+                    let insert_at = knots
+                        .iter()
+                        .position(|k| k.pos[0] > cx)
+                        .unwrap_or(knots.len());
+                    let prev = if insert_at > 0 {
+                        Some(knots[insert_at - 1].pos)
+                    } else {
+                        None
+                    };
+                    let next = if insert_at < knots.len() {
+                        Some(knots[insert_at].pos)
+                    } else {
+                        None
+                    };
+                    let new_knot = CurveKnot::smooth([cx, cy], prev, next);
+                    knots.insert(insert_at, new_knot);
                 }
             }
         }
@@ -1286,10 +1285,9 @@ fn show_file_with_actions(ui: &mut egui::Ui, tex_opt: &mut Option<EmbeddedTextur
         if small_icon_button(ui, SWAP, ICON_FONT, ICON_SIZE, true)
             .on_hover_text("Replace")
             .clicked()
+            && let Some(new_tex) = pick_and_load_texture()
         {
-            if let Some(new_tex) = pick_and_load_texture() {
-                *tex_opt = Some(new_tex);
-            }
+            *tex_opt = Some(new_tex);
         }
         if small_icon_button(ui, X_CIRCLE, ICON_FONT, ICON_SIZE, true)
             .on_hover_text("Clear")
@@ -1305,10 +1303,9 @@ fn show_file_with_actions(ui: &mut egui::Ui, tex_opt: &mut Option<EmbeddedTextur
                 egui::Button::new("Open file…"),
             )
             .clicked()
+            && let Some(new_tex) = pick_and_load_texture()
         {
-            if let Some(new_tex) = pick_and_load_texture() {
-                *tex_opt = Some(new_tex);
-            }
+            *tex_opt = Some(new_tex);
         }
     }
 }

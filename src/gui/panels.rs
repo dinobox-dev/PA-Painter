@@ -11,7 +11,7 @@ use super::widgets;
 
 impl PainterApp {
     /// Colored banner below the menu bar when a newer version is available.
-    pub(super) fn show_update_banner(&mut self, ctx: &egui::Context) {
+    pub(super) fn show_update_banner(&mut self, ui: &mut egui::Ui) {
         self.update_checker.poll();
 
         if self.update_dismissed {
@@ -35,10 +35,10 @@ impl PainterApp {
         let x_size = 18.0;
         let gap = 5.0;
 
-        egui::TopBottomPanel::top("update_banner")
-            .exact_height(banner_h)
+        egui::Panel::top("update_banner")
+            .exact_size(banner_h)
             .frame(egui::Frame::new().fill(bg))
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 let rect = ui.max_rect();
                 let cy = rect.center().y;
                 let p = ui.painter();
@@ -130,8 +130,8 @@ impl PainterApp {
         ui.add_enabled(enabled, btn).clicked()
     }
 
-    pub(super) fn show_menu_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui: &mut egui::Ui| {
+    pub(super) fn show_menu_bar(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::top("menu_bar").show_inside(ui, |ui: &mut egui::Ui| {
             egui::MenuBar::new().ui(ui, |ui: &mut egui::Ui| {
                 ui.menu_button("File", |ui: &mut egui::Ui| {
                     use egui::{Key, KeyboardShortcut, Modifiers};
@@ -275,10 +275,10 @@ impl PainterApp {
     }
 
     /// Bottom status bar (status message, resolution, layer count).
-    pub(super) fn show_status_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("status_bar")
-            .exact_height(24.0)
-            .show(ctx, |ui: &mut egui::Ui| {
+    pub(super) fn show_status_bar(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::bottom("status_bar")
+            .exact_size(24.0)
+            .show_inside(ui, |ui: &mut egui::Ui| {
                 ui.horizontal(|ui: &mut egui::Ui| {
                     ui.label(&self.state.status_message);
                     ui.separator();
@@ -291,13 +291,13 @@ impl PainterApp {
     }
 
     /// Left sidebar (layers, settings) and right sidebar (layer inspector).
-    pub(super) fn show_sidebars(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("left_panel")
-            .default_width(260.0)
-            .min_width(260.0)
-            .max_width(400.0)
-            .show(ctx, |ui: &mut egui::Ui| {
-                egui::TopBottomPanel::bottom("left_bottom")
+    pub(super) fn show_sidebars(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::left("left_panel")
+            .default_size(260.0)
+            .min_size(260.0)
+            .max_size(400.0)
+            .show_inside(ui, |ui: &mut egui::Ui| {
+                egui::Panel::bottom("left_bottom")
                     .frame(egui::Frame::new().inner_margin(0.0))
                     .show_separator_line(false)
                     .show_inside(ui, |ui: &mut egui::Ui| {
@@ -311,11 +311,11 @@ impl PainterApp {
             });
 
         if self.state.selected_layer.is_some() {
-            egui::SidePanel::right("right_panel")
-                .default_width(280.0)
-                .min_width(240.0)
-                .max_width(420.0)
-                .show(ctx, |ui: &mut egui::Ui| {
+            egui::Panel::right("right_panel")
+                .default_size(280.0)
+                .min_size(240.0)
+                .max_size(420.0)
+                .show_inside(ui, |ui: &mut egui::Ui| {
                     egui::ScrollArea::vertical().show(ui, |ui: &mut egui::Ui| {
                         slot_editor::show(ui, &mut self.state);
                     });
@@ -324,7 +324,8 @@ impl PainterApp {
     }
 
     /// Central panel: viewport (UV/3D) or welcome screen.
-    pub(super) fn show_central_panel(&mut self, ctx: &egui::Context) {
+    pub(super) fn show_central_panel(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
         let title = if let Some(name) = self
             .state
             .project_path
@@ -345,7 +346,7 @@ impl PainterApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         let render_state = self.render_state.clone();
-        egui::CentralPanel::default().show(ctx, |ui: &mut egui::Ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui: &mut egui::Ui| {
             let has_project = self.state.loaded_mesh.is_some() || self.state.project_path.is_some();
 
             if has_project {

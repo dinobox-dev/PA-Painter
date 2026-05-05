@@ -477,7 +477,7 @@ fn path_overlay_button(ui: &mut egui::Ui, selected: &mut Option<usize>) {
 fn strip_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 4.0;
     use egui_phosphor::fill::*;
-    let no_text = !ui.ctx().wants_keyboard_input();
+    let no_text = !ui.ctx().egui_wants_keyboard_input();
     let maps = [
         (MapMode::Color, egui::Key::Num1, "1", PALETTE, "Color"),
         (MapMode::Height, egui::Key::Num2, "2", MOUNTAINS, "Height"),
@@ -502,7 +502,7 @@ fn strip_uv_view(ui: &mut egui::Ui, state: &mut AppState) {
 fn strip_setup(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 4.0;
     use egui_phosphor::fill::*;
-    let no_text = !ui.ctx().wants_keyboard_input();
+    let no_text = !ui.ctx().egui_wants_keyboard_input();
     let tools = [
         (GuideTool::Select, egui::Key::Num1, "1", CURSOR, "Select"),
         (
@@ -558,7 +558,7 @@ fn strip_3d(ui: &mut egui::Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 4.0;
     use super::state::OrbitTarget;
     use egui_phosphor::fill::*;
-    let no_text = !ui.ctx().wants_keyboard_input();
+    let no_text = !ui.ctx().egui_wants_keyboard_input();
 
     let targets = [
         (

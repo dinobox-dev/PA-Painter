@@ -169,14 +169,13 @@ impl PathOverlayCache {
         }
 
         // If a worker is already computing exactly these params, not stale either.
-        if let Some((idx, ref key)) = self.pending {
-            if idx == layer_index
-                && key.paint == layer.paint
-                && key.seed == seed
-                && key.guides == layer.guides
-            {
-                return false;
-            }
+        if let Some((idx, ref key)) = self.pending
+            && idx == layer_index
+            && key.paint == layer.paint
+            && key.seed == seed
+            && key.guides == layer.guides
+        {
+            return false;
         }
 
         true

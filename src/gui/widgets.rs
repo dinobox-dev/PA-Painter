@@ -167,7 +167,7 @@ pub fn slider_row(
             egui::TextEdit::singleline(&mut text_buf)
                 .desired_width(TEXT_FIELD_W)
                 .clip_text(true)
-                .frame(false),
+                .frame(egui::Frame::NONE),
         );
 
         // Fill the reserved slot with a DragValue-style background.
@@ -189,10 +189,10 @@ pub fn slider_row(
             te_resp.surrender_focus();
         }
 
-        if te_resp.changed() || te_resp.lost_focus() {
-            if let Ok(v) = text_buf.parse::<f32>() {
-                *value = v.clamp(*range.start(), *range.end());
-            }
+        if (te_resp.changed() || te_resp.lost_focus())
+            && let Ok(v) = text_buf.parse::<f32>()
+        {
+            *value = v.clamp(*range.start(), *range.end());
         }
 
         if te_resp.has_focus() {

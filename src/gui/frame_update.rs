@@ -57,36 +57,36 @@ impl PainterApp {
         }
 
         // Duplicate selected layer
-        if !ctx.wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::D))
+        if !ctx.egui_wants_keyboard_input()
+            && ctx.input_mut(|i| i.consume_key(undo_mods, egui::Key::D))
+            && let Some(idx) = self.state.selected_layer
         {
-            if let Some(idx) = self.state.selected_layer {
-                let mut cloned = self.state.project.layers[idx].clone();
-                cloned.name = format!("{} copy", cloned.name);
-                cloned.seed = self.state.project.layers.len() as u32;
-                self.state.project.layers.insert(idx, cloned);
-                self.state.selected_layer = Some(idx);
-                self.state.selected_guide = None;
-                let n = self.state.project.layers.len() as i32;
-                for (i, layer) in self.state.project.layers.iter_mut().enumerate() {
-                    layer.order = n - 1 - i as i32;
-                }
-                self.state.pending_remerge = true;
+            let mut cloned = self.state.project.layers[idx].clone();
+            cloned.name = format!("{} copy", cloned.name);
+            cloned.seed = self.state.project.layers.len() as u32;
+            self.state.project.layers.insert(idx, cloned);
+            self.state.selected_layer = Some(idx);
+            self.state.selected_guide = None;
+            let n = self.state.project.layers.len() as i32;
+            for (i, layer) in self.state.project.layers.iter_mut().enumerate() {
+                layer.order = n - 1 - i as i32;
             }
+            self.state.pending_remerge = true;
         }
 
         // Delete selected layer or guide (skip if a text field has focus)
-        if !ctx.wants_keyboard_input()
+        if !ctx.egui_wants_keyboard_input()
             && ctx.input_mut(|i| {
                 i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
                     || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
             })
         {
             if let Some(gi) = self.state.selected_guide {
-                if let Some(li) = self.state.selected_layer {
-                    if gi < self.state.project.layers[li].guides.len() {
-                        self.state.project.layers[li].guides.remove(gi);
-                        self.state.selected_guide = None;
-                    }
+                if let Some(li) = self.state.selected_layer
+                    && gi < self.state.project.layers[li].guides.len()
+                {
+                    self.state.project.layers[li].guides.remove(gi);
+                    self.state.selected_guide = None;
                 }
             } else if let Some(idx) = self.state.selected_layer {
                 self.state.project.layers.remove(idx);
@@ -252,48 +252,47 @@ impl PainterApp {
             }
         }
         // Submit new path overlay computation if cache is stale
-        if self.state.viewport.path_overlay_idx.is_some() {
-            if let Some(selected) = self.state.selected_layer {
-                if selected < self.state.project.layers.len() {
-                    let layer = &self.state.project.layers[selected];
-                    if layer.visible {
-                        let seed = layer.seed;
+        if self.state.viewport.path_overlay_idx.is_some()
+            && let Some(selected) = self.state.selected_layer
+            && selected < self.state.project.layers.len()
+        {
+            let layer = &self.state.project.layers[selected];
+            if layer.visible {
+                let seed = layer.seed;
 
-                        let stale = self
+                let stale = self
+                    .state
+                    .path_overlay
+                    .is_stale_for_layer(selected, layer, seed);
+
+                if stale {
+                    let needs_normal = layer.paint.normal_break_threshold.is_some();
+                    let normals_stale = needs_normal
+                        && self
                             .state
-                            .path_overlay
-                            .is_stale_for_layer(selected, layer, seed);
+                            .cached_mesh_normals
+                            .as_ref()
+                            .is_none_or(|(r, _)| *r != BASE_RESOLUTION);
 
-                        if stale {
-                            let needs_normal = layer.paint.normal_break_threshold.is_some();
-                            let normals_stale = needs_normal
-                                && self
-                                    .state
-                                    .cached_mesh_normals
-                                    .as_ref()
-                                    .is_none_or(|(r, _)| *r != BASE_RESOLUTION);
-
-                            let input = preview::PathOverlayInput {
-                                layer: layer.clone(),
-                                layer_index: selected,
-                                layer_count: self.state.project.layers.len(),
-                                seed,
-                                resolution: BASE_RESOLUTION,
-                                cached_normals: if needs_normal {
-                                    self.state.cached_mesh_normals.clone()
-                                } else {
-                                    None
-                                },
-                                mesh: if normals_stale {
-                                    self.state.loaded_mesh.clone()
-                                } else {
-                                    None
-                                },
-                            };
-                            self.state.path_overlay.set_pending(selected, layer, seed);
-                            self.state.path_worker.start(input);
-                        }
-                    }
+                    let input = preview::PathOverlayInput {
+                        layer: layer.clone(),
+                        layer_index: selected,
+                        layer_count: self.state.project.layers.len(),
+                        seed,
+                        resolution: BASE_RESOLUTION,
+                        cached_normals: if needs_normal {
+                            self.state.cached_mesh_normals.clone()
+                        } else {
+                            None
+                        },
+                        mesh: if normals_stale {
+                            self.state.loaded_mesh.clone()
+                        } else {
+                            None
+                        },
+                    };
+                    self.state.path_overlay.set_pending(selected, layer, seed);
+                    self.state.path_worker.start(input);
                 }
             }
         }

@@ -169,35 +169,34 @@ impl PainterApp {
         if mode != self.prev_result_mode {
             self.prev_result_mode = mode;
             if show {
-                if let Some(ref rs) = self.render_state {
-                    if self.state.mesh_preview.gpu_ready {
-                        if let Some(ref generated) = self.state.generated {
-                            mesh_preview::upload_color_texture_raw(
-                                rs,
-                                &generated.gpu_color_pixels,
-                                generated.resolution as usize,
-                            );
-                            mesh_preview::upload_normal_texture_raw(
-                                rs,
-                                &generated.gpu_normal_pixels,
-                                generated.resolution as usize,
-                            );
-                            let lh = collect_layer_refs(
-                                &generated.rendered_layers,
-                                &self.state.generation.layer_cache,
-                            );
-                            let (sc, lc, ng) = mesh_preview::upload_time_texture(
-                                rs,
-                                &lh,
-                                generated.resolution,
-                                self.state.mesh_preview.draw_order,
-                                self.state.mesh_preview.chunk_size,
-                            );
-                            self.state.mesh_preview.stroke_count = sc;
-                            self.state.mesh_preview.layer_count = lc;
-                            self.state.mesh_preview.num_groups = ng;
-                        }
-                    }
+                if let Some(ref rs) = self.render_state
+                    && self.state.mesh_preview.gpu_ready
+                    && let Some(ref generated) = self.state.generated
+                {
+                    mesh_preview::upload_color_texture_raw(
+                        rs,
+                        &generated.gpu_color_pixels,
+                        generated.resolution as usize,
+                    );
+                    mesh_preview::upload_normal_texture_raw(
+                        rs,
+                        &generated.gpu_normal_pixels,
+                        generated.resolution as usize,
+                    );
+                    let lh = collect_layer_refs(
+                        &generated.rendered_layers,
+                        &self.state.generation.layer_cache,
+                    );
+                    let (sc, lc, ng) = mesh_preview::upload_time_texture(
+                        rs,
+                        &lh,
+                        generated.resolution,
+                        self.state.mesh_preview.draw_order,
+                        self.state.mesh_preview.chunk_size,
+                    );
+                    self.state.mesh_preview.stroke_count = sc;
+                    self.state.mesh_preview.layer_count = lc;
+                    self.state.mesh_preview.num_groups = ng;
                 }
             } else {
                 self.upload_base_only_to_3d();
@@ -220,50 +219,48 @@ impl PainterApp {
         if cur_order != self.prev_draw_order || cur_chunk != self.prev_chunk_size {
             self.prev_draw_order = cur_order;
             self.prev_chunk_size = cur_chunk;
-            if mode == state::ResultMode::Drawing {
-                if let Some(ref rs) = self.render_state {
-                    if self.state.mesh_preview.gpu_ready {
-                        if let Some(ref generated) = self.state.generated {
-                            let lh = collect_layer_refs(
-                                &generated.rendered_layers,
-                                &self.state.generation.layer_cache,
-                            );
-                            let (sc, lc, ng) = mesh_preview::upload_time_texture(
-                                rs,
-                                &lh,
-                                generated.resolution,
-                                cur_order,
-                                self.state.mesh_preview.chunk_size,
-                            );
-                            self.state.mesh_preview.stroke_count = sc;
-                            self.state.mesh_preview.layer_count = lc;
-                            self.state.mesh_preview.num_groups = ng;
-                        }
-                    }
-                }
+            if mode == state::ResultMode::Drawing
+                && let Some(ref rs) = self.render_state
+                && self.state.mesh_preview.gpu_ready
+                && let Some(ref generated) = self.state.generated
+            {
+                let lh = collect_layer_refs(
+                    &generated.rendered_layers,
+                    &self.state.generation.layer_cache,
+                );
+                let (sc, lc, ng) = mesh_preview::upload_time_texture(
+                    rs,
+                    &lh,
+                    generated.resolution,
+                    cur_order,
+                    self.state.mesh_preview.chunk_size,
+                );
+                self.state.mesh_preview.stroke_count = sc;
+                self.state.mesh_preview.layer_count = lc;
+                self.state.mesh_preview.num_groups = ng;
             }
         }
 
         // ── Direction field overlay: sync with toggle + guide changes ──
         // Clone render_state (cheap Arc clone) to avoid borrowing self during
         // upload_direction_field_overlay.
-        if let Some(rs) = self.render_state.clone() {
-            if self.state.mesh_preview.gpu_ready {
-                let show_df = self.state.mesh_preview.show_direction_field;
-                let df_hash = self.direction_field_hash();
+        if let Some(rs) = self.render_state.clone()
+            && self.state.mesh_preview.gpu_ready
+        {
+            let show_df = self.state.mesh_preview.show_direction_field;
+            let df_hash = self.direction_field_hash();
 
-                if show_df != self.prev_show_direction_field {
-                    self.prev_show_direction_field = show_df;
-                    if show_df {
-                        self.upload_direction_field_overlay(&rs);
-                        self.prev_direction_field_hash = df_hash;
-                    } else {
-                        mesh_preview::clear_overlay_texture(&rs);
-                    }
-                } else if show_df && df_hash != self.prev_direction_field_hash {
-                    self.prev_direction_field_hash = df_hash;
+            if show_df != self.prev_show_direction_field {
+                self.prev_show_direction_field = show_df;
+                if show_df {
                     self.upload_direction_field_overlay(&rs);
+                    self.prev_direction_field_hash = df_hash;
+                } else {
+                    mesh_preview::clear_overlay_texture(&rs);
                 }
+            } else if show_df && df_hash != self.prev_direction_field_hash {
+                self.prev_direction_field_hash = df_hash;
+                self.upload_direction_field_overlay(&rs);
             }
         }
     }

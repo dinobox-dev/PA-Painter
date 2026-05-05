@@ -426,12 +426,11 @@ pub fn composite_stroke(
                     appearance.normal_break_threshold,
                     normal_data,
                     stroke_normal,
-                ) {
-                    if let Some(pixel_n) = try_sample_object_normal(nd, uv) {
-                        let sn_vec = glam::Vec3::new(sn[0], sn[1], sn[2]);
-                        if sn_vec.dot(pixel_n) < threshold {
-                            continue;
-                        }
+                ) && let Some(pixel_n) = try_sample_object_normal(nd, uv)
+                {
+                    let sn_vec = glam::Vec3::new(sn[0], sn[1], sn[2]);
+                    if sn_vec.dot(pixel_n) < threshold {
+                        continue;
                     }
                 }
 
@@ -453,10 +452,10 @@ pub fn composite_stroke(
                         global.paint_load[idx] = r;
                     }
 
-                    if let Some(sn) = stroke_normal {
-                        if !global.object_normal.is_empty() {
-                            global.object_normal[idx] = sn;
-                        }
+                    if let Some(sn) = stroke_normal
+                        && !global.object_normal.is_empty()
+                    {
+                        global.object_normal[idx] = sn;
                     }
                 }
 

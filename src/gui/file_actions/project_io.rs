@@ -59,10 +59,10 @@ pub fn apply_load_result(
     state.undo.clear();
 
     // Restore editor UI state (camera, viewport, playback, etc.)
-    if let Some(json) = editor_state_json {
-        if let Ok(es) = serde_json::from_str::<crate::gui::state::EditorState>(&json) {
-            state.apply_editor_state(es);
-        }
+    if let Some(json) = editor_state_json
+        && let Ok(es) = serde_json::from_str::<crate::gui::state::EditorState>(&json)
+    {
+        state.apply_editor_state(es);
     }
 
     // Auto-preview will regenerate output after load

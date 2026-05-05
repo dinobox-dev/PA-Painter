@@ -23,7 +23,7 @@ impl PainterApp {
         }
 
         let mut action: Option<bool> = None; // Some(true) = save, Some(false) = cancel
-        let weak = ctx.style().visuals.weak_text_color();
+        let weak = ctx.global_style().visuals.weak_text_color();
 
         let frame = egui::Frame {
             inner_margin: egui::Margin::same(16),
@@ -35,7 +35,7 @@ impl PainterApp {
                 spread: 4,
                 color: egui::Color32::from_black_alpha(80),
             },
-            fill: ctx.style().visuals.window_fill,
+            fill: ctx.global_style().visuals.window_fill,
             stroke: egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
         };
 
@@ -182,7 +182,7 @@ impl PainterApp {
                     spread: 4,
                     color: egui::Color32::from_black_alpha(80),
                 },
-                fill: ctx.style().visuals.window_fill,
+                fill: ctx.global_style().visuals.window_fill,
                 stroke: egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
             };
 

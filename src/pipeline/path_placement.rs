@@ -143,13 +143,15 @@ pub(crate) fn generate_seeds_poisson_in(
                 for dx in -check_radius..=check_radius {
                     let ni = ci as i32 + dx;
                     let nj = cj as i32 + dy;
-                    if ni >= 0 && ni < grid_w as i32 && nj >= 0 && nj < grid_h as i32 {
-                        if let Some(idx) = grid[nj as usize * grid_w + ni as usize] {
-                            if (candidate - points[idx]).length_squared() < cand_min_sq {
-                                too_close = true;
-                                break 'outer;
-                            }
-                        }
+                    if ni >= 0
+                        && ni < grid_w as i32
+                        && nj >= 0
+                        && nj < grid_h as i32
+                        && let Some(idx) = grid[nj as usize * grid_w + ni as usize]
+                        && (candidate - points[idx]).length_squared() < cand_min_sq
+                    {
+                        too_close = true;
+                        break 'outer;
                     }
                 }
             }
@@ -257,10 +259,10 @@ pub fn trace_streamline(
         }
 
         // Mask boundary check (distance field)
-        if let Some(df) = dist_field {
-            if !df.sample(next_pos, dist_threshold) {
-                break;
-            }
+        if let Some(df) = dist_field
+            && !df.sample(next_pos, dist_threshold)
+        {
+            break;
         }
 
         // Color boundary check
@@ -446,12 +448,11 @@ pub fn generate_paths(
             dist_field,
             seed_threshold,
             stretch_map,
-        ) {
-            if let Some(clipped) = clip_path_to_uv(path) {
-                let length: f32 = clipped.windows(2).map(|w| (w[1] - w[0]).length()).sum();
-                if length >= min_length {
-                    raw_paths.push(clipped);
-                }
+        ) && let Some(clipped) = clip_path_to_uv(path)
+        {
+            let length: f32 = clipped.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+            if length >= min_length {
+                raw_paths.push(clipped);
             }
         }
     }

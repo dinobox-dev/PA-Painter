@@ -62,18 +62,18 @@ fn handle_select(
     // Start drag: use press_origin for accurate hit-testing.
     // (interact_pointer_pos returns the position at drag-threshold, which may
     //  have drifted past the handle — press_origin is the true press point.)
-    if response.drag_started_by(egui::PointerButton::Primary) {
-        if let Some(pos) = ui.input(|i| i.pointer.press_origin()) {
-            let guides = &state.project.layers[layer_idx].guides;
-            if let Some(target) = hit_test_full(pos, guides, state, viewport_rect) {
-                let idx = match target {
-                    DragTarget::GuidePosition(i)
-                    | DragTarget::GuideDirection(i)
-                    | DragTarget::GuideInfluence(i) => i,
-                };
-                state.guide_drag = Some(target);
-                state.selected_guide = Some(idx);
-            }
+    if response.drag_started_by(egui::PointerButton::Primary)
+        && let Some(pos) = ui.input(|i| i.pointer.press_origin())
+    {
+        let guides = &state.project.layers[layer_idx].guides;
+        if let Some(target) = hit_test_full(pos, guides, state, viewport_rect) {
+            let idx = match target {
+                DragTarget::GuidePosition(i)
+                | DragTarget::GuideDirection(i)
+                | DragTarget::GuideInfluence(i) => i,
+            };
+            state.guide_drag = Some(target);
+            state.selected_guide = Some(idx);
         }
     }
 
@@ -123,14 +123,14 @@ fn handle_select(
     }
 
     // Click (no drag): select or deselect
-    if response.clicked() {
-        if let Some(pos) = response.interact_pointer_pos() {
-            let guides = &state.project.layers[layer_idx].guides;
-            if let Some(idx) = hit_test_position(pos, guides, state, viewport_rect) {
-                state.selected_guide = Some(idx);
-            } else {
-                state.selected_guide = None;
-            }
+    if response.clicked()
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        let guides = &state.project.layers[layer_idx].guides;
+        if let Some(idx) = hit_test_position(pos, guides, state, viewport_rect) {
+            state.selected_guide = Some(idx);
+        } else {
+            state.selected_guide = None;
         }
     }
 
@@ -168,22 +168,22 @@ fn handle_add(
     viewport_rect: Rect,
     guide_type: GuideType,
 ) {
-    if response.clicked() {
-        if let Some(pos) = response.interact_pointer_pos() {
-            let uv = screen_to_uv(pos, state, viewport_rect);
-            if (0.0..=1.0).contains(&uv.x) && (0.0..=1.0).contains(&uv.y) {
-                state.project.layers[layer_idx].guides.push(Guide {
-                    guide_type,
-                    position: uv,
-                    direction: glam::Vec2::X,
-                    influence: 0.2,
-                    strength: 1.0,
-                });
-                let n = state.project.layers[layer_idx].guides.len();
-                state.selected_guide = Some(n - 1);
-                // Switch to Select so user can immediately interact
-                state.guide_tool = GuideTool::Select;
-            }
+    if response.clicked()
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        let uv = screen_to_uv(pos, state, viewport_rect);
+        if (0.0..=1.0).contains(&uv.x) && (0.0..=1.0).contains(&uv.y) {
+            state.project.layers[layer_idx].guides.push(Guide {
+                guide_type,
+                position: uv,
+                direction: glam::Vec2::X,
+                influence: 0.2,
+                strength: 1.0,
+            });
+            let n = state.project.layers[layer_idx].guides.len();
+            state.selected_guide = Some(n - 1);
+            // Switch to Select so user can immediately interact
+            state.guide_tool = GuideTool::Select;
         }
     }
 }

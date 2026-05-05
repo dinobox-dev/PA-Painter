@@ -295,17 +295,17 @@ pub fn save_project(
 
     // assets/layer_{n}_color.png / layer_{n}_normal.png — File-mode textures
     for (i, layer) in project.layers.iter().enumerate() {
-        if let TextureSource::File(Some(ref tex)) = layer.base_color {
-            if let Some(png) = encode_pixels_as_srgb_png(&tex.pixels, tex.width, tex.height) {
-                zip.start_file(format!("assets/layer_{i}_color.png"), options)?;
-                zip.write_all(&png)?;
-            }
+        if let TextureSource::File(Some(ref tex)) = layer.base_color
+            && let Some(png) = encode_pixels_as_srgb_png(&tex.pixels, tex.width, tex.height)
+        {
+            zip.start_file(format!("assets/layer_{i}_color.png"), options)?;
+            zip.write_all(&png)?;
         }
-        if let TextureSource::File(Some(ref tex)) = layer.base_normal {
-            if let Some(png) = encode_pixels_as_linear_png(&tex.pixels, tex.width, tex.height) {
-                zip.start_file(format!("assets/layer_{i}_normal.png"), options)?;
-                zip.write_all(&png)?;
-            }
+        if let TextureSource::File(Some(ref tex)) = layer.base_normal
+            && let Some(png) = encode_pixels_as_linear_png(&tex.pixels, tex.width, tex.height)
+        {
+            zip.start_file(format!("assets/layer_{i}_normal.png"), options)?;
+            zip.write_all(&png)?;
         }
     }
 

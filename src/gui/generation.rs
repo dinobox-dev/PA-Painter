@@ -581,18 +581,18 @@ fn run_pipeline(
     set_progress(progress, p_blending);
 
     for &(layer_index, _) in &sorted {
-        if let Some(bn) = input.layer_base_normals.get(layer_index) {
-            if let Some(ref pixels) = bn.pixels {
-                let df = df_refs.get(layer_index).and_then(|m| *m);
-                blend_normals_udn(
-                    &mut normal_map,
-                    pixels,
-                    bn.width,
-                    bn.height,
-                    input.resolution,
-                    df,
-                );
-            }
+        if let Some(bn) = input.layer_base_normals.get(layer_index)
+            && let Some(ref pixels) = bn.pixels
+        {
+            let df = df_refs.get(layer_index).and_then(|m| *m);
+            blend_normals_udn(
+                &mut normal_map,
+                pixels,
+                bn.width,
+                bn.height,
+                input.resolution,
+                df,
+            );
         }
     }
 

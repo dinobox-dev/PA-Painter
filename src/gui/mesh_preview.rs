@@ -708,8 +708,11 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("mesh_pipeline_layout"),
-        bind_group_layouts: &[&uniform_bind_group_layout, &texture_bind_group_layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[
+            Some(&uniform_bind_group_layout),
+            Some(&texture_bind_group_layout),
+        ],
+        ..Default::default()
     });
 
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -737,8 +740,8 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
@@ -753,8 +756,8 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
             })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         }),
-        multiview: None,
         cache: None,
+        multiview_mask: None,
     });
 
     let rt = create_render_targets(device, 64, 64);
