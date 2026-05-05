@@ -63,10 +63,10 @@ fn composite_stroke_scatter(
                     let r = local_height.remaining[ly * local_height.width + lx];
                     global.paint_load[idx] = r;
                 }
-                if let Some(sn) = stroke_normal {
-                    if !global.object_normal.is_empty() {
-                        global.object_normal[idx] = sn;
-                    }
+                if let Some(sn) = stroke_normal
+                    && !global.object_normal.is_empty()
+                {
+                    global.object_normal[idx] = sn;
                 }
             }
             let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h);
