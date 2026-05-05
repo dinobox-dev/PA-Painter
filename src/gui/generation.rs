@@ -312,7 +312,7 @@ fn run_pipeline(
     let df_refs: Vec<Option<&DistanceField>> = dist_fields.iter().map(|m| m.as_ref()).collect();
 
     let mut sorted: Vec<(usize, &PaintLayer)> = input.layers.iter().enumerate().collect();
-    sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
+    sorted.sort_by_key(|a| a.1.order);
 
     // ── Check per-layer caches (render + path) ──
     //

@@ -563,7 +563,7 @@ pub fn generate_all_paths(
         layers.len()
     );
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
-    sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
+    sorted.sort_by_key(|a| a.1.order);
 
     let mut all_paths: Vec<Vec<StrokePath>> = sorted
         .par_iter()
@@ -736,7 +736,7 @@ pub fn composite_all(input: &CompositeAllInput<'_>) -> GlobalMaps {
 
     // Sort layers by order (ascending), preserving original index for stroke ID encoding
     let mut sorted: Vec<(usize, &PaintLayer)> = layers.iter().enumerate().collect();
-    sorted.sort_by(|a, b| a.1.order.cmp(&b.1.order));
+    sorted.sort_by_key(|a| a.1.order);
 
     // Phase A: Generate paths (parallel across layers when not cached)
     let mut generated;
