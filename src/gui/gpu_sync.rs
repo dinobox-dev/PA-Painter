@@ -171,25 +171,25 @@ impl PainterApp {
             if show {
                 if let Some(ref rs) = self.render_state {
                     if self.state.mesh_preview.gpu_ready {
-                        if let Some(ref gen) = self.state.generated {
+                        if let Some(ref generated) = self.state.generated {
                             mesh_preview::upload_color_texture_raw(
                                 rs,
-                                &gen.gpu_color_pixels,
-                                gen.resolution as usize,
+                                &generated.gpu_color_pixels,
+                                generated.resolution as usize,
                             );
                             mesh_preview::upload_normal_texture_raw(
                                 rs,
-                                &gen.gpu_normal_pixels,
-                                gen.resolution as usize,
+                                &generated.gpu_normal_pixels,
+                                generated.resolution as usize,
                             );
                             let lh = collect_layer_refs(
-                                &gen.rendered_layers,
+                                &generated.rendered_layers,
                                 &self.state.generation.layer_cache,
                             );
                             let (sc, lc, ng) = mesh_preview::upload_time_texture(
                                 rs,
                                 &lh,
-                                gen.resolution,
+                                generated.resolution,
                                 self.state.mesh_preview.draw_order,
                                 self.state.mesh_preview.chunk_size,
                             );
@@ -223,15 +223,15 @@ impl PainterApp {
             if mode == state::ResultMode::Drawing {
                 if let Some(ref rs) = self.render_state {
                     if self.state.mesh_preview.gpu_ready {
-                        if let Some(ref gen) = self.state.generated {
+                        if let Some(ref generated) = self.state.generated {
                             let lh = collect_layer_refs(
-                                &gen.rendered_layers,
+                                &generated.rendered_layers,
                                 &self.state.generation.layer_cache,
                             );
                             let (sc, lc, ng) = mesh_preview::upload_time_texture(
                                 rs,
                                 &lh,
-                                gen.resolution,
+                                generated.resolution,
                                 cur_order,
                                 self.state.mesh_preview.chunk_size,
                             );

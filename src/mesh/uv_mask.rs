@@ -408,7 +408,7 @@ mod tests {
             .data
             .iter()
             .zip(mask1.data.iter())
-            .filter(|(&a, &b)| a || b)
+            .filter(|&(&a, &b)| a || b)
             .count();
 
         let total = 32 * 32;

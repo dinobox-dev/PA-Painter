@@ -806,7 +806,7 @@ fn draw_curve_knots_and_handles(
     canvas: &CurveCanvas,
     curve: &mut PressureCurve,
 ) {
-    if let PressureCurve::Custom(ref mut knots) = curve {
+    if let PressureCurve::Custom(knots) = curve {
         let n = knots.len();
         let endpoint_color = egui::Color32::from_rgb(100, 200, 255);
         let midpoint_color = egui::Color32::from_rgb(255, 160, 80);
@@ -1093,13 +1093,13 @@ fn show_color_source_controls(ui: &mut egui::Ui, state: &mut AppState, layer_idx
 
         let mesh_ref = &state.loaded_mesh;
         match &mut state.project.layers[layer_idx].base_color {
-            TextureSource::MeshMaterial(ref mut mat_idx) => {
+            TextureSource::MeshMaterial(mat_idx) => {
                 show_material_combo(ui, mesh_ref, mat_idx, "color_mat_combo", true);
             }
-            TextureSource::File(ref mut tex_opt) => {
+            TextureSource::File(tex_opt) => {
                 show_file_with_actions(ui, tex_opt);
             }
-            TextureSource::Solid(ref mut rgb) => {
+            TextureSource::Solid(rgb) => {
                 show_solid_color_fill(ui, rgb);
             }
             TextureSource::None => {
@@ -1158,10 +1158,10 @@ fn show_normal_source_controls(ui: &mut egui::Ui, state: &mut AppState, layer_id
 
         let mesh_ref = &state.loaded_mesh;
         match &mut state.project.layers[layer_idx].base_normal {
-            TextureSource::MeshMaterial(ref mut mat_idx) => {
+            TextureSource::MeshMaterial(mat_idx) => {
                 show_material_combo(ui, mesh_ref, mat_idx, "normal_mat_combo", false);
             }
-            TextureSource::File(ref mut tex_opt) => {
+            TextureSource::File(tex_opt) => {
                 show_file_with_actions(ui, tex_opt);
             }
             TextureSource::None | TextureSource::Solid(_) => {
@@ -1272,7 +1272,7 @@ fn show_file_with_actions(ui: &mut egui::Ui, tex_opt: &mut Option<EmbeddedTextur
     const ICON_SIZE: f32 = 18.0;
     const ICON_FONT: f32 = 13.0;
 
-    if let Some(ref tex) = tex_opt {
+    if let &mut Some(ref tex) = tex_opt {
         let label_text = tex.label.clone();
         // Pre-subtract icon space (2 icons + 2 spacings between 3 widgets)
         let icons_w = ICON_SIZE * 2.0 + ui.spacing().item_spacing.x * 2.0;

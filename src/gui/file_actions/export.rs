@@ -162,7 +162,7 @@ fn count_export_steps(es: &ExportSettings, layer_count: usize, do_glb: bool) -> 
 /// Build an ExportInput from the current app state.
 /// Returns None if there is nothing to export.
 fn gather_export_input(state: &AppState, dir: PathBuf, do_glb: bool) -> Option<ExportInput> {
-    let gen = state.generated.as_ref()?;
+    let generated = state.generated.as_ref()?;
     let es = state.project.export_settings.clone();
     let with_alpha = state.project.settings.background_mode == BackgroundMode::Transparent;
     let need_stroke_id = es.export_maps && es.include_stroke_id;
@@ -197,23 +197,23 @@ fn gather_export_input(state: &AppState, dir: PathBuf, do_glb: bool) -> Option<E
     Some(ExportInput {
         dir,
         es,
-        resolution: gen.resolution,
+        resolution: generated.resolution,
         with_alpha,
-        color: gen.color.clone(),
-        height: gen.height.clone(),
-        normal_map: gen.normal_map.clone(),
+        color: generated.color.clone(),
+        height: generated.height.clone(),
+        normal_map: generated.normal_map.clone(),
         stroke_id: if need_stroke_id {
-            gen.stroke_id.clone()
+            generated.stroke_id.clone()
         } else {
             Vec::new()
         },
         stroke_time_order: if need_time {
-            gen.stroke_time_order.clone()
+            generated.stroke_time_order.clone()
         } else {
             Vec::new()
         },
         stroke_time_arc: if need_time {
-            gen.stroke_time_arc.clone()
+            generated.stroke_time_arc.clone()
         } else {
             Vec::new()
         },

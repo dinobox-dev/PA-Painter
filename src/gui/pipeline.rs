@@ -268,10 +268,10 @@ impl PainterApp {
 
         // If Type A settings changed while generation was running, remerge with current values
         let s = &self.state.project.settings;
-        if let Some(ref gen) = self.state.generated {
-            if gen.gen_normal_strength != s.normal_strength
-                || gen.gen_normal_mode != s.normal_mode
-                || gen.gen_background_mode != s.background_mode
+        if let Some(ref generated) = self.state.generated {
+            if generated.gen_normal_strength != s.normal_strength
+                || generated.gen_normal_mode != s.normal_mode
+                || generated.gen_background_mode != s.background_mode
             {
                 self.state.pending_remerge = true;
             }
@@ -411,15 +411,15 @@ impl PainterApp {
 
         // Sync GPU textures with current generation state
         if self.state.mesh_preview.show_result() {
-            if let Some(ref gen) = self.state.generated {
-                mesh_preview::upload_color_texture(rs, &gen.color, gen.resolution as usize);
-                mesh_preview::upload_normal_texture(rs, &gen.normal_map, gen.resolution as usize);
+            if let Some(ref generated) = self.state.generated {
+                mesh_preview::upload_color_texture(rs, &generated.color, generated.resolution as usize);
+                mesh_preview::upload_normal_texture(rs, &generated.normal_map, generated.resolution as usize);
                 let lh =
-                    collect_layer_refs(&gen.rendered_layers, &self.state.generation.layer_cache);
+                    collect_layer_refs(&generated.rendered_layers, &self.state.generation.layer_cache);
                 let (sc, lc, ng) = mesh_preview::upload_time_texture(
                     rs,
                     &lh,
-                    gen.resolution,
+                    generated.resolution,
                     self.state.mesh_preview.draw_order,
                     self.state.mesh_preview.chunk_size,
                 );

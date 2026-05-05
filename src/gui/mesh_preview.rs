@@ -1175,7 +1175,7 @@ fn build_layer_slice(
         let painted = lm.height[i] > 0.0;
         if painted {
             let o = lm.stroke_time_order[i].clamp(0.0, 1.0);
-            let remapped = if let Some(ref map) = remap {
+            let remapped = if let Some(map) = remap {
                 let key = (o * 65535.0) as u32;
                 map.get(&key).copied().unwrap_or(o)
             } else {
