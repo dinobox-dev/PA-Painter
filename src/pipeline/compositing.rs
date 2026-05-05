@@ -464,39 +464,56 @@ pub fn composite_stroke(
                     }
                 }
 
-                // Color: always subtractive mix when overlapping existing paint.
-                // Within a layer, strokes are wet and pigments mix on contact.
-                //
-                // Internal representation is premultiplied alpha:
-                //   stored.rgb = straight.rgb * alpha
-                // This ensures a single compositing formula works for both
-                // transparent and opaque backgrounds.
+                // Same stroke revisiting a pixel with lower height (segment
+                // junction overlap): skip color update to avoid diluting the
+                // result already written at the higher density.
+                if same_stroke && prev_h > 0.0 && h < prev_h {
+                    continue;
+                }
+
                 let opacity = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, h);
                 let prev = global.color[idx];
                 let prev_a = prev.a;
 
-                // Un-premultiply previous color for subtractive mixing
-                let prev_straight = if prev_a > 0.0 {
-                    Color::rgb(prev.r / prev_a, prev.g / prev_a, prev.b / prev_a)
+                if same_stroke && prev_h > 0.0 {
+                    // Same stroke revisiting with equal or higher height.
+                    // Incremental opacity correction: recover the original
+                    // background and re-composite at the new (higher) density,
+                    // avoiding the double-compositing that causes visible bands.
+                    let prev_op = smoothstep(0.0, DENSITY_OPACITY_THRESHOLD, prev_h);
+                    if prev_op < 1.0 - 1e-6 {
+                        let s = (1.0 - opacity) / (1.0 - prev_op);
+                        let t = (opacity - prev_op) / (1.0 - prev_op);
+                        global.color[idx] = Color::new(
+                            stroke_color.r * t + prev.r * s,
+                            stroke_color.g * t + prev.g * s,
+                            stroke_color.b * t + prev.b * s,
+                            t + prev_a * s,
+                        );
+                    }
                 } else {
-                    prev
-                };
+                    let prev_straight = if prev_a > 0.0 {
+                        Color::rgb(prev.r / prev_a, prev.g / prev_a, prev.b / prev_a)
+                    } else {
+                        prev
+                    };
 
-                let blended = if !same_stroke && prev_h > 0.0 {
-                    let mix_ratio = prev_h.min(1.0);
-                    subtractive_mix(prev_straight, stroke_color, mix_ratio)
-                } else {
-                    stroke_color
-                };
+                    let blended = if prev_h > 0.0 {
+                        let mix_ratio = (prev_h / (prev_h + h)).min(1.0);
+                        subtractive_mix(prev_straight, stroke_color, mix_ratio)
+                    } else {
+                        stroke_color
+                    };
 
-                // Premultiplied alpha compositing (Porter-Duff "over")
-                let inv = 1.0 - opacity;
-                global.color[idx] = Color::new(
-                    blended.r * opacity + prev.r * inv,
-                    blended.g * opacity + prev.g * inv,
-                    blended.b * opacity + prev.b * inv,
-                    opacity + prev_a * inv,
-                );
+                    // Premultiplied alpha compositing (Porter-Duff "over")
+                    let inv = 1.0 - opacity;
+                    global.color[idx] = Color::new(
+                        blended.r * opacity + prev.r * inv,
+                        blended.g * opacity + prev.g * inv,
+                        blended.b * opacity + prev.b * inv,
+                        opacity + prev_a * inv,
+                    );
+                }
 
                 global.stroke_id[idx] = stroke_id;
 
