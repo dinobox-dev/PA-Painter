@@ -48,7 +48,7 @@ env_logger = "0.11"
 clap = { version = "4", features = ["derive"] }
 ureq = "3"
 semver = "1"
-dirs-next = "2"
+dirs = "6"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

@@ -56,15 +56,15 @@ impl RecentEntry {
 fn config_path() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
-        dirs_next::data_dir().map(|d| d.join("PA Painter").join(FILE_NAME))
+        dirs::data_dir().map(|d| d.join("PA Painter").join(FILE_NAME))
     }
     #[cfg(target_os = "windows")]
     {
-        dirs_next::data_local_dir().map(|d| d.join("PA Painter").join(FILE_NAME))
+        dirs::data_local_dir().map(|d| d.join("PA Painter").join(FILE_NAME))
     }
     #[cfg(target_os = "linux")]
     {
-        dirs_next::config_dir().map(|d| d.join("pa-painter").join(FILE_NAME))
+        dirs::config_dir().map(|d| d.join("pa-painter").join(FILE_NAME))
     }
 }
 
