@@ -62,7 +62,7 @@ jobs:
           echo "ASSET=${DIR}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.target }}
           path: ${{ env.ASSET }}
@@ -75,12 +75,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: aarch64-apple-darwin
           path: arm64
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: x86_64-apple-darwin
           path: x64
@@ -264,13 +264,13 @@ jobs:
           echo "CLI_ASSET=${CLI_DIR}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: universal-apple-darwin-dmg
           path: ${{ env.DMG_NAME }}
 
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: universal-apple-darwin-cli
           path: ${{ env.CLI_ASSET }}
@@ -384,28 +384,28 @@ jobs:
 
       - name: Upload GUI artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.target }}-gui
           path: ${{ env.GUI_ASSET }}
 
       - name: Upload CLI artifact (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.target }}-cli
           path: ${{ env.CLI_ASSET }}
 
       - name: Upload AppImage artifact
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.target }}-appimage
           path: ${{ env.APPIMAGE }}
 
       - name: Upload CLI artifact
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.target }}-cli
           path: ${{ env.CLI_ASSET }}
@@ -420,7 +420,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
 
