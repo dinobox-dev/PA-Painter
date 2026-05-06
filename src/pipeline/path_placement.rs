@@ -190,7 +190,6 @@ pub fn trace_streamline(
     resolution: u32,
     rng: &mut SeededRng,
     color_tex: Option<&ColorTextureRef<'_>>,
-    _normal_data: Option<&MeshNormalData>,
     uv_bounds: (Vec2, Vec2),
     dist_field: Option<&DistanceField>,
     dist_threshold: f32,
@@ -368,7 +367,6 @@ pub fn generate_paths(
     ctx: &PathContext<'_>,
 ) -> Vec<StrokePath> {
     let color_tex = ctx.color_tex;
-    let normal_data = ctx.normal_data;
     let dist_field = ctx.dist_field;
     let stretch_map = ctx.stretch_map;
     let cancel = ctx.cancel;
@@ -443,7 +441,6 @@ pub fn generate_paths(
             resolution,
             &mut rng,
             color_tex,
-            normal_data,
             (seed_lo, seed_hi),
             dist_field,
             seed_threshold,

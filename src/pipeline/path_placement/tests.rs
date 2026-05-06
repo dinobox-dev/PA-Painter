@@ -107,7 +107,6 @@ fn streamline_follows_guide_direction() {
         512,
         &mut rng,
         None,
-        None,
         (Vec2::ZERO, Vec2::ONE),
         None,
         0.0,
@@ -138,7 +137,6 @@ fn streamline_follows_guide_direction() {
         &params,
         512,
         &mut rng,
-        None,
         None,
         (Vec2::ZERO, Vec2::ONE),
         None,
@@ -178,7 +176,6 @@ fn streamline_uv_boundary_termination() {
         &params,
         512,
         &mut rng,
-        None,
         None,
         (Vec2::ZERO, Vec2::ONE),
         None,
@@ -221,7 +218,6 @@ fn streamline_min_length_filter() {
         512,
         &mut rng,
         None,
-        None,
         (Vec2::ZERO, Vec2::ONE),
         None,
         0.0,
@@ -250,7 +246,6 @@ fn streamline_length_variation() {
             &params,
             512,
             &mut rng,
-            None,
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
@@ -534,7 +529,6 @@ fn streamline_curved_two_guides() {
         512,
         &mut rng,
         None,
-        None,
         (Vec2::ZERO, Vec2::ONE),
         None,
         0.0,
@@ -584,7 +578,6 @@ fn turn_angle_termination() {
         &params,
         512,
         &mut rng,
-        None,
         None,
         (Vec2::ZERO, Vec2::ONE),
         None,
@@ -865,7 +858,6 @@ fn stroke_length_distribution_median() {
             512,
             &mut rng,
             None,
-            None,
             (Vec2::ZERO, Vec2::ONE),
             None,
             0.0,
@@ -906,7 +898,6 @@ fn stroke_length_respects_max() {
             512,
             &mut rng,
             None,
-            None,
             (Vec2::ZERO, Vec2::ONE),
             None,
             0.0,
@@ -942,7 +933,6 @@ fn max_stroke_length_scaling() {
                 &params,
                 512,
                 &mut rng,
-                None,
                 None,
                 (Vec2::ZERO, Vec2::ONE),
                 None,
@@ -1010,7 +1000,6 @@ fn color_boundary_breaks_path() {
         512,
         &mut rng,
         Some(&tex_ref),
-        None,
         (Vec2::ZERO, Vec2::ONE),
         None,
         0.0,
@@ -1029,7 +1018,6 @@ fn color_boundary_breaks_path() {
         512,
         &mut rng2,
         Some(&tex_ref),
-        None,
         (Vec2::ZERO, Vec2::ONE),
         None,
         0.0,
@@ -1088,7 +1076,6 @@ fn uniform_texture_no_break() {
         512,
         &mut rng1,
         Some(&tex_ref),
-        None,
         (Vec2::ZERO, Vec2::ONE),
         None,
         0.0,
@@ -1101,7 +1088,6 @@ fn uniform_texture_no_break() {
         512,
         &mut rng2,
         Some(&tex_ref),
-        None,
         (Vec2::ZERO, Vec2::ONE),
         None,
         0.0,
@@ -1118,34 +1104,6 @@ fn uniform_texture_no_break() {
         }
         (None, None) => {}
         _ => panic!("uniform texture should not affect path existence"),
-    }
-}
-
-// ── Normal Boundary Break Tests ──
-
-/// Build a simple MeshNormalData with two halves: left = +Z, right = +X.
-/// Simulates a 90° hard edge at u=0.5.
-fn make_two_face_normal_data(resolution: u32) -> MeshNormalData {
-    let size = (resolution * resolution) as usize;
-    let mut normals = Vec::with_capacity(size);
-    let tangents = vec![Vec3::X; size];
-    let bitangents = vec![Vec3::Y; size];
-    for py in 0..resolution {
-        for px in 0..resolution {
-            let u = (px as f32 + 0.5) / resolution as f32;
-            if u < 0.5 {
-                normals.push(Vec3::Z); // left face
-            } else {
-                normals.push(Vec3::X); // right face (90° from left)
-            }
-            let _ = py; // suppress unused warning
-        }
-    }
-    MeshNormalData {
-        object_normals: normals,
-        tangents,
-        bitangents,
-        resolution,
     }
 }
 
@@ -1166,7 +1124,6 @@ fn normal_boundary_no_longer_breaks_path() {
         ..StrokeParams::default()
     };
     let field = DirectionField::new(&guides, 512);
-    let nd = make_two_face_normal_data(64);
 
     let mut rng = SeededRng::new(42);
     let path = trace_streamline(
@@ -1176,7 +1133,6 @@ fn normal_boundary_no_longer_breaks_path() {
         512,
         &mut rng,
         None,
-        Some(&nd),
         (Vec2::ZERO, Vec2::ONE),
         None,
         0.0,
@@ -1195,7 +1151,6 @@ fn normal_boundary_no_longer_breaks_path() {
         512,
         &mut rng2,
         None,
-        Some(&nd),
         (Vec2::ZERO, Vec2::ONE),
         None,
         0.0,
@@ -1255,7 +1210,6 @@ fn threshold_none_ignores_features() {
             512,
             &mut rng1,
             None,
-            None,
             (Vec2::ZERO, Vec2::ONE),
             None,
             0.0,
@@ -1268,7 +1222,6 @@ fn threshold_none_ignores_features() {
             512,
             &mut rng2,
             Some(&tex_ref),
-            None,
             (Vec2::ZERO, Vec2::ONE),
             None,
             0.0,
@@ -1295,7 +1248,6 @@ fn threshold_none_ignores_features() {
             normal_break_threshold: None,
             ..StrokeParams::default()
         };
-        let nd = make_two_face_normal_data(64);
 
         let mut rng1 = SeededRng::new(42);
         let mut rng2 = SeededRng::new(42);
@@ -1305,7 +1257,6 @@ fn threshold_none_ignores_features() {
             &params,
             512,
             &mut rng1,
-            None,
             None,
             (Vec2::ZERO, Vec2::ONE),
             None,
@@ -1319,7 +1270,6 @@ fn threshold_none_ignores_features() {
             512,
             &mut rng2,
             None,
-            Some(&nd),
             (Vec2::ZERO, Vec2::ONE),
             None,
             0.0,
