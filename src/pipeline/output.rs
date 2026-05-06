@@ -1,7 +1,7 @@
 //! **Pipeline stage 5** — final output map generation and export.
 //!
-//! Converts composited global maps into color, normal, height, and AO textures,
-//! then writes them as PNG or OpenEXR files.
+//! Converts composited global maps into color, normal, height, stroke-ID, and
+//! stroke-time textures, then writes them as PNG or OpenEXR files.
 
 mod exr_export;
 mod normal_map;

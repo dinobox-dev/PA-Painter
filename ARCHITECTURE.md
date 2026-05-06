@@ -85,5 +85,5 @@ Current version: **2**.
 └── editor.json                    # opaque editor UI state (camera, viewport, playback)
 ```
 
-Output maps (colour, height, normal, stroke-time) are exported to a separate
-directory — they are not stored inside the `.papr` archive.
+Output maps (colour, height, normal, stroke-ID, stroke-time) are exported to a
+separate directory — they are not stored inside the `.papr` archive.
