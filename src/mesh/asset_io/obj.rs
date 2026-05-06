@@ -93,7 +93,11 @@ pub fn collect_obj_aux_files(obj_path: &Path) -> Option<ObjAuxFiles> {
                 continue;
             }
             if !is_safe_relative_path(&name) {
-                warn!("OBJ aux: refusing unsafe MTL texture path '{name}'");
+                warn!(
+                    "MTL: refusing texture path '{name}': pa-painter only embeds \
+                     textures co-located with the OBJ. Flatten ../ paths into the \
+                     OBJ directory."
+                );
                 continue;
             }
             let tex_path = obj_dir
@@ -405,7 +409,11 @@ fn mtl_to_material_info(
     let base_color_texture = mat.diffuse_texture.as_ref().and_then(|tex_path| {
         let tex_path = normalize_tex_path(tex_path);
         if !is_safe_relative_path(&tex_path) {
-            warn!("MTL: refusing unsafe diffuse texture path '{tex_path}'");
+            warn!(
+                "MTL: refusing texture path '{tex_path}': pa-painter only embeds \
+                 textures co-located with the OBJ. Flatten ../ paths into the \
+                 OBJ directory."
+            );
             return None;
         }
         let full = if let Some(dir) = obj_dir {
@@ -428,7 +436,11 @@ fn mtl_to_material_info(
     let normal_texture = mat.normal_texture.as_ref().and_then(|tex_path| {
         let tex_path = normalize_tex_path(tex_path);
         if !is_safe_relative_path(&tex_path) {
-            warn!("MTL: refusing unsafe normal texture path '{tex_path}'");
+            warn!(
+                "MTL: refusing texture path '{tex_path}': pa-painter only embeds \
+                 textures co-located with the OBJ. Flatten ../ paths into the \
+                 OBJ directory."
+            );
             return None;
         }
         let full = if let Some(dir) = obj_dir {
