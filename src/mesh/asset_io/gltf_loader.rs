@@ -95,11 +95,14 @@ fn build_mesh_from_gltf(
                 return Err(MeshError::NoUvChannel);
             }
 
-            let prim_indices: Vec<u32> = reader
-                .read_indices()
-                .ok_or_else(|| MeshError::ParseError("No index data".to_string()))?
-                .into_u32()
-                .collect();
+            // Non-indexed primitives are valid in glTF 2.0; synthesize a sequential
+            // index buffer so downstream code (which assumes indexed TRIANGLES) works.
+            // Primitives whose mode is not TRIANGLES will produce wrong geometry, but
+            // that matches the prior behavior of the indexed path.
+            let prim_indices: Vec<u32> = match reader.read_indices() {
+                Some(iter) => iter.into_u32().collect(),
+                None => (0..prim_positions.len() as u32).collect(),
+            };
 
             let base_vertex = positions.len() as u32;
             let index_offset = indices.len() as u32;
@@ -309,6 +312,85 @@ mod tests {
         assert_eq!(glb.uvs.len(), gltf.uvs.len());
         assert_eq!(glb.indices.len(), gltf.indices.len());
         assert_eq!(glb.indices, gltf.indices);
+    }
+
+    #[test]
+    fn load_glb_non_indexed_primitive() {
+        // Build a minimal GLB describing a single triangle with no `indices`
+        // accessor. Per glTF 2.0 such primitives are valid; we synthesize
+        // sequential indices so downstream pipeline code keeps working.
+        let mut bin: Vec<u8> = Vec::new();
+        for &p in &[[0.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+            for c in p {
+                bin.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        for &uv in &[[0.0f32, 0.0], [1.0, 0.0], [0.0, 1.0]] {
+            for c in uv {
+                bin.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        while !bin.len().is_multiple_of(4) {
+            bin.push(0);
+        }
+
+        let json = serde_json::json!({
+            "asset": {"version": "2.0"},
+            "scene": 0,
+            "scenes": [{"nodes": [0]}],
+            "nodes": [{"mesh": 0}],
+            "meshes": [{
+                "primitives": [{
+                    "attributes": {"POSITION": 0, "TEXCOORD_0": 1},
+                    "mode": 4
+                }]
+            }],
+            "buffers": [{"byteLength": bin.len()}],
+            "bufferViews": [
+                {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+                {"buffer": 0, "byteOffset": 36, "byteLength": 24}
+            ],
+            "accessors": [
+                {
+                    "bufferView": 0, "componentType": 5126,
+                    "count": 3, "type": "VEC3",
+                    "min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 0.0]
+                },
+                {
+                    "bufferView": 1, "componentType": 5126,
+                    "count": 3, "type": "VEC2"
+                }
+            ]
+        });
+        let mut json_bytes = serde_json::to_vec(&json).unwrap();
+        while !json_bytes.len().is_multiple_of(4) {
+            json_bytes.push(b' ');
+        }
+
+        let total_len = 12 + 8 + json_bytes.len() + 8 + bin.len();
+        let mut glb: Vec<u8> = Vec::with_capacity(total_len);
+        glb.extend_from_slice(&0x4654_6C67u32.to_le_bytes());
+        glb.extend_from_slice(&2u32.to_le_bytes());
+        glb.extend_from_slice(&(total_len as u32).to_le_bytes());
+        glb.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+        glb.extend_from_slice(&0x4E4F_534Au32.to_le_bytes());
+        glb.extend_from_slice(&json_bytes);
+        glb.extend_from_slice(&(bin.len() as u32).to_le_bytes());
+        glb.extend_from_slice(&0x004E_4942u32.to_le_bytes());
+        glb.extend_from_slice(&bin);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("non_indexed.glb");
+        std::fs::write(&path, &glb).unwrap();
+
+        let mesh = load_mesh(&path).expect("non-indexed primitive should load");
+        assert_eq!(mesh.positions.len(), 3, "3 vertices expected");
+        assert_eq!(mesh.uvs.len(), 3);
+        assert_eq!(
+            mesh.indices,
+            vec![0, 1, 2],
+            "non-indexed primitive should get sequential synthesized indices"
+        );
     }
 
     #[test]
