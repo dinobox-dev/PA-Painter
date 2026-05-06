@@ -21,10 +21,16 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: License
+      - name: cargo-deny — licenses, bans, sources
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          command: check licenses
+          command: check licenses bans sources
+
+      - name: cargo-deny — advisories (informational)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        continue-on-error: true
+        with:
+          command: check advisories
 
       - name: Format
         run: cargo fmt --check
@@ -33,7 +39,22 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
-        run: cargo test --lib
+        run: cargo test
 
       - name: Doc
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+
+  msrv:
+    name: MSRV (1.92)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@1.92
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+
+      - name: Build on MSRV
+        run: cargo build --all-targets --locked
