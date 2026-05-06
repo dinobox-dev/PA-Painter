@@ -27,7 +27,7 @@ Pre-built binaries for Windows, Linux, and macOS are available on [itch.io](http
 
 ## Building from Source
 
-Requires Rust 1.87+ and a GPU with Vulkan/Metal/DX12 support (for the GUI).
+Requires Rust 1.92+ and a GPU with Vulkan/Metal/DX12 support (for the GUI).
 
 ```bash
 # Build both CLI and GUI
