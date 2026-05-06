@@ -8,6 +8,10 @@
 //! - `assets/layer_{n}_color.png` — per-layer File-mode color texture
 //! - `assets/layer_{n}_normal.png` — per-layer File-mode normal texture
 //! - `thumbnails/preview.png` — 256×256 preview thumbnail (reserved, currently unused)
+//!
+//! Loading is defended in two ways: each entry decompresses under a per-kind
+//! size cap to neutralise zip-bomb shapes, and the manifest version is
+//! refused if it exceeds [`MAX_SUPPORTED_VERSION`].
 
 use log::{info, warn};
 use std::io::{Read, Write};

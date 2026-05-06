@@ -87,3 +87,9 @@ Current version: **2**.
 
 Output maps (colour, height, normal, stroke-ID, stroke-time) are exported to a
 separate directory — they are not stored inside the `.papr` archive.
+
+Loading defends against malformed input on two axes: each ZIP entry is read
+under a per-kind size cap (see `MAX_*_BYTES` in `io::project`) to neutralise
+zip-bomb shapes, and the manifest `version` is refused if it exceeds
+`io::project::MAX_SUPPORTED_VERSION` so files written by a newer build do not
+deserialise via best-effort defaults.
