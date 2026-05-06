@@ -484,7 +484,9 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
 /// than `cap` bytes (decompression-bomb guard).
 fn read_capped<R: Read>(mut src: R, cap: u64, name: &str) -> Result<Vec<u8>, ProjectError> {
     let mut buf = Vec::new();
-    (&mut src).take(cap.saturating_add(1)).read_to_end(&mut buf)?;
+    (&mut src)
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut buf)?;
     if buf.len() as u64 > cap {
         return Err(ProjectError::InvalidFormat(format!(
             "ZIP entry '{name}' exceeds size cap of {cap} bytes (decompression bomb?)"
