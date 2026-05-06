@@ -952,14 +952,7 @@ mod tests {
         };
 
         // Generate paths with overscan + Poisson + 3 passes
-        let paths = generate_paths(
-            &layer,
-            0,
-            &PathContext {
-                normal_data: Some(&nd),
-                ..Default::default()
-            },
-        );
+        let paths = generate_paths(&layer, 0, &PathContext::default());
         eprintln!("Overscan+Poisson: {} paths generated", paths.len());
 
         let cached_paths = vec![paths];

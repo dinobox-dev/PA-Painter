@@ -382,7 +382,6 @@ fn run_pipeline(
                 layer_index as u32,
                 &PathContext {
                     color_tex: tex_ref.as_ref(),
-                    normal_data,
                     dist_field: df,
                     stretch_map: stretch_ref,
                     cancel: Some(cancel),

@@ -4,8 +4,6 @@ use std::thread;
 
 use eframe::egui;
 
-use pa_painter::mesh::asset_io::LoadedMesh;
-use pa_painter::mesh::object_normal::{MeshNormalData, compute_mesh_normal_data};
 use pa_painter::pipeline::path_placement;
 use pa_painter::pipeline::stroke_height;
 use pa_painter::types::{Guide, Layer, PaintValues, StrokeParams};
@@ -225,11 +223,6 @@ pub struct PathOverlayInput {
     pub layer_index: usize,
     pub layer_count: usize,
     pub seed: u32,
-    pub resolution: u32,
-    /// Cached mesh normals from a previous computation. Reused if resolution matches.
-    pub cached_normals: Option<(u32, Arc<MeshNormalData>)>,
-    /// Mesh for on-demand normal computation when cache is cold.
-    pub mesh: Option<Arc<LoadedMesh>>,
 }
 
 /// Result from a completed path overlay computation.
@@ -243,8 +236,6 @@ pub struct PathOverlayResult {
     /// Copy of the layer's PaintValues + guides for cache key storage.
     pub paint: PaintValues,
     pub guides: Vec<Guide>,
-    /// Freshly computed mesh normals — returned so the main thread can cache them.
-    pub computed_normals: Option<(u32, Arc<MeshNormalData>)>,
 }
 
 /// Background worker for path overlay computation.
@@ -311,30 +302,6 @@ impl PathOverlayWorker {
 
 /// Background thread function for path overlay computation.
 fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<PathOverlayResult> {
-    let needs_normal = input.layer.paint.normal_break_threshold.is_some();
-
-    // Resolve mesh normals: reuse cached if resolution matches, else compute.
-    let cached_valid = needs_normal
-        && input
-            .cached_normals
-            .as_ref()
-            .is_some_and(|(res, _)| *res == input.resolution);
-
-    let fresh_normals: Option<Arc<MeshNormalData>> = if needs_normal && !cached_valid {
-        input
-            .mesh
-            .as_ref()
-            .map(|mesh| Arc::new(compute_mesh_normal_data(mesh, input.resolution)))
-    } else {
-        None
-    };
-
-    let normal_ref: Option<&MeshNormalData> = if cached_valid {
-        input.cached_normals.as_ref().map(|(_, nd)| nd.as_ref())
-    } else {
-        fresh_normals.as_deref()
-    };
-
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
@@ -344,7 +311,6 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
         &paint_layer,
         0,
         &path_placement::PathContext {
-            normal_data: normal_ref,
             cancel: Some(cancel),
             ..Default::default()
         },
@@ -399,7 +365,6 @@ fn run_path_overlay(input: PathOverlayInput, cancel: &AtomicBool) -> Option<Path
         seed: input.seed,
         paint: input.layer.paint.clone(),
         guides: input.layer.guides.clone(),
-        computed_normals: fresh_normals.map(|nd| (input.resolution, nd)),
     })
 }
 

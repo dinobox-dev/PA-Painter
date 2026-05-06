@@ -541,7 +541,6 @@ pub fn composite_stroke(
 pub fn generate_all_paths(
     layers: &[PaintLayer],
     base_colors: &[LayerBaseColor],
-    normal_data: Option<&MeshNormalData>,
     dist_fields: &[Option<&DistanceField>],
     stretch_map: Option<&StretchMap>,
 ) -> Vec<Vec<StrokePath>> {
@@ -579,7 +578,6 @@ pub fn generate_all_paths(
                 layer_index as u32,
                 &PathContext {
                     color_tex: tex_ref.as_ref(),
-                    normal_data,
                     dist_field: df,
                     stretch_map,
                     ..Default::default()
@@ -757,7 +755,6 @@ pub fn composite_all(input: &CompositeAllInput<'_>) -> GlobalMaps {
                     layer_index as u32,
                     &PathContext {
                         color_tex: tex_ref.as_ref(),
-                        normal_data,
                         dist_field: df,
                         stretch_map,
                         ..Default::default()
@@ -872,7 +869,6 @@ pub fn composite_layer(global: &mut GlobalMaps, input: &CompositeLayerInput<'_>)
             layer_index,
             &PathContext {
                 color_tex: tex_ref.as_ref(),
-                normal_data,
                 dist_field,
                 stretch_map,
                 ..Default::default()

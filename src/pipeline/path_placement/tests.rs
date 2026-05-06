@@ -1,4 +1,5 @@
 use super::*;
+use crate::mesh::object_normal::MeshNormalData;
 use crate::types::{Guide, PaintLayer, StrokeParams};
 use glam::Vec3;
 
@@ -1412,12 +1413,8 @@ fn visual_normal_boundary_comparison() {
     let mut layer_on = layer_off.clone();
     layer_on.params.normal_break_threshold = Some(0.5);
 
-    let nd_ctx = PathContext {
-        normal_data: Some(&nd),
-        ..Default::default()
-    };
-    let paths_off = generate_paths(&layer_off, 0, &nd_ctx);
-    let paths_on = generate_paths(&layer_on, 0, &nd_ctx);
+    let paths_off = generate_paths(&layer_off, 0, &PathContext::default());
+    let paths_on = generate_paths(&layer_on, 0, &PathContext::default());
 
     eprintln!(
         "normal_break OFF: {} paths, ON: {} paths",

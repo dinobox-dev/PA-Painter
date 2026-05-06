@@ -8,8 +8,6 @@ use super::preview;
 use super::recent_files;
 use super::state::{ProjectLoadSource, UnsavedAction};
 
-use pa_painter::types::BASE_RESOLUTION;
-
 impl PainterApp {
     /// Global keyboard shortcuts (undo/redo, save, generate, tab cycling).
     pub(super) fn handle_keyboard(&mut self, ctx: &egui::Context) {
@@ -240,10 +238,6 @@ impl PainterApp {
         if let Some(poll_result) = self.state.path_worker.poll() {
             match poll_result {
                 Ok(result) => {
-                    if let Some(normals) = &result.computed_normals {
-                        self.state.cached_mesh_normals =
-                            Some((normals.0, std::sync::Arc::clone(&normals.1)));
-                    }
                     self.state.path_overlay.apply_result(&result);
                 }
                 Err(msg) => {
@@ -266,30 +260,11 @@ impl PainterApp {
                     .is_stale_for_layer(selected, layer, seed);
 
                 if stale {
-                    let needs_normal = layer.paint.normal_break_threshold.is_some();
-                    let normals_stale = needs_normal
-                        && self
-                            .state
-                            .cached_mesh_normals
-                            .as_ref()
-                            .is_none_or(|(r, _)| *r != BASE_RESOLUTION);
-
                     let input = preview::PathOverlayInput {
                         layer: layer.clone(),
                         layer_index: selected,
                         layer_count: self.state.project.layers.len(),
                         seed,
-                        resolution: BASE_RESOLUTION,
-                        cached_normals: if needs_normal {
-                            self.state.cached_mesh_normals.clone()
-                        } else {
-                            None
-                        },
-                        mesh: if normals_stale {
-                            self.state.loaded_mesh.clone()
-                        } else {
-                            None
-                        },
                     };
                     self.state.path_overlay.set_pending(selected, layer, seed);
                     self.state.path_worker.start(input);

@@ -140,13 +140,7 @@ fn main() {
         .collect();
 
     info!("Generating...");
-    let paths = generate_all_paths(
-        &layers,
-        &layer_base_colors,
-        normal_data.as_ref(),
-        &df_refs,
-        stretch_ref,
-    );
+    let paths = generate_all_paths(&layers, &layer_base_colors, &df_refs, stretch_ref);
 
     // paths[i] corresponds to layers sorted by order (generate_all_paths contract).
     // Build a map from original layer index to its position in that sorted output,

@@ -10,7 +10,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use glam::Vec2;
 use log::{debug, info, warn};
 
-use crate::mesh::object_normal::MeshNormalData;
 #[cfg(test)]
 use crate::mesh::object_normal::sample_object_normal;
 use crate::mesh::stretch_map::StretchMap;
@@ -33,7 +32,6 @@ const STRETCH_CLAMP_MAX: f32 = 2.0;
 #[derive(Default)]
 pub struct PathContext<'a> {
     pub color_tex: Option<&'a ColorTextureRef<'a>>,
-    pub normal_data: Option<&'a MeshNormalData>,
     pub dist_field: Option<&'a DistanceField>,
     pub stretch_map: Option<&'a StretchMap>,
     pub cancel: Option<&'a AtomicBool>,
