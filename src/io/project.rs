@@ -88,6 +88,17 @@ pub fn utc_now_iso8601() -> String {
 /// Bump when introducing a new on-disk format, and add a migration step.
 pub const MAX_SUPPORTED_VERSION: u32 = 2;
 
+// Per-entry decompression size caps. A `.papr` file is just a ZIP, so without
+// these caps a deliberately-crafted small archive could decompress to GBs of
+// memory before any structural validation runs. The values are deliberately
+// generous: they should never bite legitimate projects, only obvious bombs.
+const MAX_MANIFEST_BYTES: u64 = 1024 * 1024; // 1 MiB
+const MAX_PROJECT_JSON_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB
+const MAX_EDITOR_JSON_BYTES: u64 = 8 * 1024 * 1024; // 8 MiB
+const MAX_MESH_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
+const MAX_MTL_BYTES: u64 = 4 * 1024 * 1024; // 4 MiB
+const MAX_TEXTURE_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub version: String,
@@ -335,8 +346,8 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
     let mut archive = ZipArchive::new(file)?;
 
     // manifest.json (required)
-    let mut manifest: Manifest =
-        read_json_entry(&mut archive, "manifest.json").map_err(|e| match e {
+    let mut manifest: Manifest = read_json_entry(&mut archive, "manifest.json", MAX_MANIFEST_BYTES)
+        .map_err(|e| match e {
             ProjectError::Zip(_) => {
                 ProjectError::InvalidFormat("missing manifest.json".to_string())
             }
@@ -356,7 +367,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
     }
 
     // project.json (required — unified format)
-    let data: ProjectData = read_json_entry(&mut archive, "project.json")?;
+    let data: ProjectData = read_json_entry(&mut archive, "project.json", MAX_PROJECT_JSON_BYTES)?;
 
     // assets/mesh.* — find embedded mesh
     let (mesh_bytes, mesh_format) = read_mesh_asset(&mut archive, &data.mesh_ref.format);
@@ -388,7 +399,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
     for (i, layer) in layers.iter_mut().enumerate() {
         if let TextureSource::File(Some(_)) = layer.base_color {
             let entry_name = format!("assets/layer_{i}_color.png");
-            let decoded = read_bytes_optional(&mut archive, &entry_name)
+            let decoded = read_bytes_optional(&mut archive, &entry_name, MAX_TEXTURE_BYTES)
                 .and_then(|bytes| decode_srgb_png_bytes(&bytes).ok());
             if let Some((pixels, w, h)) = decoded {
                 if let TextureSource::File(Some(ref mut tex)) = layer.base_color {
@@ -404,7 +415,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
         }
         if let TextureSource::File(Some(_)) = layer.base_normal {
             let entry_name = format!("assets/layer_{i}_normal.png");
-            let decoded = read_bytes_optional(&mut archive, &entry_name)
+            let decoded = read_bytes_optional(&mut archive, &entry_name, MAX_TEXTURE_BYTES)
                 .and_then(|bytes| decode_linear_png_bytes(&bytes).ok());
             if let Some((pixels, w, h)) = decoded {
                 if let TextureSource::File(Some(ref mut tex)) = layer.base_normal {
@@ -438,7 +449,7 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
     }
 
     // editor.json — opaque editor UI state
-    let editor_state_json = read_bytes_optional(&mut archive, "editor.json")
+    let editor_state_json = read_bytes_optional(&mut archive, "editor.json", MAX_EDITOR_JSON_BYTES)
         .and_then(|bytes| String::from_utf8(bytes).ok());
 
     let project = Project {
@@ -469,22 +480,43 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
 
 // ── Helpers ──
 
+/// Read up to `cap` bytes from a `Read`. Errors if the source produced more
+/// than `cap` bytes (decompression-bomb guard).
+fn read_capped<R: Read>(mut src: R, cap: u64, name: &str) -> Result<Vec<u8>, ProjectError> {
+    let mut buf = Vec::new();
+    (&mut src).take(cap.saturating_add(1)).read_to_end(&mut buf)?;
+    if buf.len() as u64 > cap {
+        return Err(ProjectError::InvalidFormat(format!(
+            "ZIP entry '{name}' exceeds size cap of {cap} bytes (decompression bomb?)"
+        )));
+    }
+    Ok(buf)
+}
+
 fn read_json_entry<T: serde::de::DeserializeOwned>(
     archive: &mut ZipArchive<std::fs::File>,
     name: &str,
+    cap: u64,
 ) -> Result<T, ProjectError> {
-    let mut entry = archive.by_name(name)?;
-    let mut buf = String::new();
-    entry.read_to_string(&mut buf)?;
-    let value = serde_json::from_str(&buf)?;
+    let entry = archive.by_name(name)?;
+    let buf = read_capped(entry, cap, name)?;
+    let value = serde_json::from_slice(&buf)?;
     Ok(value)
 }
 
-fn read_bytes_optional(archive: &mut ZipArchive<std::fs::File>, name: &str) -> Option<Vec<u8>> {
-    let mut entry = archive.by_name(name).ok()?;
-    let mut buf = Vec::new();
-    entry.read_to_end(&mut buf).ok()?;
-    Some(buf)
+fn read_bytes_optional(
+    archive: &mut ZipArchive<std::fs::File>,
+    name: &str,
+    cap: u64,
+) -> Option<Vec<u8>> {
+    let entry = archive.by_name(name).ok()?;
+    match read_capped(entry, cap, name) {
+        Ok(buf) => Some(buf),
+        Err(e) => {
+            warn!("Skipping ZIP entry '{name}': {e}");
+            None
+        }
+    }
 }
 
 /// Search for the embedded mesh asset in the ZIP.
@@ -500,7 +532,7 @@ fn read_mesh_asset(
     };
     for ext in candidates {
         let name = format!("assets/mesh.{ext}");
-        if let Some(bytes) = read_bytes_optional(archive, &name) {
+        if let Some(bytes) = read_bytes_optional(archive, &name, MAX_MESH_BYTES) {
             return (Some(bytes), ext.to_string());
         }
     }
@@ -509,7 +541,7 @@ fn read_mesh_asset(
 
 /// Read OBJ auxiliary files (MTL + textures) from the ZIP if present.
 fn read_obj_aux_files(archive: &mut ZipArchive<std::fs::File>) -> Option<ObjAuxFiles> {
-    let mtl_bytes = read_bytes_optional(archive, "assets/mesh.mtl")?;
+    let mtl_bytes = read_bytes_optional(archive, "assets/mesh.mtl", MAX_MTL_BYTES)?;
 
     // Scan ZIP entries for assets/mesh_textures/*
     let tex_names: Vec<String> = (0..archive.len())
@@ -530,7 +562,7 @@ fn read_obj_aux_files(archive: &mut ZipArchive<std::fs::File>) -> Option<ObjAuxF
     let mut texture_files = Vec::new();
     for tex_name in tex_names {
         let zip_path = format!("assets/mesh_textures/{tex_name}");
-        if let Some(bytes) = read_bytes_optional(archive, &zip_path) {
+        if let Some(bytes) = read_bytes_optional(archive, &zip_path, MAX_TEXTURE_BYTES) {
             texture_files.push((tex_name, bytes));
         }
     }
@@ -842,6 +874,41 @@ mod tests {
         match result.unwrap_err() {
             ProjectError::Zip(_) => {}
             e => panic!("expected Zip error, got: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn load_rejects_oversized_manifest() {
+        // Build a .papr whose manifest.json decompresses to far more than the cap.
+        // Use serde_json to ensure the bytes are valid JSON, padded with whitespace.
+        let path = temp_pap_path("oversized_manifest.papr");
+        {
+            let file = std::fs::File::create(&path).unwrap();
+            let mut zip = ZipWriter::new(file);
+            let options = SimpleFileOptions::default();
+            zip.start_file("manifest.json", options).unwrap();
+            // 2 MiB of JSON whitespace padding around a real document — exceeds 1 MiB cap.
+            let mut payload = String::new();
+            payload.push_str(
+                r#"{"version":"2","app_name":"PA Painter","created_at":"","modified_at":""}"#,
+            );
+            payload.push('\n');
+            // Pad with spaces to push past the cap. Spaces are valid JSON whitespace.
+            payload.push_str(&" ".repeat(2 * 1024 * 1024));
+            zip.write_all(payload.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+
+        let result = load_project(&path);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ProjectError::InvalidFormat(msg) => {
+                assert!(
+                    msg.contains("size cap"),
+                    "error should mention size cap: {msg}"
+                );
+            }
+            e => panic!("expected InvalidFormat for oversized manifest, got {e:?}"),
         }
     }
 
