@@ -84,6 +84,10 @@ pub fn utc_now_iso8601() -> String {
 
 // ── Data Structures ──
 
+/// Highest project format version this build can load.
+/// Bump when introducing a new on-disk format, and add a migration step.
+pub const MAX_SUPPORTED_VERSION: u32 = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub version: String,
@@ -338,6 +342,18 @@ pub fn load_project(path: &Path) -> Result<LoadResult, ProjectError> {
             }
             other => other,
         })?;
+
+    // Reject project files newer than this build understands. Older versions
+    // are migrated below; future versions may have structural changes that
+    // would silently lose data via best-effort serde deserialization.
+    if let Ok(v) = manifest.version.parse::<u32>()
+        && v > MAX_SUPPORTED_VERSION
+    {
+        return Err(ProjectError::InvalidFormat(format!(
+            "project version {v} is newer than supported (max {MAX_SUPPORTED_VERSION}); \
+             open with a newer build of PA Painter"
+        )));
+    }
 
     // project.json (required — unified format)
     let data: ProjectData = read_json_entry(&mut archive, "project.json")?;
@@ -826,6 +842,36 @@ mod tests {
         match result.unwrap_err() {
             ProjectError::Zip(_) => {}
             e => panic!("expected Zip error, got: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn load_rejects_future_version() {
+        let path = temp_pap_path("future_version.papr");
+        {
+            let file = std::fs::File::create(&path).unwrap();
+            let mut zip = ZipWriter::new(file);
+            let options = SimpleFileOptions::default();
+            zip.start_file("manifest.json", options).unwrap();
+            zip.write_all(
+                br#"{"version":"99","app_name":"PA Painter","created_at":"","modified_at":""}"#,
+            )
+            .unwrap();
+            zip.start_file("project.json", options).unwrap();
+            zip.write_all(b"{}").unwrap();
+            zip.finish().unwrap();
+        }
+
+        let result = load_project(&path);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ProjectError::InvalidFormat(msg) => {
+                assert!(
+                    msg.contains("newer than supported"),
+                    "error should mention version mismatch: {msg}"
+                );
+            }
+            e => panic!("expected InvalidFormat, got {e:?}"),
         }
     }
 
