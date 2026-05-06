@@ -7,10 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Non-indexed glTF primitives now load: missing `indices` accessor causes the loader to synthesize sequential indices `0..vertex_count` instead of erroring out (many exporters emit non-indexed triangle lists by default)
+- `MAX_SUPPORTED_VERSION` constant in `io::project` declares the highest `.papr` format version this build accepts
+
 ### Fixed
 
 - UV island boundary density drop: seeds near island edges were filtered by the dilated bitmap mask, eliminating overscan and causing sparse strokes at island boundaries
 - Brush rasterization bleeding into adjacent UV islands: strokes near island edges could paint pixels belonging to a different mesh group
+- `.papr` loader now refuses files whose manifest version is newer than this build understands, instead of silently best-effort-deserializing structurally incompatible JSON
+- `.papr` ZIP entries now decompress under per-entry size caps (1 MiB manifest, 64 MiB project.json, 8 MiB editor.json, 1 GiB mesh, 4 MiB MTL, 512 MiB per texture) — previously a small archive could expand to GBs of memory before any validation
+- MTL texture references containing `..` or absolute paths are refused: a malicious on-disk OBJ could otherwise cause the loader to read arbitrary readable files via the image decoder
+- Documentation: rustdoc on `lib`, `pipeline::compositing`, `pipeline::output` no longer describes a non-existent "AO map" output (actual outputs are color, normal, height, stroke ID, stroke time)
+- README MSRV bumped to 1.92 to match `Cargo.toml` (was stale at 1.87)
 
 ### Changed
 
@@ -26,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `generate_all_paths`, `finalize_layers`, `fill_base_color_region`, `blend_normals_udn`: mask parameter replaced with distance field
 - `Project::build_masks` → `Project::build_dist_fields`
 - Added: `DistanceField`, `UvMask::distance_field()`, `LayerMaps::clip_to_dist_field()`, `CLIP_DISTANCE_PX`
+- `trace_streamline` parameter list shortened: dead `_normal_data: Option<&MeshNormalData>` argument removed (normal-boundary path termination has been per-pixel in compositing for several releases)
+
+### CI
+
+- `cargo test` now runs the full suite (lib + integration + doctests); previously `cargo test --lib` silently skipped the CLI integration test and the lib doctest
+- `cargo deny` widened from licenses-only to licenses + bans + sources, plus a non-blocking advisories check
+- New MSRV gate job pinned to Rust 1.92 builds with `--locked` so a regression in declared `rust-version` is caught on every PR rather than at release tag time
+- `bzip2-1.0.6` allow-listed in `deny.toml` (transitively pulled in by zip 8 → bzip2)
 
 ## [0.3.0] — 2026-04-03
 
