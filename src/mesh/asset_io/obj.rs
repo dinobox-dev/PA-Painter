@@ -21,6 +21,24 @@ fn normalize_tex_path(p: &str) -> String {
     p.replace('\\', "/")
 }
 
+/// Reject MTL texture paths that try to escape the OBJ directory.
+///
+/// MTL files arrive from disk and may be authored by anyone; without this
+/// check, a malicious MTL with `map_Kd ../../etc/passwd` would cause us to
+/// open and decode an arbitrary readable file (`image` would fail to decode,
+/// but the read still succeeds — minor information-disclosure risk).
+fn is_safe_relative_path(p: &str) -> bool {
+    use std::path::{Component, Path};
+    let path = Path::new(p);
+    for comp in path.components() {
+        match comp {
+            Component::Prefix(_) | Component::RootDir | Component::ParentDir => return false,
+            Component::Normal(_) | Component::CurDir => {}
+        }
+    }
+    true
+}
+
 // ---------------------------------------------------------------------------
 // OBJ auxiliary files
 // ---------------------------------------------------------------------------
@@ -72,6 +90,10 @@ pub fn collect_obj_aux_files(obj_path: &Path) -> Option<ObjAuxFiles> {
         if let Some(name) = tex_name {
             let name = normalize_tex_path(name);
             if name.is_empty() || !seen.insert(name.clone()) {
+                continue;
+            }
+            if !is_safe_relative_path(&name) {
+                warn!("OBJ aux: refusing unsafe MTL texture path '{name}'");
                 continue;
             }
             let tex_path = obj_dir
@@ -382,6 +404,10 @@ fn mtl_to_material_info(
 
     let base_color_texture = mat.diffuse_texture.as_ref().and_then(|tex_path| {
         let tex_path = normalize_tex_path(tex_path);
+        if !is_safe_relative_path(&tex_path) {
+            warn!("MTL: refusing unsafe diffuse texture path '{tex_path}'");
+            return None;
+        }
         let full = if let Some(dir) = obj_dir {
             dir.join(&tex_path)
         } else {
@@ -401,6 +427,10 @@ fn mtl_to_material_info(
 
     let normal_texture = mat.normal_texture.as_ref().and_then(|tex_path| {
         let tex_path = normalize_tex_path(tex_path);
+        if !is_safe_relative_path(&tex_path) {
+            warn!("MTL: refusing unsafe normal texture path '{tex_path}'");
+            return None;
+        }
         let full = if let Some(dir) = obj_dir {
             dir.join(&tex_path)
         } else {
@@ -720,5 +750,23 @@ f 1/1 2/2 3/3 4/4
         let mesh = load_mesh(&path).unwrap();
         assert_eq!(mesh.indices.len(), 6);
         assert_eq!(mesh.indices, vec![0, 1, 3, 1, 2, 3]);
+    }
+
+    #[test]
+    fn rejects_unsafe_mtl_texture_paths() {
+        // Plain relatives are accepted.
+        assert!(is_safe_relative_path("texture.png"));
+        assert!(is_safe_relative_path("textures/diffuse.png"));
+        assert!(is_safe_relative_path("./local.png"));
+
+        // Parent traversal is rejected anywhere in the chain.
+        assert!(!is_safe_relative_path("../etc/passwd"));
+        assert!(!is_safe_relative_path("textures/../../secret"));
+        assert!(!is_safe_relative_path(".."));
+
+        // Absolute paths are rejected.
+        assert!(!is_safe_relative_path("/etc/passwd"));
+        // Windows-style absolute (drive letter) is rejected on Windows; on
+        // unix it gets parsed as a Normal component, so we don't assert here.
     }
 }
