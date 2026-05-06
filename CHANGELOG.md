@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `generate_all_paths`, `finalize_layers`, `fill_base_color_region`, `blend_normals_udn`: mask parameter replaced with distance field
 - `Project::build_masks` → `Project::build_dist_fields`
 - Added: `DistanceField`, `UvMask::distance_field()`, `LayerMaps::clip_to_dist_field()`, `CLIP_DISTANCE_PX`
-- `trace_streamline` parameter list shortened: dead `_normal_data: Option<&MeshNormalData>` argument removed (normal-boundary path termination has been per-pixel in compositing for several releases)
+- Dead `normal_data` plumbing into path placement removed end-to-end: `trace_streamline` argument, `PathContext.normal_data`, and `generate_all_paths`' `normal_data: Option<&MeshNormalData>` parameter all dropped. Normal-boundary path termination has been per-pixel in compositing for several releases; the channel into path placement was write-only. The path-overlay preview worker no longer recomputes mesh normals on its own.
 
 ### CI
 
