@@ -34,12 +34,34 @@ pub struct PainterApp {
     pub(super) gen_counter: u64,
     /// `gen_counter` value reflected in the GPU-resident generated color/normal textures.
     pub(super) prev_uploaded_gen: u64,
-    /// Cache key for the time-texture upload: (gen_counter, draw_order, chunk_size, resolution).
+    /// `gen_counter` value seen in the previous `sync_gpu_textures` call. Used together
+    /// with `prev_uploaded_gen` to defer the heavy upload by one frame after a change.
+    pub(super) prev_seen_gen: u64,
+    /// Cache key for the time-texture upload that's currently on the GPU.
     /// `None` until the first time-texture build.
     pub(super) prev_time_key: Option<(u64, state::DrawOrder, u32, u32)>,
-    /// Hash of base texture state. Eagerly invalidates the Base color/normal slots,
-    /// regardless of current `result_mode`, so toggling to None is instant.
+    /// Time-texture cache key seen in the previous `sync_gpu_textures` call.
+    /// Together with `prev_time_key` this defers rebuilds by one frame, so that
+    /// toggling into Drawing mode is instant and the build happens on the next
+    /// frame instead of blocking the toggle click.
+    pub(super) prev_seen_time_key: Option<(u64, state::DrawOrder, u32, u32)>,
+    /// Hash of base texture state. Compared every frame to detect base edits;
+    /// when it changes we set `base_dirty` rather than recomposing eagerly.
     pub(super) prev_base_tex_hash: u64,
+    /// True when `base_texture_hash` has changed since the last Base-slot upload.
+    /// The actual recompose+upload is deferred until `result_mode == None`, so
+    /// editing base layers while in Paint/Drawing mode (where the Base slot is
+    /// not visible) costs nothing on the UI thread.
+    pub(super) base_dirty: bool,
+    /// Mirror of `MeshGpuResources::bound_to_generated`, kept on the app side so
+    /// the per-frame `bind_textures_for_mode` short-circuit can avoid acquiring
+    /// the wgpu renderer write lock when nothing changed.
+    pub(super) prev_bound_to_generated: Option<bool>,
+    /// `result_mode` seen in the previous `sync_gpu_textures` call. The frame
+    /// where this differs from `state.mesh_preview.result_mode` is the toggle
+    /// click itself; we skip heavy uploads on that frame so the click feels
+    /// instant and the upload runs on the next frame.
+    pub(super) prev_seen_mode: state::ResultMode,
     /// Background remerge worker.
     pub(super) remerge_worker: generation::RemergeWorker,
     /// Previous show_direction_field state for toggle change detection.
@@ -71,8 +93,13 @@ impl PainterApp {
             render_state: cc.wgpu_render_state.clone(),
             gen_counter: 0,
             prev_uploaded_gen: 0,
+            prev_seen_gen: 0,
             prev_time_key: None,
+            prev_seen_time_key: None,
             prev_base_tex_hash: 0,
+            base_dirty: true,
+            prev_bound_to_generated: None,
+            prev_seen_mode: state::ResultMode::Paint,
             remerge_worker: generation::RemergeWorker::default(),
             prev_show_direction_field: false,
             prev_direction_field_hash: 0,

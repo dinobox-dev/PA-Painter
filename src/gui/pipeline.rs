@@ -380,12 +380,20 @@ impl PainterApp {
             self.state.mesh_preview.fit_to_mesh(mesh);
         }
 
-        // Force sync_gpu_textures to refresh on the next frame: a fresh project
-        // has new base layers, possibly a new generated result, and the GPU slots
-        // may still hold placeholders or stale data from a previous mesh.
+        // Force sync_gpu_textures to refresh: a fresh project has new base layers,
+        // possibly a new generated result, and the GPU slots may still hold
+        // placeholders or stale data from a previous mesh. We seed the *_seen_*
+        // fields equal to the current values so the very next sync sees a stable
+        // frame and uploads immediately, instead of paying the usual one-frame
+        // deferral on top of project-load latency.
         self.prev_base_tex_hash = 0;
+        self.base_dirty = true;
         self.prev_uploaded_gen = self.gen_counter.wrapping_sub(1);
+        self.prev_seen_gen = self.gen_counter;
         self.prev_time_key = None;
+        self.prev_seen_time_key = None;
+        self.prev_bound_to_generated = None;
+        self.prev_seen_mode = self.state.mesh_preview.result_mode;
     }
 
     /// Auto-preview debounce and remerge polling.

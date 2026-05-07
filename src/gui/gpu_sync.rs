@@ -12,13 +12,16 @@ use pa_painter::pipeline::compositing::{
     GlobalMaps, fill_base_color_region, resolve_base_color, resolve_base_normal,
 };
 use pa_painter::pipeline::output::blend_normals_udn;
-use pa_painter::types::{BaseColorSource, Color};
+use pa_painter::types::{BaseColorSource, Color, EmbeddedTexture, TextureSource};
 
 impl PainterApp {
     /// Hash of visible layers' base texture state (color, normal, group, order, visibility)
-    /// plus the current resolution preset. Resolution is included so that resizing while
-    /// in Paint/Drawing mode invalidates the cached Base slot, preventing a size mismatch
-    /// when the user later toggles to None.
+    /// plus the current resolution preset. Resolution is included so that resizing
+    /// invalidates the cached Base slot, preventing a size mismatch on the next upload.
+    ///
+    /// Runs every frame, so it must avoid heap allocation. We hash `TextureSource`
+    /// directly (descending into `EmbeddedTexture::content_hash` for file textures)
+    /// instead of round-tripping through JSON.
     fn base_texture_hash(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -33,9 +36,8 @@ impl PainterApp {
             if layer.visible {
                 layer.order.hash(&mut h);
                 layer.group_name.hash(&mut h);
-                if let Ok(bytes) = serde_json::to_vec(&(&layer.base_color, &layer.base_normal)) {
-                    bytes.hash(&mut h);
-                }
+                hash_texture_source(&layer.base_color, &mut h);
+                hash_texture_source(&layer.base_normal, &mut h);
             }
         }
         h.finish()
@@ -184,24 +186,54 @@ impl PainterApp {
 
     /// Synchronise GPU textures for the 3D preview.
     ///
-    /// Two slot pairs (Base, Generated) stay GPU-resident, so toggling `result_mode`
-    /// is just a bind-group rebind. Eager invalidation:
-    ///   * `prev_base_tex_hash` mismatch → recompose base into the Base slot.
-    ///   * `prev_uploaded_gen` mismatch → upload current `state.generated` pixels
-    ///     into the Generated slot.
-    ///   * `prev_time_key` mismatch → rebuild the time-texture array.
+    /// Two slot pairs (Base, Generated) stay GPU-resident; mode toggles only flip
+    /// the bind group. Heavy uploads (base recompose, generated pixels, time-
+    /// texture array) follow the same **"upload on the first stable frame"**
+    /// pattern: when an input key (hash / counter / time key) changes, mark dirty
+    /// but skip the upload. The next frame, if the key did not change again,
+    /// perform the upload. This gives:
     ///
-    /// Mode toggle alone never triggers texture work; only the bind group flips.
+    ///   * Continuous edits (slider drags) → dirty stays set every frame, no
+    ///     upload until the user pauses.
+    ///   * One-shot transitions (mode toggle, generation finishing) → first
+    ///     frame is just bind-group / state housekeeping; the heavy work runs
+    ///     on the very next frame so the click feels instant.
+    ///
+    /// Base recompose is additionally gated on `result_mode == None` because
+    /// the Base slot isn't visible in Paint/Drawing modes.
     pub(super) fn sync_gpu_textures(&mut self) {
-        // ── Base slot (eager): keep current even when in Paint/Drawing mode ──
+        let mode = self.state.mesh_preview.result_mode;
+        let mode_changed_this_frame = mode != self.prev_seen_mode;
+        self.prev_seen_mode = mode;
+
+        // ── Base slot ──
+        // Hash every frame; mark dirty on change, recompose only on a stable
+        // frame in None mode (where the Base slot is actually visible). We also
+        // skip on the frame where the mode just changed so toggling into None
+        // with a pre-existing `base_dirty` doesn't block the click.
         let cur_base_hash = self.base_texture_hash();
-        if cur_base_hash != self.prev_base_tex_hash {
-            self.prev_base_tex_hash = cur_base_hash;
+        let base_changed_this_frame = cur_base_hash != self.prev_base_tex_hash;
+        self.prev_base_tex_hash = cur_base_hash;
+        if base_changed_this_frame {
+            self.base_dirty = true;
+        }
+        if self.base_dirty
+            && !base_changed_this_frame
+            && !mode_changed_this_frame
+            && mode == state::ResultMode::None
+        {
             self.upload_base_only_to_3d();
+            self.base_dirty = false;
         }
 
-        // ── Generated color/normal slot: refresh when state.generated has been replaced ──
-        if self.gen_counter != self.prev_uploaded_gen
+        // ── Generated color/normal slot ──
+        // Defer one frame after `gen_counter` bumps so the upload doesn't run on
+        // the same frame as `apply_generation_result` (which already did CPU work).
+        let cur_gen = self.gen_counter;
+        let gen_changed_this_frame = cur_gen != self.prev_seen_gen;
+        self.prev_seen_gen = cur_gen;
+        if !gen_changed_this_frame
+            && cur_gen != self.prev_uploaded_gen
             && let Some(ref rs) = self.render_state
             && self.state.mesh_preview.gpu_ready
             && let Some(ref generated) = self.state.generated
@@ -218,22 +250,25 @@ impl PainterApp {
                 generated.resolution as usize,
                 mesh_preview::TextureSlot::Generated,
             );
-            self.prev_uploaded_gen = self.gen_counter;
+            self.prev_uploaded_gen = cur_gen;
         }
 
-        // ── Time texture: cache by (gen, draw_order, chunk_size, resolution).
-        //    Built lazily — only when the user is actually in Drawing mode and the key changed. ──
-        let mode = self.state.mesh_preview.result_mode;
-        if mode == state::ResultMode::Drawing
-            && let Some(ref generated) = self.state.generated
-        {
-            let cur_time_key = (
+        // ── Time texture: cache by (gen, draw_order, chunk_size, resolution) ──
+        // Build only in Drawing mode; defer one frame after the key changes so
+        // toggling into Drawing or changing draw_order/chunk_size feels instant.
+        if let Some(ref generated) = self.state.generated {
+            let cur_time_key = Some((
                 self.gen_counter,
                 self.state.mesh_preview.draw_order,
                 self.state.mesh_preview.chunk_size,
                 generated.resolution,
-            );
-            if Some(cur_time_key) != self.prev_time_key
+            ));
+            let time_changed_this_frame = cur_time_key != self.prev_seen_time_key;
+            self.prev_seen_time_key = cur_time_key;
+            if mode == state::ResultMode::Drawing
+                && !time_changed_this_frame
+                && !mode_changed_this_frame
+                && cur_time_key != self.prev_time_key
                 && let Some(ref rs) = self.render_state
                 && self.state.mesh_preview.gpu_ready
             {
@@ -251,19 +286,25 @@ impl PainterApp {
                 self.state.mesh_preview.stroke_count = sc;
                 self.state.mesh_preview.layer_count = lc;
                 self.state.mesh_preview.num_groups = ng;
-                self.prev_time_key = Some(cur_time_key);
+                self.prev_time_key = cur_time_key;
             }
+        } else {
+            self.prev_seen_time_key = None;
         }
 
         // ── Bind group selection: cheap rebind only, no texture work. ──
-        // Re-evaluated every frame; `bind_textures_for_mode` short-circuits if unchanged.
-        // Bind to Generated only when we have something to show — handles the case where
-        // generation completes after the user already toggled to Paint/Drawing.
+        // App-side cache (`prev_bound_to_generated`) avoids acquiring the wgpu
+        // renderer write lock every frame when the desired binding hasn't changed.
+        // Bind to Generated only when we have something to show — handles the case
+        // where generation completes after the user already toggled to Paint/Drawing.
         if let Some(ref rs) = self.render_state
             && self.state.mesh_preview.gpu_ready
         {
             let show_generated = mode != state::ResultMode::None && self.state.generated.is_some();
-            mesh_preview::bind_textures_for_mode(rs, show_generated);
+            if self.prev_bound_to_generated != Some(show_generated) {
+                mesh_preview::bind_textures_for_mode(rs, show_generated);
+                self.prev_bound_to_generated = Some(show_generated);
+            }
         }
 
         // ── Direction field overlay: sync with toggle + guide changes ──
@@ -289,4 +330,42 @@ impl PainterApp {
             }
         }
     }
+}
+
+/// Allocation-free hash of a `TextureSource` for use in `base_texture_hash`.
+/// `EmbeddedTexture::pixels` is heavy and not directly hashable; we descend
+/// only into the cheap `content_hash` summary.
+fn hash_texture_source<H: std::hash::Hasher>(src: &TextureSource, h: &mut H) {
+    use std::hash::Hash;
+    match src {
+        TextureSource::None => 0u8.hash(h),
+        TextureSource::Solid(rgb) => {
+            1u8.hash(h);
+            for c in rgb {
+                c.to_bits().hash(h);
+            }
+        }
+        TextureSource::MeshMaterial(idx) => {
+            2u8.hash(h);
+            idx.hash(h);
+        }
+        TextureSource::File(opt) => {
+            3u8.hash(h);
+            match opt {
+                None => 0u8.hash(h),
+                Some(tex) => {
+                    1u8.hash(h);
+                    hash_embedded_texture(tex, h);
+                }
+            }
+        }
+    }
+}
+
+fn hash_embedded_texture<H: std::hash::Hasher>(tex: &EmbeddedTexture, h: &mut H) {
+    use std::hash::Hash;
+    tex.label.hash(h);
+    tex.width.hash(h);
+    tex.height.hash(h);
+    tex.content_hash.hash(h);
 }
