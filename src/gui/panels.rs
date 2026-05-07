@@ -151,10 +151,19 @@ impl PainterApp {
                         ui.close();
                         self.state.pending_open = true;
                     }
-                    if Self::menu_item(ui, "Open Example", None, true) {
-                        ui.close();
-                        self.state.pending_open_example = true;
-                    }
+                    ui.menu_button("Open Example", |ui| {
+                        ui.set_min_width(200.0);
+                        let mut chosen: Option<usize> = None;
+                        for (i, ex) in super::state::EXAMPLES.iter().enumerate() {
+                            if ui.button(ex.name).clicked() {
+                                chosen = Some(i);
+                                ui.close();
+                            }
+                        }
+                        if let Some(i) = chosen {
+                            self.state.pending_open_example = Some(i);
+                        }
+                    });
                     if !self.recent_files.is_empty() {
                         ui.menu_button("Recent Projects", |ui| {
                             ui.set_min_width(250.0);

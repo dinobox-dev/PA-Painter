@@ -116,7 +116,7 @@ impl eframe::App for PainterApp {
         let pre_frame = self.state.take_snapshot();
         let project_replacing = self.state.pending_open
             || self.state.pending_new
-            || self.state.pending_open_example
+            || self.state.pending_open_example.is_some()
             || self.pending_open_recent.is_some()
             || self.state.project_load_worker.is_active();
 

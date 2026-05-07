@@ -718,11 +718,15 @@ impl PainterApp {
                             self.do_open_project(ctx);
                         }
                     }
-                    Some(UnsavedAction::OpenExample) => {
-                        self.state.status_message = "Opening example project…".to_string();
+                    Some(UnsavedAction::OpenExample(idx)) => {
+                        let name = crate::gui::state::EXAMPLES
+                            .get(idx)
+                            .map(|e| e.name)
+                            .unwrap_or("example");
+                        self.state.status_message = format!("Opening {name}…");
                         self.state
                             .project_load_worker
-                            .start(ProjectLoadSource::Example);
+                            .start(ProjectLoadSource::Example(idx));
                     }
                     Some(UnsavedAction::New) => self.do_new_project(ctx),
                     Some(UnsavedAction::Quit) => {

@@ -161,15 +161,18 @@ impl PainterApp {
                 self.recent_files = recent_files::remove(&path);
             }
         }
-        if self.state.pending_open_example {
-            self.state.pending_open_example = false;
+        if let Some(idx) = self.state.pending_open_example.take() {
             if self.state.dirty {
-                self.state.unsaved_confirm = Some(UnsavedAction::OpenExample);
+                self.state.unsaved_confirm = Some(UnsavedAction::OpenExample(idx));
             } else {
-                self.state.status_message = "Opening example project…".to_string();
+                let name = super::state::EXAMPLES
+                    .get(idx)
+                    .map(|e| e.name)
+                    .unwrap_or("example");
+                self.state.status_message = format!("Opening {name}…");
                 self.state
                     .project_load_worker
-                    .start(ProjectLoadSource::Example);
+                    .start(ProjectLoadSource::Example(idx));
             }
         }
         if self.state.pending_save {
@@ -332,7 +335,7 @@ impl PainterApp {
                         ProjectLoadSource::Open(p) | ProjectLoadSource::Recent(p) => {
                             Some(p.clone())
                         }
-                        ProjectLoadSource::Example => None,
+                        ProjectLoadSource::Example(_) => None,
                     };
                     file_actions::apply_load_result(&mut self.state, load_result, project_path);
                     self.after_project_loaded();

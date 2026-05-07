@@ -17,13 +17,34 @@ use super::preview;
 use super::preview::PreviewCache;
 use super::undo::{UndoHistory, UndoSnapshot};
 
+// ── Bundled Examples ────────────────────────────────────────────────
+
+/// One bundled example project shown under File > Open Example.
+pub struct ExampleEntry {
+    /// Display name used in the menu.
+    pub name: &'static str,
+    /// Filename used for the temp file written before loading.
+    pub filename: &'static str,
+    /// Embedded `.papr` bytes.
+    pub bytes: &'static [u8],
+}
+
+/// Bundled examples, in menu display order. Add entries here to extend the
+/// File > Open Example submenu.
+pub const EXAMPLES: &[ExampleEntry] = &[ExampleEntry {
+    name: "PA Painter Logo",
+    filename: "PAPainterLogo.papr",
+    bytes: include_bytes!("../../examples/PAPainterLogo.papr"),
+}];
+
 // ── Export Worker ──────────────────────────────────────────────────
 
 /// Which action triggered the unsaved-changes confirmation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnsavedAction {
     Open,
-    OpenExample,
+    /// Open one of the bundled [`EXAMPLES`] (by index).
+    OpenExample(usize),
     New,
     Quit,
 }
@@ -115,8 +136,8 @@ pub enum ProjectLoadSource {
     Open(PathBuf),
     /// Recent file or drag-and-drop.
     Recent(PathBuf),
-    /// Built-in example project.
-    Example,
+    /// Built-in example project (index into [`EXAMPLES`]).
+    Example(usize),
 }
 
 /// Background worker for loading .papr project files.
@@ -155,17 +176,19 @@ impl ProjectLoadWorker {
         self.handle = Some(thread::spawn(move || {
             let path = match &source {
                 ProjectLoadSource::Open(p) | ProjectLoadSource::Recent(p) => p.clone(),
-                ProjectLoadSource::Example => {
-                    let tmp = std::env::temp_dir().join("pa_painter_example.papr");
-                    let example_bytes: &[u8] = include_bytes!("../../examples/PAPainterLogo.papr");
-                    std::fs::write(&tmp, example_bytes)
+                ProjectLoadSource::Example(idx) => {
+                    let entry = EXAMPLES
+                        .get(*idx)
+                        .ok_or_else(|| format!("Unknown example index: {idx}"))?;
+                    let tmp = std::env::temp_dir().join(entry.filename);
+                    std::fs::write(&tmp, entry.bytes)
                         .map_err(|e| format!("Failed to write example: {e}"))?;
                     tmp
                 }
             };
             let result = load_project(&path).map_err(|e| format!("Failed to load project: {e}"))?;
             // Clean up temp file for example
-            if matches!(source, ProjectLoadSource::Example) {
+            if matches!(source, ProjectLoadSource::Example(_)) {
                 let _ = std::fs::remove_file(&path);
             }
             Ok((result, source))
@@ -522,7 +545,8 @@ pub struct AppState {
 
     // ── Deferred Actions (set by child widgets, consumed by PainterApp) ──
     pub pending_open: bool,
-    pub pending_open_example: bool,
+    /// Index into [`EXAMPLES`] for a pending Open Example action.
+    pub pending_open_example: Option<usize>,
     pub pending_new: bool,
     pub pending_save: bool,
     pub pending_save_as: bool,
@@ -621,7 +645,7 @@ impl AppState {
             generated: None,
             path_worker: preview::PathOverlayWorker::default(),
             pending_open: false,
-            pending_open_example: false,
+            pending_open_example: None,
             pending_new: false,
             pending_save: false,
             pending_save_as: false,
