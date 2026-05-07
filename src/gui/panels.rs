@@ -203,6 +203,17 @@ impl PainterApp {
                         ui.close();
                         self.state.pending_export = true;
                     }
+                    ui.separator();
+                    let can_extract = self
+                        .state
+                        .generated
+                        .as_ref()
+                        .is_some_and(|g| !g.object_normal.is_empty())
+                        && self.state.cached_mesh_normals.is_some();
+                    if Self::menu_item(ui, "Extract...", None, can_extract) {
+                        ui.close();
+                        self.state.show_extract_settings = true;
+                    }
                 });
                 ui.menu_button("Edit", |ui: &mut egui::Ui| {
                     use egui::{Key, KeyboardShortcut, Modifiers};

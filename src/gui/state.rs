@@ -527,6 +527,7 @@ pub struct AppState {
     pub pending_save: bool,
     pub pending_save_as: bool,
     pub pending_export: bool,
+    pub pending_extract: bool,
     pub pending_reload_mesh: bool,
     pub pending_replace_mesh: bool,
     /// Mesh path from drag-and-drop (skips file dialog in new_project).
@@ -567,6 +568,10 @@ pub struct AppState {
     pub show_export_settings: bool,
     /// Temporary copy of export settings being edited in the dialog.
     pub export_settings_draft: Option<ExportSettings>,
+
+    // ── Extract Panel (separate track from Export; not persisted in .papr) ──
+    pub show_extract_settings: bool,
+    pub extract_prefs: super::extract_prefs::ExtractPrefs,
 
     // ── Background Export ──
     pub export_worker: ExportWorker,
@@ -621,6 +626,7 @@ impl AppState {
             pending_save: false,
             pending_save_as: false,
             pending_export: false,
+            pending_extract: false,
             pending_reload_mesh: false,
             pending_replace_mesh: false,
             pending_drop_mesh: None,
@@ -637,6 +643,8 @@ impl AppState {
             auto_gen_suppressed: false,
             show_export_settings: false,
             export_settings_draft: None,
+            show_extract_settings: false,
+            extract_prefs: super::extract_prefs::load(),
             export_worker: ExportWorker::default(),
             project_load_worker: ProjectLoadWorker::default(),
             export_overwrite_confirm: None,

@@ -8,7 +8,7 @@ use super::file_actions;
 use super::recent_files;
 use super::state::{AppState, GuideTool, ProjectLoadSource, UnsavedAction};
 
-use pa_painter::pipeline::output::ExportFormat;
+use pa_painter::pipeline::output::{ExportFormat, ExtractEncoding, UpAxis};
 use pa_painter::types::{NormalYConvention, TextureSource};
 
 impl PainterApp {
@@ -160,6 +160,134 @@ impl PainterApp {
             Some(false) => {
                 state.export_settings_draft = None;
                 state.show_export_settings = false;
+            }
+            None => {}
+        }
+    }
+
+    /// Modal dialog for the Extract track. Distinct from Export Settings
+    /// because the data flow is different: settings are not persisted in
+    /// `.papr`, the action writes a single file via `rfd::save_file`, and
+    /// the input is consumed directly without a draft/commit step.
+    pub(super) fn show_extract_settings_window(ctx: &egui::Context, state: &mut AppState) {
+        if !state.show_extract_settings {
+            return;
+        }
+
+        let mut action: Option<bool> = None; // Some(true) = save, Some(false) = cancel
+        let weak = ctx.global_style().visuals.weak_text_color();
+
+        let frame = egui::Frame {
+            inner_margin: egui::Margin::same(16),
+            outer_margin: egui::Margin::ZERO,
+            corner_radius: egui::CornerRadius::same(8),
+            shadow: egui::Shadow {
+                offset: [0, 4],
+                blur: 16,
+                spread: 4,
+                color: egui::Color32::from_black_alpha(80),
+            },
+            fill: ctx.global_style().visuals.window_fill,
+            stroke: egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+        };
+
+        egui::Window::new("extract_settings")
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .min_width(280.0)
+            .max_width(280.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .frame(frame)
+            .show(ctx, |ui: &mut egui::Ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
+
+                ui.vertical_centered(|ui: &mut egui::Ui| {
+                    ui.strong(egui::RichText::new("Extract").size(15.0));
+                });
+                ui.add_space(2.0);
+                ui.vertical_centered(|ui: &mut egui::Ui| {
+                    ui.colored_label(weak, "Object-space normal map");
+                });
+                ui.add_space(8.0);
+
+                ui.indent("extract_indent", |ui: &mut egui::Ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        ui.colored_label(weak, "Up axis");
+                        ui.selectable_value(
+                            &mut state.extract_prefs.up_axis,
+                            UpAxis::Y,
+                            "Y-up",
+                        );
+                        ui.selectable_value(
+                            &mut state.extract_prefs.up_axis,
+                            UpAxis::Z,
+                            "Z-up",
+                        );
+                    });
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui: &mut egui::Ui| {
+                        ui.colored_label(weak, "Encoding");
+                        ui.selectable_value(
+                            &mut state.extract_prefs.encoding,
+                            ExtractEncoding::Png8,
+                            "PNG 8-bit",
+                        );
+                        ui.selectable_value(
+                            &mut state.extract_prefs.encoding,
+                            ExtractEncoding::Png16,
+                            "PNG 16-bit",
+                        );
+                        ui.selectable_value(
+                            &mut state.extract_prefs.encoding,
+                            ExtractEncoding::Exr,
+                            "EXR",
+                        );
+                    });
+                });
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui: &mut egui::Ui| {
+                    let btn_w = 90.0_f32;
+                    let gap = 12.0_f32;
+                    ui.spacing_mut().item_spacing.x = gap;
+                    let total = btn_w * 2.0 + gap;
+                    let pad = ((ui.available_width() - total) / 2.0).max(0.0);
+                    ui.add_space(pad);
+                    if ui
+                        .add(egui::Button::new("Cancel").min_size(egui::Vec2::new(btn_w, 28.0)))
+                        .clicked()
+                    {
+                        action = Some(false);
+                    }
+                    let accent = egui::Color32::from_rgb(45, 120, 220);
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Save…").color(egui::Color32::WHITE),
+                            )
+                            .fill(accent)
+                            .min_size(egui::Vec2::new(btn_w, 28.0)),
+                        )
+                        .clicked()
+                    {
+                        action = Some(true);
+                    }
+                });
+            });
+
+        match action {
+            Some(true) => {
+                state.show_extract_settings = false;
+                state.pending_extract = true;
+            }
+            Some(false) => {
+                state.show_extract_settings = false;
             }
             None => {}
         }
@@ -487,6 +615,7 @@ impl PainterApp {
         }
 
         Self::show_export_settings_window(ctx, &mut self.state);
+        Self::show_extract_settings_window(ctx, &mut self.state);
 
         // Alert dialog (modal)
         let mut dismiss_alert = false;

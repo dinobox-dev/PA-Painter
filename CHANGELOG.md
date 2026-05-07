@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Extract track** for DCC-targeted ad-hoc output, separate from project-persistent Export. Emits a single map per invocation; settings are stored per-user (not in `.papr`), preserving project-file reproducibility.
+  - GUI: `File > Extract...` opens a modal that picks **Up axis** (Y-up / Z-up) and **Encoding** (PNG 8-bit / PNG 16-bit / EXR), then writes a single file via the native save dialog. Last selection persists in the user data directory (mirrors the `recent_projects.json` pattern).
+  - CLI: `pa-painter extract <project.papr> --map object-normal [--up y|z] [--encoding png8|png16|exr] -o <file> [-r <res>]`. The default `pa-painter <project.papr>` flat-arg form is preserved (backwards-compatible via clap's `args_conflicts_with_subcommands`).
+  - v1 supports object-space normal map only (mesh + DepictedForm normal mode required). Additional source maps will be added in a follow-up.
+  - 16-bit PNG output uses 65,536 levels per channel (256× the precision of 8-bit) — eliminates the banding visible at glancing angles on smooth surfaces. EXR option writes 32-bit linear float for DCC pipelines that prefer it.
+
 ### Fixed
 
 - CLI and GUI error messages now use `Display` formatting instead of `Debug`, so user-facing failures show the message defined by `thiserror` (e.g. `Failed to load project: IO error: No such file or directory (os error 2)`) rather than the enum-variant tree (`Failed to load project: Io(Os { code: 2, kind: NotFound, message: "No such file or directory" })`). Affects CLI load/export/per-layer/manifest paths and GUI load/save/export/GLB status messages.

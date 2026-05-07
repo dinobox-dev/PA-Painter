@@ -202,6 +202,10 @@ impl PainterApp {
                 }
             }
         }
+        if self.state.pending_extract {
+            self.state.pending_extract = false;
+            file_actions::extract_object_normal_action(&mut self.state);
+        }
         if self.state.pending_new {
             self.state.pending_new = false;
             if self.state.dirty {

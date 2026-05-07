@@ -1,8 +1,10 @@
 mod export;
+mod extract;
 mod mesh_loading;
 mod project_io;
 
 pub use export::{confirm_export_overwrite, export_both, export_glb, export_maps};
+pub use extract::extract_object_normal_action;
 pub use mesh_loading::apply_mesh_load_popup;
 pub use project_io::{
     apply_load_result, new_project, pick_project_path, reload_mesh, replace_mesh,

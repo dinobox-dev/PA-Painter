@@ -1,4 +1,5 @@
 mod dialogs;
+pub mod extract_prefs;
 pub mod file_actions;
 mod frame_update;
 pub mod generation;
