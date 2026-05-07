@@ -28,12 +28,17 @@ pub struct PainterApp {
     pub(super) state: AppState,
     pub(super) checkerboard: Option<egui::TextureHandle>,
     pub(super) render_state: Option<egui_wgpu::RenderState>,
-    /// Previous frame's result_mode for toggle change detection.
-    pub(super) prev_result_mode: state::ResultMode,
-    /// Previous frame's draw_order for change detection (re-upload time texture).
-    pub(super) prev_draw_order: state::DrawOrder,
-    pub(super) prev_chunk_size: u32,
-    /// Hash of base texture state for 3D preview invalidation when show_result is off.
+    /// Monotonic counter bumped each time `state.generated` is replaced
+    /// (apply_generation_result / apply_remerge_result). Used by sync_gpu_textures
+    /// to detect when GPU-resident generated textures need refreshing.
+    pub(super) gen_counter: u64,
+    /// `gen_counter` value reflected in the GPU-resident generated color/normal textures.
+    pub(super) prev_uploaded_gen: u64,
+    /// Cache key for the time-texture upload: (gen_counter, draw_order, chunk_size, resolution).
+    /// `None` until the first time-texture build.
+    pub(super) prev_time_key: Option<(u64, state::DrawOrder, u32, u32)>,
+    /// Hash of base texture state. Eagerly invalidates the Base color/normal slots,
+    /// regardless of current `result_mode`, so toggling to None is instant.
     pub(super) prev_base_tex_hash: u64,
     /// Background remerge worker.
     pub(super) remerge_worker: generation::RemergeWorker,
@@ -64,9 +69,9 @@ impl PainterApp {
             state: AppState::new(),
             checkerboard: None,
             render_state: cc.wgpu_render_state.clone(),
-            prev_result_mode: state::ResultMode::Paint,
-            prev_draw_order: state::DrawOrder::Sequential,
-            prev_chunk_size: 1,
+            gen_counter: 0,
+            prev_uploaded_gen: 0,
+            prev_time_key: None,
             prev_base_tex_hash: 0,
             remerge_worker: generation::RemergeWorker::default(),
             prev_show_direction_field: false,

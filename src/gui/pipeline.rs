@@ -176,7 +176,6 @@ impl PainterApp {
         mut result: generation::GenResult,
     ) {
         let is_preview = self.state.generation.is_preview;
-        let r = result.resolution;
         // Upload pre-converted images — take ownership to avoid 64MB clone.
         let empty_img = egui::ColorImage::new([0, 0], vec![]);
         self.state.textures.color = Some(ctx.load_texture(
@@ -200,26 +199,11 @@ impl PainterApp {
             egui::TextureOptions::LINEAR,
         ));
 
-        // Upload color, normal, and time textures to 3D preview
-        if let Some(ref rs) = self.render_state
-            && self.state.mesh_preview.gpu_ready
-            && self.state.mesh_preview.show_result()
-        {
-            mesh_preview::upload_color_texture_raw(rs, &result.gpu_color_pixels, r as usize);
-            mesh_preview::upload_normal_texture_raw(rs, &result.gpu_normal_pixels, r as usize);
-            let lh =
-                collect_layer_refs(&result.rendered_layers, &self.state.generation.layer_cache);
-            let (sc, lc, ng) = mesh_preview::upload_time_texture(
-                rs,
-                &lh,
-                result.resolution,
-                self.state.mesh_preview.draw_order,
-                self.state.mesh_preview.chunk_size,
-            );
-            self.state.mesh_preview.stroke_count = sc;
-            self.state.mesh_preview.layer_count = lc;
-            self.state.mesh_preview.num_groups = ng;
-        }
+        // GPU upload is deferred to sync_gpu_textures via the gen_counter bump.
+        // sync_gpu_textures will detect prev_uploaded_gen != gen_counter and refresh
+        // the Generated color/normal slot; the time texture is rebuilt only when
+        // Drawing mode is active (lazy).
+        self.gen_counter = self.gen_counter.wrapping_add(1);
 
         // Cache mesh normals computed on the worker thread
         if let Some(normals) = &result.computed_normals {
@@ -327,26 +311,8 @@ impl PainterApp {
             egui::TextureOptions::LINEAR,
         ));
 
-        // Upload to 3D preview
-        if let Some(ref rs) = self.render_state
-            && self.state.mesh_preview.gpu_ready
-            && self.state.mesh_preview.show_result()
-        {
-            mesh_preview::upload_color_texture_raw(rs, &result.gpu_color_pixels, r as usize);
-            mesh_preview::upload_normal_texture_raw(rs, &result.gpu_normal_pixels, r as usize);
-            let lh =
-                collect_layer_refs(&result.rendered_layers, &self.state.generation.layer_cache);
-            let (sc, lc, ng) = mesh_preview::upload_time_texture(
-                rs,
-                &lh,
-                r,
-                self.state.mesh_preview.draw_order,
-                self.state.mesh_preview.chunk_size,
-            );
-            self.state.mesh_preview.stroke_count = sc;
-            self.state.mesh_preview.layer_count = lc;
-            self.state.mesh_preview.num_groups = ng;
-        }
+        // GPU upload is deferred to sync_gpu_textures via the gen_counter bump.
+        self.gen_counter = self.gen_counter.wrapping_add(1);
 
         // Update stored result
         self.state.generated = Some(generation::GenResult {
@@ -414,39 +380,12 @@ impl PainterApp {
             self.state.mesh_preview.fit_to_mesh(mesh);
         }
 
-        // Sync GPU textures with current generation state
-        if self.state.mesh_preview.show_result() {
-            if let Some(ref generated) = self.state.generated {
-                mesh_preview::upload_color_texture(
-                    rs,
-                    &generated.color,
-                    generated.resolution as usize,
-                );
-                mesh_preview::upload_normal_texture(
-                    rs,
-                    &generated.normal_map,
-                    generated.resolution as usize,
-                );
-                let lh = collect_layer_refs(
-                    &generated.rendered_layers,
-                    &self.state.generation.layer_cache,
-                );
-                let (sc, lc, ng) = mesh_preview::upload_time_texture(
-                    rs,
-                    &lh,
-                    generated.resolution,
-                    self.state.mesh_preview.draw_order,
-                    self.state.mesh_preview.chunk_size,
-                );
-                self.state.mesh_preview.stroke_count = sc;
-                self.state.mesh_preview.layer_count = lc;
-                self.state.mesh_preview.num_groups = ng;
-            } else {
-                self.upload_base_only_to_3d();
-            }
-        } else {
-            self.upload_base_only_to_3d();
-        }
+        // Force sync_gpu_textures to refresh on the next frame: a fresh project
+        // has new base layers, possibly a new generated result, and the GPU slots
+        // may still hold placeholders or stale data from a previous mesh.
+        self.prev_base_tex_hash = 0;
+        self.prev_uploaded_gen = self.gen_counter.wrapping_sub(1);
+        self.prev_time_key = None;
     }
 
     /// Auto-preview debounce and remerge polling.

@@ -15,10 +15,19 @@ use pa_painter::pipeline::output::blend_normals_udn;
 use pa_painter::types::{BaseColorSource, Color};
 
 impl PainterApp {
-    /// Hash of visible layers' base texture state (color, normal, group, order, visibility).
+    /// Hash of visible layers' base texture state (color, normal, group, order, visibility)
+    /// plus the current resolution preset. Resolution is included so that resizing while
+    /// in Paint/Drawing mode invalidates the cached Base slot, preventing a size mismatch
+    /// when the user later toggles to None.
     fn base_texture_hash(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.state
+            .project
+            .settings
+            .resolution_preset
+            .resolution()
+            .hash(&mut h);
         for layer in &self.state.project.layers {
             layer.visible.hash(&mut h);
             if layer.visible {
@@ -73,8 +82,10 @@ impl PainterApp {
         mesh_preview::upload_overlay_texture(render_state, &pixels, resolution);
     }
 
-    /// Upload base-only textures to the 3D preview (no stroke results).
-    /// Composites visible layers' base color and base normal textures.
+    /// Recompose visible layers' base color/normal and upload into the **Base** slot pair.
+    ///
+    /// This always targets the Base slot regardless of current `result_mode`, so the
+    /// data is ready for an instant bind-group swap when the user toggles to None.
     pub(super) fn upload_base_only_to_3d(&self) {
         let Some(ref rs) = self.render_state else {
             return;
@@ -157,72 +168,74 @@ impl PainterApp {
             }
         }
 
-        mesh_preview::upload_color_texture(rs, &global.color, resolution as usize);
-        mesh_preview::upload_normal_texture(rs, &normal_map, resolution as usize);
+        mesh_preview::upload_color_texture(
+            rs,
+            &global.color,
+            resolution as usize,
+            mesh_preview::TextureSlot::Base,
+        );
+        mesh_preview::upload_normal_texture(
+            rs,
+            &normal_map,
+            resolution as usize,
+            mesh_preview::TextureSlot::Base,
+        );
     }
 
-    /// Synchronise GPU textures for the 3D preview (result mode, direction field overlay).
+    /// Synchronise GPU textures for the 3D preview.
+    ///
+    /// Two slot pairs (Base, Generated) stay GPU-resident, so toggling `result_mode`
+    /// is just a bind-group rebind. Eager invalidation:
+    ///   * `prev_base_tex_hash` mismatch → recompose base into the Base slot.
+    ///   * `prev_uploaded_gen` mismatch → upload current `state.generated` pixels
+    ///     into the Generated slot.
+    ///   * `prev_time_key` mismatch → rebuild the time-texture array.
+    ///
+    /// Mode toggle alone never triggers texture work; only the bind group flips.
     pub(super) fn sync_gpu_textures(&mut self) {
-        // ── Result mode: re-upload when mode/draw_order/chunk_size changes ──
+        // ── Base slot (eager): keep current even when in Paint/Drawing mode ──
+        let cur_base_hash = self.base_texture_hash();
+        if cur_base_hash != self.prev_base_tex_hash {
+            self.prev_base_tex_hash = cur_base_hash;
+            self.upload_base_only_to_3d();
+        }
+
+        // ── Generated color/normal slot: refresh when state.generated has been replaced ──
+        if self.gen_counter != self.prev_uploaded_gen
+            && let Some(ref rs) = self.render_state
+            && self.state.mesh_preview.gpu_ready
+            && let Some(ref generated) = self.state.generated
+        {
+            mesh_preview::upload_color_texture_raw(
+                rs,
+                &generated.gpu_color_pixels,
+                generated.resolution as usize,
+                mesh_preview::TextureSlot::Generated,
+            );
+            mesh_preview::upload_normal_texture_raw(
+                rs,
+                &generated.gpu_normal_pixels,
+                generated.resolution as usize,
+                mesh_preview::TextureSlot::Generated,
+            );
+            self.prev_uploaded_gen = self.gen_counter;
+        }
+
+        // ── Time texture: cache by (gen, draw_order, chunk_size, resolution).
+        //    Built lazily — only when the user is actually in Drawing mode and the key changed. ──
         let mode = self.state.mesh_preview.result_mode;
-        let show = self.state.mesh_preview.show_result();
-        if mode != self.prev_result_mode {
-            self.prev_result_mode = mode;
-            if show {
-                if let Some(ref rs) = self.render_state
-                    && self.state.mesh_preview.gpu_ready
-                    && let Some(ref generated) = self.state.generated
-                {
-                    mesh_preview::upload_color_texture_raw(
-                        rs,
-                        &generated.gpu_color_pixels,
-                        generated.resolution as usize,
-                    );
-                    mesh_preview::upload_normal_texture_raw(
-                        rs,
-                        &generated.gpu_normal_pixels,
-                        generated.resolution as usize,
-                    );
-                    let lh = collect_layer_refs(
-                        &generated.rendered_layers,
-                        &self.state.generation.layer_cache,
-                    );
-                    let (sc, lc, ng) = mesh_preview::upload_time_texture(
-                        rs,
-                        &lh,
-                        generated.resolution,
-                        self.state.mesh_preview.draw_order,
-                        self.state.mesh_preview.chunk_size,
-                    );
-                    self.state.mesh_preview.stroke_count = sc;
-                    self.state.mesh_preview.layer_count = lc;
-                    self.state.mesh_preview.num_groups = ng;
-                }
-            } else {
-                self.upload_base_only_to_3d();
-                self.prev_base_tex_hash = self.base_texture_hash();
-            }
-        }
-
-        // When show_result is off, detect base texture changes
-        if !show {
-            let h = self.base_texture_hash();
-            if h != self.prev_base_tex_hash {
-                self.prev_base_tex_hash = h;
-                self.upload_base_only_to_3d();
-            }
-        }
-
-        // Re-upload time texture when draw_order or chunk_size changes
-        let cur_order = self.state.mesh_preview.draw_order;
-        let cur_chunk = self.state.mesh_preview.chunk_size;
-        if cur_order != self.prev_draw_order || cur_chunk != self.prev_chunk_size {
-            self.prev_draw_order = cur_order;
-            self.prev_chunk_size = cur_chunk;
-            if mode == state::ResultMode::Drawing
+        if mode == state::ResultMode::Drawing
+            && let Some(ref generated) = self.state.generated
+        {
+            let cur_time_key = (
+                self.gen_counter,
+                self.state.mesh_preview.draw_order,
+                self.state.mesh_preview.chunk_size,
+                generated.resolution,
+            );
+            if Some(cur_time_key) != self.prev_time_key
                 && let Some(ref rs) = self.render_state
                 && self.state.mesh_preview.gpu_ready
-                && let Some(ref generated) = self.state.generated
             {
                 let lh = collect_layer_refs(
                     &generated.rendered_layers,
@@ -232,13 +245,25 @@ impl PainterApp {
                     rs,
                     &lh,
                     generated.resolution,
-                    cur_order,
+                    self.state.mesh_preview.draw_order,
                     self.state.mesh_preview.chunk_size,
                 );
                 self.state.mesh_preview.stroke_count = sc;
                 self.state.mesh_preview.layer_count = lc;
                 self.state.mesh_preview.num_groups = ng;
+                self.prev_time_key = Some(cur_time_key);
             }
+        }
+
+        // ── Bind group selection: cheap rebind only, no texture work. ──
+        // Re-evaluated every frame; `bind_textures_for_mode` short-circuits if unchanged.
+        // Bind to Generated only when we have something to show — handles the case where
+        // generation completes after the user already toggled to Paint/Drawing.
+        if let Some(ref rs) = self.render_state
+            && self.state.mesh_preview.gpu_ready
+        {
+            let show_generated = mode != state::ResultMode::None && self.state.generated.is_some();
+            mesh_preview::bind_textures_for_mode(rs, show_generated);
         }
 
         // ── Direction field overlay: sync with toggle + guide changes ──

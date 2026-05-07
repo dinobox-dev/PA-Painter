@@ -142,11 +142,6 @@ impl Default for MeshPreviewState {
 }
 
 impl MeshPreviewState {
-    /// Whether any generated result is shown (Paint or Drawing).
-    pub fn show_result(&self) -> bool {
-        self.result_mode != super::state::ResultMode::None
-    }
-
     /// Compute the camera eye position from spherical coordinates.
     fn eye(&self) -> Vec3 {
         let x = self.distance * self.yaw.cos() * self.pitch.cos();
@@ -196,6 +191,19 @@ impl MeshPreviewState {
 
 // ── GPU Resources ──────────────────────────────────────────────────
 
+/// Which texture slot to target for color/normal uploads.
+///
+/// Two slot pairs (Base and Generated) are kept resident on the GPU so that
+/// switching `ResultMode` (None ↔ Paint/Drawing) only swaps the bind group
+/// instead of re-uploading texture data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextureSlot {
+    /// Composited base color/normal (shown when ResultMode::None).
+    Base,
+    /// Generated result color/normal (shown when ResultMode::Paint/Drawing).
+    Generated,
+}
+
 struct MeshGpuResources {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
@@ -203,22 +211,27 @@ struct MeshGpuResources {
     index_count: u32,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
-    #[allow(dead_code)] // Ownership anchor: TextureView and BindGroup reference this GPU resource.
-    color_texture: wgpu::Texture,
-    #[allow(dead_code)] // Ownership anchor: texture_bind_group references this view.
-    color_texture_view: wgpu::TextureView,
-    #[allow(dead_code)] // Ownership anchor: TextureView and BindGroup reference this GPU resource.
-    normal_texture: wgpu::Texture,
-    #[allow(dead_code)] // Ownership anchor: texture_bind_group references this view.
-    normal_texture_view: wgpu::TextureView,
+    #[allow(dead_code)] // Ownership anchor.
+    color_base_texture: wgpu::Texture,
+    color_base_view: wgpu::TextureView,
+    #[allow(dead_code)] // Ownership anchor.
+    normal_base_texture: wgpu::Texture,
+    normal_base_view: wgpu::TextureView,
+    #[allow(dead_code)] // Ownership anchor.
+    color_generated_texture: wgpu::Texture,
+    color_generated_view: wgpu::TextureView,
+    #[allow(dead_code)] // Ownership anchor.
+    normal_generated_texture: wgpu::Texture,
+    normal_generated_view: wgpu::TextureView,
     #[allow(dead_code)]
     overlay_texture: wgpu::Texture,
-    #[allow(dead_code)]
     overlay_texture_view: wgpu::TextureView,
     #[allow(dead_code)]
     time_texture: wgpu::Texture,
-    #[allow(dead_code)]
     time_texture_view: wgpu::TextureView,
+    /// Which slot pair the active bind group currently points at.
+    /// `false` = Base, `true` = Generated.
+    bound_to_generated: bool,
     texture_bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -599,11 +612,19 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         }],
     });
 
-    let color_texture = create_placeholder_texture(device, queue);
-    let color_texture_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let color_base_texture = create_placeholder_texture(device, queue);
+    let color_base_view = color_base_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    let normal_texture = create_placeholder_normal_texture(device, queue);
-    let normal_texture_view = normal_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let normal_base_texture = create_placeholder_normal_texture(device, queue);
+    let normal_base_view = normal_base_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let color_generated_texture = create_placeholder_texture(device, queue);
+    let color_generated_view =
+        color_generated_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let normal_generated_texture = create_placeholder_normal_texture(device, queue);
+    let normal_generated_view =
+        normal_generated_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     let overlay_texture = create_placeholder_overlay_texture(device, queue);
     let overlay_texture_view = overlay_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -673,32 +694,16 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
                 },
             ],
         });
-    let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("mesh_texture_bg"),
-        layout: &texture_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&color_texture_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&sampler),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::TextureView(&normal_texture_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: wgpu::BindingResource::TextureView(&overlay_texture_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: wgpu::BindingResource::TextureView(&time_texture_view),
-            },
-        ],
-    });
+    // Default initial binding: Base slots (matches ResultMode::None / pre-generation state).
+    let texture_bind_group = rebuild_texture_bind_group(
+        device,
+        &texture_bind_group_layout,
+        &sampler,
+        &color_base_view,
+        &normal_base_view,
+        &overlay_texture_view,
+        &time_texture_view,
+    );
 
     // Pipeline
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -769,14 +774,19 @@ pub fn init_gpu_resources(render_state: &egui_wgpu::RenderState, mesh: &LoadedMe
         index_count,
         uniform_buffer,
         uniform_bind_group,
-        color_texture,
-        color_texture_view,
-        normal_texture,
-        normal_texture_view,
+        color_base_texture,
+        color_base_view,
+        normal_base_texture,
+        normal_base_view,
+        color_generated_texture,
+        color_generated_view,
+        normal_generated_texture,
+        normal_generated_view,
         overlay_texture,
         overlay_texture_view,
         time_texture,
         time_texture_view,
+        bound_to_generated: false,
         texture_bind_group,
         texture_bind_group_layout,
         sampler,
@@ -867,10 +877,15 @@ pub fn convert_normal_pixels(normal_data: &[[f32; 3]]) -> Vec<u8> {
 
 /// Upload pre-converted color pixel bytes to the 3D preview texture.
 /// Use this when pixels are already converted on the worker thread.
+///
+/// Writes into the requested slot only — does not change which slot is currently
+/// bound. Caller must invoke `bind_textures_for_mode` to actually display the
+/// uploaded data when needed.
 pub fn upload_color_texture_raw(
     render_state: &egui_wgpu::RenderState,
     pixels: &[u8],
     resolution: usize,
+    slot: TextureSlot,
 ) {
     let device = &render_state.device;
     let queue = &render_state.queue;
@@ -880,8 +895,12 @@ pub fn upload_color_texture_raw(
         height: resolution as u32,
         depth_or_array_layers: 1,
     };
+    let label = match slot {
+        TextureSlot::Base => "mesh_color_base_tex",
+        TextureSlot::Generated => "mesh_color_generated_tex",
+    };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("mesh_color_tex"),
+        label: Some(label),
         size,
         mip_level_count: 1,
         sample_count: 1,
@@ -910,17 +929,26 @@ pub fn upload_color_texture_raw(
 
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
-        res.texture_bind_group = rebuild_texture_bind_group(
-            device,
-            &res.texture_bind_group_layout,
-            &res.sampler,
-            &view,
-            &res.normal_texture_view,
-            &res.overlay_texture_view,
-            &res.time_texture_view,
+        match slot {
+            TextureSlot::Base => {
+                res.color_base_texture = texture;
+                res.color_base_view = view;
+            }
+            TextureSlot::Generated => {
+                res.color_generated_texture = texture;
+                res.color_generated_view = view;
+            }
+        }
+        // If we just rewrote the slot the bind group currently points at, the
+        // old TextureView in the bind group still references the dropped texture.
+        // Rebuild so the GPU samples from the new resource.
+        let slot_is_active = matches!(
+            (slot, res.bound_to_generated),
+            (TextureSlot::Base, false) | (TextureSlot::Generated, true)
         );
-        res.color_texture = texture;
-        res.color_texture_view = view;
+        if slot_is_active {
+            rebuild_active_bind_group(device, res);
+        }
     }
 }
 
@@ -929,6 +957,7 @@ pub fn upload_normal_texture_raw(
     render_state: &egui_wgpu::RenderState,
     pixels: &[u8],
     resolution: usize,
+    slot: TextureSlot,
 ) {
     let device = &render_state.device;
     let queue = &render_state.queue;
@@ -938,8 +967,12 @@ pub fn upload_normal_texture_raw(
         height: resolution as u32,
         depth_or_array_layers: 1,
     };
+    let label = match slot {
+        TextureSlot::Base => "mesh_normal_base_tex",
+        TextureSlot::Generated => "mesh_normal_generated_tex",
+    };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("mesh_normal_tex"),
+        label: Some(label),
         size,
         mip_level_count: 1,
         sample_count: 1,
@@ -968,18 +1001,58 @@ pub fn upload_normal_texture_raw(
 
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
-        res.texture_bind_group = rebuild_texture_bind_group(
-            device,
-            &res.texture_bind_group_layout,
-            &res.sampler,
-            &res.color_texture_view,
-            &view,
-            &res.overlay_texture_view,
-            &res.time_texture_view,
+        match slot {
+            TextureSlot::Base => {
+                res.normal_base_texture = texture;
+                res.normal_base_view = view;
+            }
+            TextureSlot::Generated => {
+                res.normal_generated_texture = texture;
+                res.normal_generated_view = view;
+            }
+        }
+        let slot_is_active = matches!(
+            (slot, res.bound_to_generated),
+            (TextureSlot::Base, false) | (TextureSlot::Generated, true)
         );
-        res.normal_texture = texture;
-        res.normal_texture_view = view;
+        if slot_is_active {
+            rebuild_active_bind_group(device, res);
+        }
     }
+}
+
+/// Switch which slot pair (Base or Generated) the bind group exposes to the shader.
+///
+/// Cheap operation: only rebuilds the bind group descriptor; no texture upload.
+/// Used when the user toggles `ResultMode` between None / Paint / Drawing.
+pub fn bind_textures_for_mode(render_state: &egui_wgpu::RenderState, show_generated: bool) {
+    let device = &render_state.device;
+    let mut renderer = render_state.renderer.write();
+    if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
+        if res.bound_to_generated == show_generated {
+            return;
+        }
+        res.bound_to_generated = show_generated;
+        rebuild_active_bind_group(device, res);
+    }
+}
+
+/// Rebuild `texture_bind_group` from the slot indicated by `bound_to_generated`.
+fn rebuild_active_bind_group(device: &wgpu::Device, res: &mut MeshGpuResources) {
+    let (color_view, normal_view) = if res.bound_to_generated {
+        (&res.color_generated_view, &res.normal_generated_view)
+    } else {
+        (&res.color_base_view, &res.normal_base_view)
+    };
+    res.texture_bind_group = rebuild_texture_bind_group(
+        device,
+        &res.texture_bind_group_layout,
+        &res.sampler,
+        color_view,
+        normal_view,
+        &res.overlay_texture_view,
+        &res.time_texture_view,
+    );
 }
 
 /// Upload generated color data to the 3D preview texture.
@@ -989,9 +1062,10 @@ pub fn upload_color_texture(
     render_state: &egui_wgpu::RenderState,
     color_data: &[pa_painter::types::Color],
     resolution: usize,
+    slot: TextureSlot,
 ) {
     let pixels = convert_color_pixels(color_data);
-    upload_color_texture_raw(render_state, &pixels, resolution);
+    upload_color_texture_raw(render_state, &pixels, resolution, slot);
 }
 
 // ── Normal texture upload ──────────────────────────────────────────
@@ -1003,9 +1077,10 @@ pub fn upload_normal_texture(
     render_state: &egui_wgpu::RenderState,
     normal_data: &[[f32; 3]],
     resolution: usize,
+    slot: TextureSlot,
 ) {
     let pixels = convert_normal_pixels(normal_data);
-    upload_normal_texture_raw(render_state, &pixels, resolution);
+    upload_normal_texture_raw(render_state, &pixels, resolution, slot);
 }
 
 // ── Overlay texture upload ─────────────────────────────────────────
@@ -1055,17 +1130,9 @@ pub fn upload_overlay_texture(
 
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
-        res.texture_bind_group = rebuild_texture_bind_group(
-            device,
-            &res.texture_bind_group_layout,
-            &res.sampler,
-            &res.color_texture_view,
-            &res.normal_texture_view,
-            &view,
-            &res.time_texture_view,
-        );
         res.overlay_texture = texture;
         res.overlay_texture_view = view;
+        rebuild_active_bind_group(device, res);
     }
 }
 
@@ -1079,17 +1146,9 @@ pub fn clear_overlay_texture(render_state: &egui_wgpu::RenderState) {
 
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
-        res.texture_bind_group = rebuild_texture_bind_group(
-            device,
-            &res.texture_bind_group_layout,
-            &res.sampler,
-            &res.color_texture_view,
-            &res.normal_texture_view,
-            &view,
-            &res.time_texture_view,
-        );
         res.overlay_texture = texture;
         res.overlay_texture_view = view;
+        rebuild_active_bind_group(device, res);
     }
 }
 
@@ -1281,17 +1340,9 @@ pub fn upload_time_texture(
 
     let mut renderer = render_state.renderer.write();
     if let Some(res) = renderer.callback_resources.get_mut::<MeshGpuResources>() {
-        res.texture_bind_group = rebuild_texture_bind_group(
-            device,
-            &res.texture_bind_group_layout,
-            &res.sampler,
-            &res.color_texture_view,
-            &res.normal_texture_view,
-            &res.overlay_texture_view,
-            &view,
-        );
         res.time_texture = texture;
         res.time_texture_view = view;
+        rebuild_active_bind_group(device, res);
     }
     (total_strokes, num_layers, max_groups as f32)
 }
