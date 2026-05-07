@@ -9,9 +9,7 @@ mod normal_map;
 mod png_export;
 
 pub use exr_export::{export_color_exr, export_height_exr, export_stroke_time_exr};
-pub use extract::{
-    ExtractEncoding, ExtractObjectNormalParams, UpAxis, extract_object_normal,
-};
+pub use extract::{ExtractEncoding, ExtractObjectNormalParams, UpAxis, extract_object_normal};
 pub use normal_map::{
     blend_normals_udn, generate_normal_map, generate_normal_map_depicted_form, normals_to_pixels,
 };

@@ -49,7 +49,7 @@ enum CliEncoding {
 #[command(
     name = "pa-painter",
     about = "Procedural paint stroke generator for 3D assets",
-    args_conflicts_with_subcommands = true,
+    args_conflicts_with_subcommands = true
 )]
 struct Cli {
     #[command(flatten)]

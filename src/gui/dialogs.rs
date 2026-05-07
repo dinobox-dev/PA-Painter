@@ -216,16 +216,8 @@ impl PainterApp {
 
                     ui.horizontal(|ui: &mut egui::Ui| {
                         ui.colored_label(weak, "Up axis");
-                        ui.selectable_value(
-                            &mut state.extract_prefs.up_axis,
-                            UpAxis::Y,
-                            "Y-up",
-                        );
-                        ui.selectable_value(
-                            &mut state.extract_prefs.up_axis,
-                            UpAxis::Z,
-                            "Z-up",
-                        );
+                        ui.selectable_value(&mut state.extract_prefs.up_axis, UpAxis::Y, "Y-up");
+                        ui.selectable_value(&mut state.extract_prefs.up_axis, UpAxis::Z, "Z-up");
                     });
                     ui.add_space(2.0);
                     ui.horizontal(|ui: &mut egui::Ui| {

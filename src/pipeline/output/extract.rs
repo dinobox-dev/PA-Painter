@@ -85,7 +85,12 @@ pub fn extract_object_normal(params: &ExtractObjectNormalParams<'_>) -> Result<(
         params.encoding,
     );
     let normals = compute_object_normals(params);
-    write_normal_map(&normals, params.resolution, params.encoding, params.output_path)
+    write_normal_map(
+        &normals,
+        params.resolution,
+        params.encoding,
+        params.output_path,
+    )
 }
 
 /// Compute the perturbed object-space normal per pixel (encoded to [0, 1]
@@ -205,9 +210,7 @@ fn write_png16(normals: &[[f32; 3]], resolution: u32, path: &Path) -> Result<(),
     // contract guarantees it, so this is structurally unreachable.
     let buf: image::ImageBuffer<image::Rgb<u16>, Vec<u16>> =
         image::ImageBuffer::from_raw(resolution, resolution, pixels).ok_or_else(|| {
-            OutputError::Io(std::io::Error::other(
-                "16-bit PNG buffer size mismatch",
-            ))
+            OutputError::Io(std::io::Error::other("16-bit PNG buffer size mismatch"))
         })?;
     buf.save(path)?;
     Ok(())
