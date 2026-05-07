@@ -16,6 +16,7 @@ Originally built for *Practical Arcana* (coming soon), but works with any UV-map
 - **Guide tools**: directional, source, sink, and vortex guides to control stroke flow
 - **Pressure curves**: preset and custom Bézier spline editors for stroke pressure variation
 - **Output maps**: color, normal, height, stroke ID, and stroke time — export as PNG or EXR
+- **Object-space normal extract** — DCC-targeted single-map output for static, hard-surface assets (see [`docs/Extract Object-Space Normal.md`](docs/Extract%20Object-Space%20Normal.md))
 - **3D preview**: real-time mesh preview with generated textures applied
 - **GUI editor**: full-featured editor built with egui/eframe
 - **CLI renderer**: headless batch rendering for automation
@@ -44,12 +45,22 @@ cargo run --release --bin pa-painter -- <input.papr> -o output/
 
 ```
 Usage: pa-painter <project.papr> [options]
+       pa-painter extract <project.papr> -o <file> [options]
 
-Options:
+Render options:
   -o, --output <dir>       Output directory (default: ./output)
   -r, --resolution <px>    Override output resolution (1–16384)
   -f, --format <fmt>       Export format: png (default) or exr
       --per-layer          Export each layer as separate textures
+
+Extract options:
+  --map <map>              Map to extract: object-normal (default)
+  --up <axis>              Up axis: y (default) or z
+  --encoding <enc>         Encoding: png8, png16 (default), or exr
+  -o, --output <file>      Output file path (required)
+  -r, --resolution <px>    Override output resolution
+
+Common:
   -h, --help               Show this help
 ```
 
