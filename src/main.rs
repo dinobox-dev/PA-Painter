@@ -66,7 +66,7 @@ fn main() {
 
     // Load project
     let load_result = load_project(&project_path).unwrap_or_else(|e| {
-        error!("Failed to load project: {e:?}");
+        error!("Failed to load project: {e}");
         process::exit(1);
     });
     let project = load_result.project;
@@ -179,7 +179,7 @@ fn main() {
         normal_y,
     )
     .unwrap_or_else(|e| {
-        error!("Export failed: {e:?}");
+        error!("Export failed: {e}");
         process::exit(1);
     });
 
@@ -225,7 +225,7 @@ fn main() {
                 &output_dir,
             )
             .unwrap_or_else(|e| {
-                error!("Export failed for layer {}: {e:?}", layer.name);
+                error!("Export failed for layer {}: {e}", layer.name);
                 process::exit(1);
             });
 
@@ -240,7 +240,7 @@ fn main() {
         }
 
         export_manifest(&manifest_entries, format, &output_dir).unwrap_or_else(|e| {
-            error!("Manifest export failed: {e:?}");
+            error!("Manifest export failed: {e}");
             process::exit(1);
         });
     }

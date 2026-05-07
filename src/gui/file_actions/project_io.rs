@@ -261,7 +261,7 @@ fn do_save(state: &mut AppState, path: PathBuf) {
             state.status_message = "Project saved".to_string();
         }
         Err(e) => {
-            state.status_message = format!("Save failed: {e:?}");
+            state.status_message = format!("Save failed: {e}");
         }
     }
 }

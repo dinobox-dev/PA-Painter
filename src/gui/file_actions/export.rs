@@ -264,7 +264,7 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
             } else {
                 export_color_png(&color, res, &dir.join("color_map.png"), with_alpha)
             };
-            result.map_err(|e| format!("Export failed: {e:?}"))?;
+            result.map_err(|e| format!("Export failed: {e}"))?;
             count += 1;
             step.store(count, Ordering::Relaxed);
         }
@@ -275,19 +275,19 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
             } else {
                 export_height_png(&normalized, res, &dir.join("height_map.png"))
             };
-            result.map_err(|e| format!("Export failed: {e:?}"))?;
+            result.map_err(|e| format!("Export failed: {e}"))?;
             count += 1;
             step.store(count, Ordering::Relaxed);
         }
         if es.include_normal {
             export_normal_png(&normal_map, res, &dir.join("normal_map.png"), es.normal_y)
-                .map_err(|e| format!("Export failed: {e:?}"))?;
+                .map_err(|e| format!("Export failed: {e}"))?;
             count += 1;
             step.store(count, Ordering::Relaxed);
         }
         if es.include_stroke_id {
             export_stroke_id_png(&stroke_id, res, &dir.join("stroke_id_map.png"))
-                .map_err(|e| format!("Export failed: {e:?}"))?;
+                .map_err(|e| format!("Export failed: {e}"))?;
             count += 1;
             step.store(count, Ordering::Relaxed);
         }
@@ -307,7 +307,7 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
                     &dir.join("stroke_time_map.png"),
                 )
             };
-            result.map_err(|e| format!("Export failed: {e:?}"))?;
+            result.map_err(|e| format!("Export failed: {e}"))?;
             count += 1;
             step.store(count, Ordering::Relaxed);
         }
@@ -335,7 +335,7 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
                 ) {
                     Ok(n) => count += n,
                     Err(e) => {
-                        return Err(format!("Export failed (layer {}): {e:?}", entry.name));
+                        return Err(format!("Export failed (layer {}): {e}", entry.name));
                     }
                 }
                 step.store(count, Ordering::Relaxed);
@@ -351,7 +351,7 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
             }
 
             export_manifest(&manifest_entries, es.format, &dir)
-                .map_err(|e| format!("Export failed (manifest): {e:?}"))?;
+                .map_err(|e| format!("Export failed (manifest): {e}"))?;
             count += 1;
             step.store(count, Ordering::Relaxed);
         }
@@ -372,7 +372,7 @@ fn run_export(input: ExportInput, step: Arc<AtomicU32>) -> Result<(u32, PathBuf)
                 normal_y: es.normal_y,
                 alpha_blend: with_alpha,
             });
-            result.map_err(|e| format!("GLB export failed: {e:?}"))?;
+            result.map_err(|e| format!("GLB export failed: {e}"))?;
             count += 1;
             step.store(count, Ordering::Relaxed);
         } else {

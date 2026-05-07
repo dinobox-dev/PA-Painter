@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- CLI and GUI error messages now use `Display` formatting instead of `Debug`, so user-facing failures show the message defined by `thiserror` (e.g. `Failed to load project: IO error: No such file or directory (os error 2)`) rather than the enum-variant tree (`Failed to load project: Io(Os { code: 2, kind: NotFound, message: "No such file or directory" })`). Affects CLI load/export/per-layer/manifest paths and GUI load/save/export/GLB status messages.
+
 ## [0.4.0] — 2026-05-07
 
 ### Added

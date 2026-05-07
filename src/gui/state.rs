@@ -163,8 +163,7 @@ impl ProjectLoadWorker {
                     tmp
                 }
             };
-            let result =
-                load_project(&path).map_err(|e| format!("Failed to load project: {e:?}"))?;
+            let result = load_project(&path).map_err(|e| format!("Failed to load project: {e}"))?;
             // Clean up temp file for example
             if matches!(source, ProjectLoadSource::Example) {
                 let _ = std::fs::remove_file(&path);
